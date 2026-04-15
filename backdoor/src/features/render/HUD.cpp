@@ -1,138 +1,159 @@
 #include "pch.h"
 #include "HUD.h"
 #include "../../core/Bridge.h"
+#include "../../game/jni/Class.h"
+#include "../../game/jni/Field.h"
+#include "../../game/jni/GameInstance.h"
+#include "../../game/jni/Method.h"
+#include "../../game/mapping/Mapper.h"
+#include "../../../../shared/common/FeatureManager.h"
 #include "../../../../shared/common/ModuleConfig.h"
 #include "../../../../deps/imgui/colors.h"
-#include "../../../../deps/imgui/inter_bold_font.h"
-#include <GL/gl.h>
+#include "../../../../deps/imgui/imgui.h"
+
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
+#include <cstring>
 
-
-HUD::~HUD() {
-    CleanupFont();
-}
-
-void HUD::InitFont(HDC hdc) {
-    if (m_FontInitialized) return;
-
-    m_FontDC = hdc;
-    m_FontBase = glGenLists(256);
-    if (m_FontBase == 0) return;
-
-        DWORD numFonts = 0;
-    m_FontMemHandle = AddFontMemResourceEx(
-        const_cast<unsigned char*>(fonts::inter_bold_data),
-        fonts::inter_bold_size,
-        nullptr, &numFonts);
-    m_FontResourceLoaded = (m_FontMemHandle != nullptr && numFonts > 0);
-    
-    HFONT font = CreateFontW(
-        -14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE,
-        ANSI_CHARSET, OUT_TT_PRECIS, CLIP_DEFAULT_PRECIS,
-        ANTIALIASED_QUALITY, FF_DONTCARE | DEFAULT_PITCH, L"Inter"
-    );
-    if (!font) return;
-    
-    HFONT oldFont = (HFONT)SelectObject(hdc, font);
-    wglUseFontBitmapsA(hdc, 0, 256, m_FontBase);
-    
-    TEXTMETRICA tm;
-    GetTextMetricsA(hdc, &tm);
-    m_FontHeight = tm.tmHeight;
-
-    ABC abc[256];
-    if (GetCharABCWidthsA(hdc, 0, 255, abc)) {
-        for (int i = 0; i < 256; i++) {
-            m_CharWidths[i] = abc[i].abcA + abc[i].abcB + abc[i].abcC;
+namespace {
+    ImVec2 CalcTextSize(ImFont* font, float fontSize, const std::string& text) {
+        if (!font) {
+            return ImGui::CalcTextSize(text.c_str());
         }
-    } else {
-        GetCharWidth32A(hdc, 0, 255, m_CharWidths);
-    }
-    
-    SelectObject(hdc, oldFont);
-    DeleteObject(font);
-    
-    m_FontInitialized = true;
-}
 
-void HUD::CleanupFont() {
-    if (m_FontInitialized && m_FontBase) {
-        glDeleteLists(m_FontBase, 256);
-        m_FontBase = 0;
-        m_FontInitialized = false;
-    }
-    if (m_FontResourceLoaded && m_FontMemHandle) {
-        RemoveFontMemResourceEx(m_FontMemHandle);
-        m_FontMemHandle = nullptr;
-        m_FontResourceLoaded = false;
-    }
-}
-
-int HUD::MeasureText(const char* text) {
-    int w = 0;
-    for (const char* p = text; *p; p++) {
-        w += m_CharWidths[(unsigned char)*p];
-    }
-    return w;
-}
-
-void HUD::DrawRect(float x, float y, float w, float h, float r, float g, float b, float a) {
-    glColor4f(r, g, b, a);
-    glBegin(GL_QUADS);
-    glVertex2f(x, y);
-    glVertex2f(x + w, y);
-    glVertex2f(x + w, y + h);
-    glVertex2f(x, y + h);
-    glEnd();
-}
-
-void HUD::DrawRoundedRect(float x, float y, float w, float h, float radius, float r, float g, float b, float a) {
-    if (radius <= 0.0f) {
-        DrawRect(x, y, w, h, r, g, b, a);
-        return;
+        return font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text.c_str());
     }
 
-    const float clampedRadius = std::min(radius, std::min(w, h) * 0.5f);
-    const int segmentsPerCorner = 8;
-    const float pi = 3.14159265f;
-    std::vector<ImVec2> points;
-    points.reserve((segmentsPerCorner + 1) * 4);
-
-    auto addCorner = [&](float centerX, float centerY, float startAngle, float endAngle) {
-        for (int i = 0; i <= segmentsPerCorner; ++i) {
-            const float t = static_cast<float>(i) / static_cast<float>(segmentsPerCorner);
-            const float angle = startAngle + (endAngle - startAngle) * t;
-            points.emplace_back(centerX + cosf(angle) * clampedRadius, centerY + sinf(angle) * clampedRadius);
+    std::string ReadString(JNIEnv* env, jstring value) {
+        if (!env || !value) {
+            return {};
         }
-    };
 
-    addCorner(x + w - clampedRadius, y + clampedRadius, -pi * 0.5f, 0.0f);
-    addCorner(x + w - clampedRadius, y + h - clampedRadius, 0.0f, pi * 0.5f);
-    addCorner(x + clampedRadius, y + h - clampedRadius, pi * 0.5f, pi);
-    addCorner(x + clampedRadius, y + clampedRadius, pi, pi * 1.5f);
+        const char* chars = env->GetStringUTFChars(value, nullptr);
+        if (!chars) {
+            return {};
+        }
 
-    glColor4f(r, g, b, a);
-    glBegin(GL_TRIANGLE_FAN);
-    glVertex2f(x + w * 0.5f, y + h * 0.5f);
-    for (const auto& point : points) {
-        glVertex2f(point.x, point.y);
+        std::string result(chars);
+        env->ReleaseStringUTFChars(value, chars);
+        return result;
     }
-    glVertex2f(points.front().x, points.front().y);
-    glEnd();
+
+    JNIEnv* GetCurrentEnv() {
+        if (!g_Game || !g_Game->GetJVM()) {
+            return nullptr;
+        }
+
+        JNIEnv* env = nullptr;
+        jint status = g_Game->GetJVM()->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+        if (status == JNI_EDETACHED) {
+            status = g_Game->GetJVM()->AttachCurrentThreadAsDaemon(reinterpret_cast<void**>(&env), nullptr);
+        }
+
+        return status == JNI_OK ? env : nullptr;
+    }
+
+    std::string GetConfigNick(const ModuleConfig* config) {
+        if (!config || config->m_Username[0] == '\0') {
+            return {};
+        }
+
+        return config->m_Username;
+    }
+
+    std::string ResolvePlayerNick(ModuleConfig* config) {
+        static std::string cachedNick;
+        static auto lastAttempt = std::chrono::steady_clock::time_point{};
+
+        const auto now = std::chrono::steady_clock::now();
+        if (!cachedNick.empty() && now - lastAttempt < std::chrono::milliseconds(500)) {
+            return cachedNick;
+        }
+
+        lastAttempt = now;
+
+        if (!g_Game || !g_Game->IsInitialized()) {
+            cachedNick = GetConfigNick(config);
+            return cachedNick;
+        }
+
+        JNIEnv* env = GetCurrentEnv();
+        if (!env) {
+            cachedNick = GetConfigNick(config);
+            return cachedNick;
+        }
+
+        const auto mcClassName = Mapper::Get("net/minecraft/client/Minecraft");
+        const auto mcClassDesc = Mapper::Get("net/minecraft/client/Minecraft", 2);
+        const auto playerClassName = Mapper::Get("net/minecraft/client/entity/EntityPlayerSP");
+        const auto playerClassDesc = Mapper::Get("net/minecraft/client/entity/EntityPlayerSP", 2);
+        const auto theMinecraftName = Mapper::Get("theMinecraft");
+        const auto thePlayerName = Mapper::Get("thePlayer");
+        const auto getNameName = Mapper::Get("getName");
+
+        if (mcClassName.empty() || mcClassDesc.empty() || playerClassName.empty() ||
+            playerClassDesc.empty() || theMinecraftName.empty() || thePlayerName.empty() ||
+            getNameName.empty()) {
+            cachedNick = GetConfigNick(config);
+            return cachedNick;
+        }
+
+        auto* mcClass = g_Game->FindClass(mcClassName);
+        auto* playerClass = g_Game->FindClass(playerClassName);
+        if (!mcClass || !playerClass) {
+            cachedNick = GetConfigNick(config);
+            return cachedNick;
+        }
+
+        auto* theMinecraftField = mcClass->GetField(env, theMinecraftName.c_str(), mcClassDesc.c_str(), true);
+        auto* thePlayerField = mcClass->GetField(env, thePlayerName.c_str(), playerClassDesc.c_str());
+        auto* getNameMethod = playerClass->GetMethod(env, getNameName.c_str(), "()Ljava/lang/String;");
+        if (!theMinecraftField || !thePlayerField || !getNameMethod) {
+            cachedNick = GetConfigNick(config);
+            return cachedNick;
+        }
+
+        jobject mcInstance = theMinecraftField->GetObjectField(env, mcClass, true);
+        if (!mcInstance) {
+            cachedNick = GetConfigNick(config);
+            return cachedNick;
+        }
+
+        jobject player = thePlayerField->GetObjectField(env, mcInstance);
+        env->DeleteLocalRef(mcInstance);
+        if (!player) {
+            cachedNick = GetConfigNick(config);
+            return cachedNick;
+        }
+
+        jstring playerName = static_cast<jstring>(getNameMethod->CallObjectMethod(env, player));
+        cachedNick = ReadString(env, playerName);
+
+        if (playerName) {
+            env->DeleteLocalRef(playerName);
+        }
+        env->DeleteLocalRef(player);
+
+        if (!cachedNick.empty() && config) {
+            strncpy_s(config->m_Username, sizeof(config->m_Username), cachedNick.c_str(), _TRUNCATE);
+        } else if (cachedNick.empty()) {
+            cachedNick = GetConfigNick(config);
+        }
+
+        return cachedNick;
+    }
 }
 
-void HUD::DrawText(float x, float y, const char* text, float r, float g, float b) {
-    glColor3f(r, g, b);
-    glRasterPos2f(x, y + m_FontHeight);
-    glListBase(m_FontBase);
-    glCallLists((GLsizei)strlen(text), GL_UNSIGNED_BYTE, text);
+void HUD::SetFonts(ImFont* regular, ImFont* bold) {
+    m_RegularFont = regular;
+    m_BoldFont = bold;
 }
 
 void HUD::GetRainbowRGB(int offset, float& r, float& g, float& b) {
-    auto now = std::chrono::steady_clock::now();
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    ImVec4 themed = color::GetCycleVec4((float)((ms + offset) % 10000) / 10000.f);
+    const auto now = std::chrono::steady_clock::now();
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    const ImVec4 themed = color::GetCycleVec4((float)((ms + offset) % 10000) / 10000.0f);
     r = themed.x;
     g = themed.y;
     b = themed.z;
@@ -140,128 +161,173 @@ void HUD::GetRainbowRGB(int offset, float& r, float& g, float& b) {
 
 std::vector<HUD::ModuleEntry> HUD::GetActiveModules() {
     std::vector<ModuleEntry> modules;
-    
-    auto* config = Bridge::Get()->GetConfig();
-    if (!config) return modules;
-    
-    if (config->Modules.m_AutoClicker)
-        modules.push_back({ "Auto Clicker", "", 0, true });
-    if (config->Modules.m_RightClicker)
-        modules.push_back({ "Right Clicker", "", 0, true });
-    if (config->Modules.m_WTap)
-        modules.push_back({ "WTap", "", 0, true });
-    if (config->Modules.m_AimAssist)
-        modules.push_back({ "Aim Assist", "", 0, true });
-    if (config->Modules.m_BackTrack)
-        modules.push_back({ "BackTrack", "", 0, true });
-    
-    // calcula larguras
-    for (auto& mod : modules) {
-        mod.width = (float)MeasureText(mod.name);
+
+    ImFont* boldFont = m_BoldFont ? m_BoldFont : ImGui::GetFont();
+    ImFont* regularFont = m_RegularFont ? m_RegularFont : ImGui::GetFont();
+    const float boldSize = boldFont ? boldFont->FontSize : ImGui::GetFontSize();
+    const float regularSize = regularFont ? regularFont->FontSize : ImGui::GetFontSize();
+    const float spaceWidth = CalcTextSize(regularFont, regularSize, " ").x;
+
+    for (const auto& mod : FeatureManager::Get()->GetAllModules()) {
+        if (!mod->IsEnabled()) {
+            continue;
+        }
+
+        const std::string name = mod->GetName();
+        if (name == "ArrayList") {
+            continue;
+        }
+
+        const std::string tag = mod->GetTag();
+        float width = CalcTextSize(boldFont, boldSize, name).x;
+        if (!tag.empty()) {
+            width += spaceWidth + CalcTextSize(regularFont, regularSize, tag).x;
+        }
+
+        modules.push_back({ name, tag, width });
     }
-    
-    // ordena por largura (maior primeiro)
+
     std::sort(modules.begin(), modules.end(), [](const ModuleEntry& a, const ModuleEntry& b) {
         return a.width > b.width;
     });
-    
+
     return modules;
 }
 
-void HUD::Render(HDC hdc, ModuleConfig* config) {
-    if (!config || !config->HUD.m_Enabled) return;
+void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
+    (void)screenH;
 
-    if (!m_FontInitialized) {
-        InitFont(hdc);
-        if (!m_FontInitialized) return;
+    if (!config || !config->HUD.m_Enabled) {
+        return;
     }
-    
-    GLint viewport[4];
-    glGetIntegerv(GL_VIEWPORT, viewport);
-    m_ScreenW = viewport[2];
-    m_ScreenH = viewport[3];
-    if (m_ScreenW <= 0 || m_ScreenH <= 0) return;
-    
-    glPushAttrib(GL_ALL_ATTRIB_BITS);
-    glPushMatrix();
 
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadIdentity();
-    glOrtho(0, m_ScreenW, m_ScreenH, 0, -1, 1);
-    
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glLoadIdentity();
-    
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_TEXTURE_2D);
-    glDisable(GL_LIGHTING);
-    glDisable(GL_CULL_FACE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    
-    auto modules = GetActiveModules();
-    
-    float yPos = 4.f;
-    float padding = 6.f;
-    float barW = 3.f;
-    float itemH = (float)m_FontHeight + 4.f;
-    int idx = 0;
-    
-    const ImVec4 bg = color::GetBackgroundVec4();
-    const ImVec4 txt = color::GetStrongTextVec4();
-    const ImVec4 sub1 = color::GetModuleTextVec4();
-    const ImVec4 sub2 = color::GetModuleAltTextVec4();
-    const ImVec4 shadow = color::Mix(color::GetStrongTextVec4(), color::GetBackgroundVec4(), 0.55f);
-    
-    // header
-    {
-        float hr, hg, hb;
-        if (config->HUD.m_Rainbow)
-            GetRainbowRGB(0, hr, hg, hb);
-        else { hr = txt.x; hg = txt.y; hb = txt.z; }
-        
-        int headerW = MeasureText("OpenCommunity");
-        float headerX = (float)m_ScreenW - headerW - padding * 2 - barW - 6.f;
-        
-        DrawRoundedRect(headerX, yPos, (float)headerW + padding * 2 + barW, itemH, 9.0f, bg.x, bg.y, bg.z, 0.94f);
-        DrawRoundedRect(headerX + headerW + padding * 2, yPos, barW, itemH, 3.0f, hr, hg, hb, 1.f);
-        DrawText(headerX + padding + 1, yPos + 3.0f, "OpenCommunity", shadow.x, shadow.y, shadow.z);
-        DrawText(headerX + padding, yPos + 2, "OpenCommunity", hr, hg, hb);
-        
-        yPos += itemH + 2.f;
-        idx++;
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    if (!drawList) {
+        return;
     }
-    
-    // módulos
-    for (const auto& mod : modules) {
-        float cr, cg, cb;
-        if (config->HUD.m_Rainbow)
-            GetRainbowRGB(idx * 400, cr, cg, cb);
-        else { 
-            // alternate between two colors for subtitles
-            if (idx % 2 == 1) { cr = sub1.x; cg = sub1.y; cb = sub1.z; }
-            else { cr = sub2.x; cg = sub2.y; cb = sub2.z; }
+
+    ImFont* regularFont = m_RegularFont ? m_RegularFont : ImGui::GetFont();
+    ImFont* boldFont = m_BoldFont ? m_BoldFont : regularFont;
+    if (!regularFont || !boldFont) {
+        return;
+    }
+
+    const float regularSize = regularFont->FontSize;
+    const float boldSize = boldFont->FontSize;
+    const float shadowOffset = 1.0f;
+    const float topY = 4.0f;
+    const float moduleSpacing = 2.0f;
+    const float itemHeight = std::max(regularSize, boldSize) + 2.0f;
+    const float spaceWidth = CalcTextSize(regularFont, regularSize, " ").x;
+    const ImU32 shadowColor = IM_COL32(0, 0, 0, 120);
+    const ImU32 secondaryColor = IM_COL32(200, 200, 200, 255);
+
+    m_FrameCount++;
+    const auto now = std::chrono::steady_clock::now();
+    const float fpsElapsed = std::chrono::duration<float>(now - m_LastFpsTime).count();
+    if (fpsElapsed >= 1.0f) {
+        m_Fps = (int)(m_FrameCount / fpsElapsed);
+        m_FrameCount = 0;
+        m_LastFpsTime = now;
+    }
+
+    float deltaTime = std::chrono::duration<float>(now - m_LastFrameTime).count();
+    m_LastFrameTime = now;
+    if (deltaTime > 0.1f) {
+        deltaTime = 0.1f;
+    }
+
+    if (config->HUD.m_Watermark) {
+        float r;
+        float g;
+        float b;
+        if (config->HUD.m_Rainbow) {
+            GetRainbowRGB(0, r, g, b);
+        } else {
+            r = 1.0f;
+            g = 1.0f;
+            b = 1.0f;
         }
-        
-        int textW = MeasureText(mod.name);
-        float totalW = (float)textW + padding * 2 + barW;
-        float x = (float)m_ScreenW - totalW - 6.f;
-        
-        DrawRoundedRect(x, yPos, totalW, itemH, 9.0f, bg.x, bg.y, bg.z, 0.94f);
-        DrawRoundedRect(x + totalW - barW, yPos, barW, itemH, 3.0f, cr, cg, cb, 1.f);
-        DrawText(x + padding + 1, yPos + 3.0f, mod.name, shadow.x, shadow.y, shadow.z);
-        DrawText(x + padding, yPos + 2, mod.name, cr, cg, cb);
-        
-        yPos += itemH + 2.f;
-        idx++;
+
+        std::string nick = ResolvePlayerNick(config);
+        if (nick.empty()) {
+            nick = "player";
+        }
+
+        char fpsText[16];
+        snprintf(fpsText, sizeof(fpsText), "%d FPS", m_Fps);
+
+        const ImU32 accentColor = ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, 1.0f));
+        const std::string segment = " | " + nick + " | ";
+        const float textY = topY;
+        float cursorX = 10.0f;
+
+        drawList->AddText(boldFont, boldSize, ImVec2(cursorX + shadowOffset, textY + shadowOffset), shadowColor, "OpenCommunity");
+        drawList->AddText(boldFont, boldSize, ImVec2(cursorX, textY), accentColor, "OpenCommunity");
+        cursorX += CalcTextSize(boldFont, boldSize, "OpenCommunity").x;
+
+        drawList->AddText(regularFont, regularSize, ImVec2(cursorX + shadowOffset, textY + shadowOffset), shadowColor, segment.c_str());
+        drawList->AddText(regularFont, regularSize, ImVec2(cursorX, textY), secondaryColor, segment.c_str());
+        cursorX += CalcTextSize(regularFont, regularSize, segment).x;
+
+        drawList->AddText(regularFont, regularSize, ImVec2(cursorX + shadowOffset, textY + shadowOffset), shadowColor, fpsText);
+        drawList->AddText(regularFont, regularSize, ImVec2(cursorX, textY), secondaryColor, fpsText);
     }
-    
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
-    glPopMatrix();
-    glPopMatrix();
-    glPopAttrib();
+
+    const auto modules = GetActiveModules();
+    std::vector<std::string> activeKeys;
+    activeKeys.reserve(modules.size());
+
+    int index = 0;
+    for (const auto& mod : modules) {
+        float r;
+        float g;
+        float b;
+        if (config->HUD.m_Rainbow) {
+            GetRainbowRGB(index * 400, r, g, b);
+        } else {
+            const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+            const float baseHue = fmodf((float)ms / 5000.0f, 1.0f);
+            const float hueOffset = fmodf(index * 0.618033988749895f, 1.0f);
+            const ImVec4 themed = color::GetCycleVec4(fmodf(baseHue + hueOffset, 1.0f));
+            r = themed.x;
+            g = themed.y;
+            b = themed.z;
+        }
+
+        activeKeys.push_back(mod.name);
+
+        float& progress = m_SlideProgress[mod.name];
+        if (progress < 1.0f) {
+            progress += deltaTime * 6.0f;
+            if (progress > 1.0f) {
+                progress = 1.0f;
+            }
+        }
+
+        const float eased = 1.0f - powf(1.0f - progress, 3.0f);
+        const float targetX = screenW - mod.width - 6.0f;
+        const float currentX = screenW + (targetX - screenW) * eased;
+        const float currentY = topY + index * (itemHeight + moduleSpacing);
+        const ImU32 accentColor = ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, 1.0f));
+
+        drawList->AddText(boldFont, boldSize, ImVec2(currentX + shadowOffset, currentY + shadowOffset), shadowColor, mod.name.c_str());
+        drawList->AddText(boldFont, boldSize, ImVec2(currentX, currentY), accentColor, mod.name.c_str());
+
+        if (!mod.tag.empty()) {
+            const float tagX = currentX + CalcTextSize(boldFont, boldSize, mod.name).x + spaceWidth;
+            drawList->AddText(regularFont, regularSize, ImVec2(tagX + shadowOffset, currentY + shadowOffset), shadowColor, mod.tag.c_str());
+            drawList->AddText(regularFont, regularSize, ImVec2(tagX, currentY), secondaryColor, mod.tag.c_str());
+        }
+
+        index++;
+    }
+
+    for (auto it = m_SlideProgress.begin(); it != m_SlideProgress.end();) {
+        if (std::find(activeKeys.begin(), activeKeys.end(), it->first) == activeKeys.end()) {
+            it = m_SlideProgress.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }

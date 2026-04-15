@@ -71,6 +71,8 @@ private:
     ImFont* m_FontBodyLarge = nullptr;
     ImFont* m_FontBodyMed = nullptr;
     ImFont* m_FontBoldMed = nullptr;
+    ImFont* m_FontOverlayRegular = nullptr;
+    ImFont* m_FontOverlayBold = nullptr;
 
     ID3D11ShaderResourceView* m_IconCombat = nullptr;
     ID3D11ShaderResourceView* m_IconMovement = nullptr;

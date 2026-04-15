@@ -3,79 +3,121 @@
 #include "../features/render/HUD.h"
 #include "Bridge.h"
 
-static RenderHook* g_HookInstance = nullptr;
+#include "../../../deps/minhook/MinHook.h"
+#include "../../../deps/imgui/imgui.h"
+#include "../../../deps/imgui/imgui_impl_opengl2.hpp"
+#include "../../../deps/imgui/play_bold_font.h"
+#include "../../../deps/imgui/play_regular_font.h"
 
-LONG CALLBACK RenderHook::VehHandler(PEXCEPTION_POINTERS pExInfo) {
-    if (!g_HookInstance || !g_HookInstance->m_Installed)
-        return EXCEPTION_CONTINUE_SEARCH;
-    
-    if (pExInfo->ExceptionRecord->ExceptionCode == EXCEPTION_SINGLE_STEP) {
-        if (g_HookInstance->m_SingleStepping) {
-            g_HookInstance->m_SingleStepping = false;
-            DWORD oldProt;
-            VirtualProtect(g_HookInstance->m_TargetAddress, 1, PAGE_EXECUTE_READWRITE, &oldProt);
-            *(uint8_t*)g_HookInstance->m_TargetAddress = 0xCC;
-            VirtualProtect(g_HookInstance->m_TargetAddress, 1, oldProt, &oldProt);
-            return EXCEPTION_CONTINUE_EXECUTION;
-        }
-        return EXCEPTION_CONTINUE_SEARCH;
+#include <gl/GL.h>
+#include <mutex>
+
+static int(__stdcall* g_origWglSwapBuffers)(HDC) = nullptr;
+static bool g_fontsInitialized = false;
+static std::once_flag g_fontsOnce;
+static ImFont* g_overlayRegularFont = nullptr;
+static ImFont* g_overlayBoldFont = nullptr;
+
+bool __stdcall wglSwapBuffersHook(HDC hdc)
+{
+    auto* config = Bridge::Get()->GetConfig();
+    if (!config || config->m_Destruct) {
+        return g_origWglSwapBuffers(hdc);
     }
-    
-    if (pExInfo->ExceptionRecord->ExceptionCode == EXCEPTION_BREAKPOINT) {
-        if ((void*)pExInfo->ContextRecord->Rip == g_HookInstance->m_TargetAddress) {
-            __try {
-                HDC hdc = wglGetCurrentDC();
-                if (hdc) {
-                    g_HookInstance->OnRender(hdc);
-                }
-            } __except(EXCEPTION_EXECUTE_HANDLER) {
-            }
-            
-            DWORD oldProt;
-            VirtualProtect(g_HookInstance->m_TargetAddress, 1, PAGE_EXECUTE_READWRITE, &oldProt);
-            *(uint8_t*)g_HookInstance->m_TargetAddress = g_HookInstance->m_OriginalByte;
-            VirtualProtect(g_HookInstance->m_TargetAddress, 1, oldProt, &oldProt);
-            FlushInstructionCache(GetCurrentProcess(), g_HookInstance->m_TargetAddress, 1);
-            
-            g_HookInstance->m_SingleStepping = true;
-            pExInfo->ContextRecord->EFlags |= 0x100; // TF (trap flag)
-            
-            return EXCEPTION_CONTINUE_EXECUTION;
-        }
+
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    if (viewport[2] <= 0 || viewport[3] <= 0) {
+        return g_origWglSwapBuffers(hdc);
     }
-    
-    return EXCEPTION_CONTINUE_SEARCH;
+
+    std::call_once(g_fontsOnce, []() {
+        ImGui::CreateContext();
+        auto& io = ImGui::GetIO();
+        io.IniFilename = nullptr;
+
+        ImFontConfig fontCfg;
+        fontCfg.FontDataOwnedByAtlas = false;
+        g_overlayRegularFont = io.Fonts->AddFontFromMemoryTTF(
+            const_cast<unsigned char*>(fonts::play_regular_data),
+            fonts::play_regular_size,
+            16.0f,
+            &fontCfg
+        );
+        fontCfg.FontDataOwnedByAtlas = false;
+        g_overlayBoldFont = io.Fonts->AddFontFromMemoryTTF(
+            const_cast<unsigned char*>(fonts::play_bold_data),
+            fonts::play_bold_size,
+            16.0f,
+            &fontCfg
+        );
+
+        if (g_overlayRegularFont) {
+            io.FontDefault = g_overlayRegularFont;
+        } else {
+            io.FontDefault = io.Fonts->AddFontDefault();
+            g_overlayRegularFont = io.FontDefault;
+        }
+        if (!g_overlayBoldFont) {
+            g_overlayBoldFont = g_overlayRegularFont;
+        }
+
+        HUD::Get()->SetFonts(g_overlayRegularFont, g_overlayBoldFont);
+        ImGui_ImplOpenGL2_Init();
+        g_fontsInitialized = true;
+    });
+
+    if (!g_fontsInitialized) {
+        return g_origWglSwapBuffers(hdc);
+    }
+
+    auto& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2((float)viewport[2], (float)viewport[3]);
+
+    ImGui_ImplOpenGL2_NewFrame();
+    ImGui::NewFrame();
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, { 0.0f, 0.0f });
+    ImGui::Begin("##overlay", nullptr,
+        ImGuiWindowFlags_NoBackground |
+        ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoInputs |
+        ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoScrollWithMouse);
+    {
+        ImGui::SetWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+        ImGui::SetWindowSize(ImVec2((float)viewport[2], (float)viewport[3]), ImGuiCond_Always);
+
+        HUD::Get()->Render(config, (float)viewport[2], (float)viewport[3]);
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+
+    ImGui::Render();
+    ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
+
+    return g_origWglSwapBuffers(hdc);
 }
 
 bool RenderHook::Initialize() {
-    HMODULE opengl = GetModuleHandleW(L"opengl32.dll");
-    if (!opengl) {
-        opengl = LoadLibraryW(L"opengl32.dll");
-        if (!opengl) return false;
-    }
-    
-    m_TargetAddress = (void*)GetProcAddress(opengl, "wglSwapBuffers");
-    if (!m_TargetAddress) return false;
-    
-    g_HookInstance = this;
-    
-    m_VehHandle = AddVectoredExceptionHandler(1, VehHandler);
-    if (!m_VehHandle) return false;
-    
-    m_OriginalByte = *(uint8_t*)m_TargetAddress;
+    if (m_Installed) return true;
 
-    DWORD oldProtect;
-    if (!VirtualProtect(m_TargetAddress, 1, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-        RemoveVectoredExceptionHandler(m_VehHandle);
-        m_VehHandle = nullptr;
+    if (MH_Initialize() != MH_OK) {
         return false;
     }
 
-    *(uint8_t*)m_TargetAddress = 0xCC;
-    
-    VirtualProtect(m_TargetAddress, 1, oldProtect, &oldProtect);
-    FlushInstructionCache(GetCurrentProcess(), m_TargetAddress, 1);
-    
+    if (MH_CreateHookApi(L"opengl32.dll", "wglSwapBuffers",
+            (LPVOID)wglSwapBuffersHook, (void**)&g_origWglSwapBuffers) != MH_OK) {
+        MH_Uninitialize();
+        return false;
+    }
+
+    if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {
+        MH_Uninitialize();
+        return false;
+    }
+
     m_Installed = true;
     return true;
 }
@@ -83,27 +125,17 @@ bool RenderHook::Initialize() {
 void RenderHook::Shutdown() {
     if (!m_Installed) return;
 
-    if (m_TargetAddress) {
-        DWORD oldProtect;
-        if (VirtualProtect(m_TargetAddress, 1, PAGE_EXECUTE_READWRITE, &oldProtect)) {
-            *(uint8_t*)m_TargetAddress = m_OriginalByte;
-            VirtualProtect(m_TargetAddress, 1, oldProtect, &oldProtect);
-            FlushInstructionCache(GetCurrentProcess(), m_TargetAddress, 1);
-        }
-    }
-    
-    if (m_VehHandle) {
-        RemoveVectoredExceptionHandler(m_VehHandle);
-        m_VehHandle = nullptr;
-    }
-    
-    m_Installed = false;
-    g_HookInstance = nullptr;
-}
+    MH_DisableHook(MH_ALL_HOOKS);
+    MH_Uninitialize();
 
-void RenderHook::OnRender(HDC hdc) {
-    auto* config = Bridge::Get()->GetConfig();
-    if (!config) return;
-    
-    HUD::Get()->Render(hdc, config);
+    if (g_fontsInitialized) {
+        HUD::Get()->SetFonts(nullptr, nullptr);
+        ImGui_ImplOpenGL2_Shutdown();
+        ImGui::DestroyContext();
+        g_overlayRegularFont = nullptr;
+        g_overlayBoldFont = nullptr;
+        g_fontsInitialized = false;
+    }
+
+    m_Installed = false;
 }

@@ -106,6 +106,9 @@ public:
     virtual void SyncFromConfig(void* configPtr) { (void)configPtr; }
     virtual void Tick() {}
 
+    // Tag displayed in the ArrayList HUD (e.g. "15-25cps")
+    virtual std::string GetTag() const { return ""; }
+
     const unsigned char* GetImageData() const { return m_ImageData; }
     unsigned int GetImageSize() const { return m_ImageSize; }
 

@@ -8,6 +8,8 @@
 #include "../../../deps/imgui/colors.h"
 #include "../../../deps/imgui/inter_bold_font.h"
 #include "../../../deps/imgui/inter_regular_font.h"
+#include "../../../deps/imgui/play_bold_font.h"
+#include "../../../deps/imgui/play_regular_font.h"
 #include "../../../deps/imgui/sword_icon.h"
 #include "../../../deps/imgui/running_icon.h"
 #include "../../../deps/imgui/eye_icon.h"
@@ -519,7 +521,7 @@ bool Screen::Initialize() {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.IniFilename = nullptr; // disable imgui.ini
+    io.IniFilename = nullptr;
 
     {
         ImFontConfig cfg;
@@ -537,6 +539,10 @@ bool Screen::Initialize() {
         m_FontBodyMed = io.Fonts->AddFontFromMemoryTTF((void*)fonts::inter_regular_data, fonts::inter_regular_size, 22.0f, &cfg);
         cfg.FontDataOwnedByAtlas = false;
         m_FontBoldMed = io.Fonts->AddFontFromMemoryTTF((void*)fonts::inter_bold_data, fonts::inter_bold_size, 22.0f, &cfg);
+        cfg.FontDataOwnedByAtlas = false;
+        m_FontOverlayRegular = io.Fonts->AddFontFromMemoryTTF((void*)fonts::play_regular_data, fonts::play_regular_size, 16.0f, &cfg);
+        cfg.FontDataOwnedByAtlas = false;
+        m_FontOverlayBold = io.Fonts->AddFontFromMemoryTTF((void*)fonts::play_bold_data, fonts::play_bold_size, 16.0f, &cfg);
         if (m_FontBody) io.FontDefault = m_FontBody;
     }
     if (!io.FontDefault) {
@@ -553,6 +559,12 @@ bool Screen::Initialize() {
     }
     if (!m_FontHero) {
         m_FontHero = m_FontTitle;
+    }
+    if (!m_FontOverlayRegular) {
+        m_FontOverlayRegular = m_FontBody;
+    }
+    if (!m_FontOverlayBold) {
+        m_FontOverlayBold = m_FontBold;
     }
     
     SetupImGuiStyle();
@@ -894,25 +906,165 @@ void Screen::RenderInjecting() {
 }
 
 void Screen::RenderHUDPreview() {
-    ImDrawList* draw = ImGui::GetBackgroundDrawList();
-    float screenW = ImGui::GetIO().DisplaySize.x;
+    auto* featureManager = FeatureManager::Get();
+    bool arrayListEnabled = false;
+    for (const auto& mod : featureManager->GetModules(ModuleCategory::Visuals)) {
+        if (mod->GetName() == "ArrayList" && mod->IsEnabled()) {
+            arrayListEnabled = true;
+            break;
+        }
+    }
+    if (!arrayListEnabled) {
+        return;
+    }
+
+    static std::unordered_map<std::string, float> slideProgress;
+    static auto lastFrameTime = std::chrono::steady_clock::now();
+
+    const auto now = std::chrono::steady_clock::now();
+    float deltaTime = std::chrono::duration<float>(now - lastFrameTime).count();
+    lastFrameTime = now;
+    if (deltaTime > 0.1f) {
+        deltaTime = 0.1f;
+    }
+
+    ImDrawList* drawList = ImGui::GetBackgroundDrawList();
+    if (!drawList) {
+        return;
+    }
+
+    ImFont* detailFont = m_FontOverlayRegular ? m_FontOverlayRegular : ImGui::GetFont();
+    ImFont* nameFont = m_FontOverlayBold ? m_FontOverlayBold : detailFont;
+    if (!detailFont || !nameFont) {
+        return;
+    }
+
+    const float detailFontSize = detailFont->FontSize;
+    const float nameFontSize = nameFont->FontSize;
+    const float topY = 4.0f;
+    const float shadowOffset = 1.0f;
+    const float itemHeight = std::max(detailFontSize, nameFontSize) + 2.0f;
+    const float itemSpacing = 2.0f;
+    const float spaceWidth = CalcTextSizeWithFont(detailFont, " ", detailFontSize).x;
+    const float screenW = ImGui::GetIO().DisplaySize.x;
+    const ImU32 shadowColor = IM_COL32(0, 0, 0, 120);
+    const ImU32 secondaryColor = IM_COL32(200, 200, 200, 255);
     auto* config = Bridge::Get()->GetConfig();
-    const bool animatedPalette = config && config->HUD.m_Rainbow;
 
-    const char* modules[] = { "hud", "aim assist", "wtap", "backtrack" };
-    int count = 4;
+    if (config && config->HUD.m_Watermark) {
+        std::string nick = config->m_Username[0] != '\0' ? config->m_Username : "player";
+        char fpsText[16];
+        snprintf(fpsText, sizeof(fpsText), "%d FPS", (int)(ImGui::GetIO().Framerate + 0.5f));
 
-    float y = 50.0f;
-    for (int i = 0; i < count; i++) {
-        ImVec2 size = ImGui::CalcTextSize(modules[i]);
-        float x = screenW - size.x - 20.0f;
+        const double tMs = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        float hueR;
+        float hueG;
+        float hueB;
+        ImGui::ColorConvertHSVtoRGB((float)fmod(tMs / 2000.0, 1.0), 0.75f, 0.9f, hueR, hueG, hueB);
+        const ImU32 accentColor = IM_COL32((int)(hueR * 255), (int)(hueG * 255), (int)(hueB * 255), 255);
+        const std::string middle = " | " + nick + " | ";
 
-        ImU32 color = animatedPalette
-            ? color::GetCycleU32(static_cast<float>(ImGui::GetTime()) * 0.15f + i * 0.1f, 0.96f)
-            : (i % 3 == 0 ? color::GetAccentU32(0.96f) : (i % 3 == 1 ? color::GetModuleTextU32(0.96f) : color::GetModuleAltTextU32(0.96f)));
+        float cursorX = 10.0f;
+        drawList->AddText(nameFont, nameFontSize, ImVec2(cursorX + shadowOffset, topY + shadowOffset), shadowColor, "OpenCommunity");
+        drawList->AddText(nameFont, nameFontSize, ImVec2(cursorX, topY), accentColor, "OpenCommunity");
+        cursorX += CalcTextSizeWithFont(nameFont, "OpenCommunity", nameFontSize).x;
 
-        draw->AddText(ImVec2(x, y), color, modules[i]);
-        y += size.y + 5.0f;
+        drawList->AddText(detailFont, detailFontSize, ImVec2(cursorX + shadowOffset, topY + shadowOffset), shadowColor, middle.c_str());
+        drawList->AddText(detailFont, detailFontSize, ImVec2(cursorX, topY), secondaryColor, middle.c_str());
+        cursorX += CalcTextSizeWithFont(detailFont, middle.c_str(), detailFontSize).x;
+
+        drawList->AddText(detailFont, detailFontSize, ImVec2(cursorX + shadowOffset, topY + shadowOffset), shadowColor, fpsText);
+        drawList->AddText(detailFont, detailFontSize, ImVec2(cursorX, topY), secondaryColor, fpsText);
+    }
+
+    struct ModEntry {
+        std::string name;
+        std::string tag;
+        float totalWidth;
+    };
+
+    std::vector<ModEntry> activeModules;
+    std::vector<std::string> currentActiveKeys;
+
+    ModuleCategory cats[] = { ModuleCategory::Combat, ModuleCategory::Movement, ModuleCategory::Visuals, ModuleCategory::Settings };
+    for (auto cat : cats) {
+        for (const auto& mod : featureManager->GetModules(cat)) {
+            if (!mod->IsEnabled() || mod->GetName() == "ArrayList") {
+                continue;
+            }
+
+            const std::string name = mod->GetName();
+            const std::string tag = mod->GetTag();
+            float totalWidth = CalcTextSizeWithFont(nameFont, name.c_str(), nameFontSize).x;
+            if (!tag.empty()) {
+                totalWidth += spaceWidth + CalcTextSizeWithFont(detailFont, tag.c_str(), detailFontSize).x;
+            }
+
+            activeModules.push_back({ name, tag, totalWidth });
+            currentActiveKeys.push_back(name);
+        }
+    }
+
+    for (auto it = slideProgress.begin(); it != slideProgress.end(); ) {
+        bool found = false;
+        for (const auto& k : currentActiveKeys) {
+            if (k == it->first) { found = true; break; }
+        }
+        if (!found) it = slideProgress.erase(it);
+        else ++it;
+    }
+
+    std::sort(activeModules.begin(), activeModules.end(), [](const ModEntry& a, const ModEntry& b) {
+        return a.totalWidth > b.totalWidth;
+    });
+
+    int idx = 0;
+    const float goldenRatio = 0.618033988749895f;
+
+    for (const auto& mod : activeModules) {
+        const ImVec2 nameSizePx = CalcTextSizeWithFont(nameFont, mod.name.c_str(), nameFontSize);
+        float contentWidth = nameSizePx.x;
+        if (!mod.tag.empty()) {
+            contentWidth += spaceWidth + CalcTextSizeWithFont(detailFont, mod.tag.c_str(), detailFontSize).x;
+        }
+
+        double tMsD = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        float bHue = (float)fmod(tMsD / 2000.0, 1.0);
+        float hueOffset = fmodf(idx * goldenRatio, 1.0f);
+        float hue = fmodf(bHue + hueOffset, 1.0f);
+        float cr, cg, cb;
+        ImGui::ColorConvertHSVtoRGB(hue, 0.75f, 0.9f, cr, cg, cb);
+        ImU32 modColor = IM_COL32((int)(cr * 255), (int)(cg * 255), (int)(cb * 255), 255);
+
+        if (slideProgress.find(mod.name) == slideProgress.end())
+            slideProgress[mod.name] = 0.0f;
+        float& progress = slideProgress[mod.name];
+        if (progress < 1.0f) {
+            progress += deltaTime * 6.0f;
+            if (progress > 1.0f) {
+                progress = 1.0f;
+            }
+        }
+        float eased = 1.0f - (1.0f - progress) * (1.0f - progress) * (1.0f - progress);
+
+        float targetX = screenW - contentWidth - 6.0f;
+        float currentX = screenW + (targetX - screenW) * eased;
+        float yPos = topY + idx * (itemHeight + itemSpacing);
+        float textX = currentX;
+        float textY = yPos;
+
+        drawList->AddText(nameFont, nameFontSize, ImVec2(textX + shadowOffset, textY + shadowOffset), shadowColor, mod.name.c_str());
+        drawList->AddText(nameFont, nameFontSize, ImVec2(textX, textY), modColor, mod.name.c_str());
+
+        if (!mod.tag.empty()) {
+            float tagX = textX + nameSizePx.x + spaceWidth;
+            drawList->AddText(detailFont, detailFontSize, ImVec2(tagX + shadowOffset, textY + shadowOffset), shadowColor, mod.tag.c_str());
+            drawList->AddText(detailFont, detailFontSize, ImVec2(tagX, textY), secondaryColor, mod.tag.c_str());
+        }
+
+        idx++;
     }
 }
 
@@ -1435,6 +1587,7 @@ void Screen::RenderMainInterface() {
 
         ImGui::End();
     }
+
 
     // Automatically process keybinds and sync all modules to shared memory
     FeatureManager::Get()->UpdateFrontdoor(Bridge::Get()->GetConfig());

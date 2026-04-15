@@ -42,8 +42,7 @@ bool Bridge::Initialize() {
     
     static bool firstInit = true;
     if (firstInit) {
-        ZeroMemory(m_Config, sizeof(ModuleConfig));
-        m_Config->Reset();
+        *m_Config = ModuleConfig{};
         firstInit = false;
     }
     

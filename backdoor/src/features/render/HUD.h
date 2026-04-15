@@ -3,15 +3,18 @@
 #include <vector>
 #include <string>
 #include <chrono>
+#include <unordered_map>
 
+struct ImFont;
 struct ModuleConfig;
 
 class HUD {
 public:
     HUD() = default;
-    ~HUD();
+    ~HUD() = default;
 
-    void Render(HDC hdc, ModuleConfig* config);
+    void Render(ModuleConfig* config, float screenW, float screenH);
+    void SetFonts(ImFont* regular, ImFont* bold);
 
     static HUD* Get() {
         static HUD instance;
@@ -20,28 +23,19 @@ public:
 
 private:
     struct ModuleEntry {
-        const char* name;
-        const char* mode;
+        std::string name;
+        std::string tag;
         float width;
-        bool enabled;
     };
 
     std::vector<ModuleEntry> GetActiveModules();
-    void InitFont(HDC hdc);
-    void CleanupFont();
-    void DrawRect(float x, float y, float w, float h, float r, float g, float b, float a);
-    void DrawRoundedRect(float x, float y, float w, float h, float radius, float r, float g, float b, float a);
-    void DrawText(float x, float y, const char* text, float r, float g, float b);
-    int MeasureText(const char* text);
     void GetRainbowRGB(int offset, float& r, float& g, float& b);
 
-    bool m_FontInitialized = false;
-    unsigned int m_FontBase = 0;
-    int m_CharWidths[256] = {};
-    int m_FontHeight = 14;
-    HDC m_FontDC = nullptr;
-    HANDLE m_FontMemHandle = nullptr;
-    bool m_FontResourceLoaded = false;
-    int m_ScreenW = 1920;
-    int m_ScreenH = 1080;
+    int m_Fps = 0;
+    int m_FrameCount = 0;
+    std::chrono::steady_clock::time_point m_LastFpsTime = std::chrono::steady_clock::now();
+    std::unordered_map<std::string, float> m_SlideProgress;
+    std::chrono::steady_clock::time_point m_LastFrameTime = std::chrono::steady_clock::now();
+    ImFont* m_RegularFont = nullptr;
+    ImFont* m_BoldFont = nullptr;
 };

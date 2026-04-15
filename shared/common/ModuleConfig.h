@@ -6,12 +6,13 @@ struct ModuleConfig {
     char m_Username[64] = {};
 
     struct {
-        bool m_Enabled = true;
+        bool m_Enabled = false;
+        bool m_Watermark = true;
         bool m_ColorBar = true;
-        bool m_Rainbow = false;
+        bool m_Rainbow = true;
         bool m_Background = true;
         float m_RainbowSpeed = 1.0f;
-        float m_Color[4] = { 0x92 / 255.0f, 0x39 / 255.0f, 0x4B / 255.0f, 1.0f };
+        float m_Color[4] = { 78.0f / 255.0f, 86.0f / 255.0f, 107.0f / 255.0f, 1.0f };
         int m_Style = 1;
     } HUD;
 
@@ -32,8 +33,7 @@ struct ModuleConfig {
     } Modules;
 
     void Reset() {
-        m_Destruct = false;
-        m_FullDestruct = false;
+        *this = ModuleConfig{};
     }
 };
 
