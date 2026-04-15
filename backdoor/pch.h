@@ -1,13 +1,9 @@
 #pragma once
 
-// precompiled header do backdoor
-// DLL injetada no javaw
-
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 
-// std
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -23,8 +19,6 @@
 #include <algorithm>
 #include <cmath>
 
-// shared
-#include "../shared/Common.h"
+#include "../shared/common/Common.h"
 
-// vendors - imgui pra arraylist
-#include "vendors/imgui/imgui.h"
+#include "../deps/imgui/imgui.h"

@@ -4,17 +4,18 @@
 #include "../core/Injector.h"
 #include "../utils/ProcessHelper.h"
 #include "../config/ClientInfo.h"
-#include "../config/ModuleConfig.h"
-#include "../../vendors/imgui/colors.h"
-#include "../../vendors/imgui/inter_bold_font.h"
-#include "../../vendors/imgui/inter_regular_font.h"
-#include "../../vendors/imgui/sword_icon.h"
-#include "../../vendors/imgui/running_icon.h"
-#include "../../vendors/imgui/eye_icon.h"
-#include "../../vendors/imgui/settings_icon.h"
+#include "../../../shared/common/ModuleConfig.h"
+#include "../../../deps/imgui/colors.h"
+#include "../../../deps/imgui/inter_bold_font.h"
+#include "../../../deps/imgui/inter_regular_font.h"
+#include "../../../deps/imgui/sword_icon.h"
+#include "../../../deps/imgui/running_icon.h"
+#include "../../../deps/imgui/eye_icon.h"
+#include "../../../deps/imgui/settings_icon.h"
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_STATIC
-#include "../../vendors/imgui/stb_image.h"
+#include "../../../deps/imgui/stb_image.h"
+#include "../../../shared/common/RegisterModules.h"
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -82,54 +83,130 @@ namespace
         drawList->AddRectFilled(surfaceMin, surfaceMax, color::GetBackgroundU32(), 0.0f);
     }
 
-    void DrawTopographicLoop(ImDrawList* drawList, const ImVec2& center, float radiusX, float radiusY, float phase, ImU32 color, float thickness)
-    {
-        const int samples = 96;
-        const float twoPi = 6.28318530718f;
-
-        drawList->PathClear();
-        for (int i = 0; i < samples; ++i) {
-            const float angle = (static_cast<float>(i) / static_cast<float>(samples)) * twoPi;
-            const float wobble = 1.0f
-                + 0.055f * sinf(angle * 3.0f + phase)
-                + 0.028f * cosf(angle * 5.0f - phase * 0.7f);
-
-            drawList->PathLineTo(ImVec2(
-                center.x + cosf(angle) * radiusX * wobble,
-                center.y + sinf(angle) * radiusY * wobble
-            ));
-        }
-
-        drawList->PathStroke(color, true, thickness);
+    // --- Topographic noise & contour system (Kali Linux style) ---
+    static float topoHash(int x, int y) {
+        int h = x * 374761393 + y * 668265263;
+        h = (h ^ (h >> 13)) * 1274126177;
+        h = h ^ (h >> 16);
+        return (h & 0x7fffffff) / (float)0x7fffffff;
     }
 
-    void DrawTopographicGroup(ImDrawList* drawList, const ImVec2& center, float radiusX, float radiusY, int rings, float spacing, float phase, const ImVec4& tint)
-    {
-        for (int ring = 0; ring < rings; ++ring) {
-            const float ringPhase = phase + ring * 0.18f;
-            const float alpha = tint.w * (1.0f - (static_cast<float>(ring) / static_cast<float>(rings + 2)));
-            DrawTopographicLoop(
-                drawList,
-                center,
-                radiusX + ring * spacing,
-                radiusY + ring * spacing * 0.82f,
-                ringPhase,
-                ImGui::ColorConvertFloat4ToU32(ImVec4(tint.x, tint.y, tint.z, alpha)),
-                1.0f
-            );
-        }
+    static float topoSmoothstep(float t) {
+        return t * t * (3.0f - 2.0f * t);
     }
 
-    void DrawTopographicBackground(ImDrawList* drawList, const ImVec2& origin, float width, float height, float elapsed)
-    {
-        const float phase = elapsed * 0.14f;
-        const ImVec2 clipMin(origin.x + 10.0f, origin.y + 10.0f);
-        const ImVec2 clipMax(origin.x + width - 10.0f, origin.y + height - 10.0f);
-        drawList->PushClipRect(clipMin, clipMax, true);
-        DrawTopographicGroup(drawList, ImVec2(origin.x + width * 0.15f, origin.y + height * 0.28f), 48.0f, 40.0f, 8, 18.0f, phase + 0.2f, color::GetModuleAltTextVec4(0.22f));
-        DrawTopographicGroup(drawList, ImVec2(origin.x + width * 0.83f, origin.y + height * 0.20f), 66.0f, 58.0f, 9, 19.0f, phase + 1.1f, color::GetModuleTextVec4(0.18f));
-        DrawTopographicGroup(drawList, ImVec2(origin.x + width * 0.17f, origin.y + height * 0.77f), 42.0f, 30.0f, 7, 15.0f, phase + 2.2f, color::GetModuleAltTextVec4(0.16f));
-        DrawTopographicGroup(drawList, ImVec2(origin.x + width * 0.56f, origin.y + height * 0.54f), 115.0f, 74.0f, 4, 26.0f, phase + 0.7f, color::GetModuleTextVec4(0.10f));
+    static float topoNoise2D(float x, float y) {
+        int ix = (int)floorf(x);
+        int iy = (int)floorf(y);
+        float fx = x - ix;
+        float fy = y - iy;
+        fx = topoSmoothstep(fx);
+        fy = topoSmoothstep(fy);
+        float n00 = topoHash(ix, iy);
+        float n10 = topoHash(ix + 1, iy);
+        float n01 = topoHash(ix, iy + 1);
+        float n11 = topoHash(ix + 1, iy + 1);
+        float nx0 = n00 + (n10 - n00) * fx;
+        float nx1 = n01 + (n11 - n01) * fx;
+        return nx0 + (nx1 - nx0) * fy;
+    }
+
+    static float topoFbm(float x, float y) {
+        float value = 0.0f;
+        float amp = 0.5f;
+        float freq = 1.0f;
+        for (int i = 0; i < 5; i++) {
+            value += amp * topoNoise2D(x * freq, y * freq);
+            amp *= 0.5f;
+            freq *= 2.0f;
+        }
+        return value;
+    }
+
+    void DrawTopographicBackground(ImDrawList* drawList, const ImVec2& origin, float width, float height, float /*elapsed*/) {
+        drawList->PushClipRect(origin, ImVec2(origin.x + width, origin.y + height), true);
+
+        const int gridW = 120;
+        const int gridH = 90;
+        const float cellW = width / (float)gridW;
+        const float cellH = height / (float)gridH;
+        const float scale = 0.04f;
+        const int numLevels = 14;
+        const ImU32 lineColor = IM_COL32(200, 200, 200, 80);
+
+        // sample noise grid
+        static float grid[121][91];
+        static bool gridReady = false;
+        static float cachedW = 0, cachedH = 0;
+        if (!gridReady || cachedW != width || cachedH != height) {
+            for (int gy = 0; gy <= gridH; gy++) {
+                for (int gx = 0; gx <= gridW; gx++) {
+                    float nx = gx * scale;
+                    float ny = gy * scale;
+                    grid[gx][gy] = topoFbm(nx, ny);
+                }
+            }
+            gridReady = true;
+            cachedW = width;
+            cachedH = height;
+        }
+
+        // marching squares for each contour level
+        for (int lv = 1; lv < numLevels; lv++) {
+            float threshold = (float)lv / (float)numLevels;
+
+            for (int gy = 0; gy < gridH; gy++) {
+                for (int gx = 0; gx < gridW; gx++) {
+                    float v00 = grid[gx][gy];
+                    float v10 = grid[gx + 1][gy];
+                    float v01 = grid[gx][gy + 1];
+                    float v11 = grid[gx + 1][gy + 1];
+
+                    int config = 0;
+                    if (v00 >= threshold) config |= 1;
+                    if (v10 >= threshold) config |= 2;
+                    if (v11 >= threshold) config |= 4;
+                    if (v01 >= threshold) config |= 8;
+
+                    if (config == 0 || config == 15) continue;
+
+                    float x0 = origin.x + gx * cellW;
+                    float y0 = origin.y + gy * cellH;
+
+                    // interpolation helpers for edge midpoints
+                    auto lerpEdge = [&](float va, float vb, float ax, float ay, float bx, float by) -> ImVec2 {
+                        float t = (threshold - va) / (vb - va + 1e-6f);
+                        t = (t < 0.0f) ? 0.0f : ((t > 1.0f) ? 1.0f : t);
+                        return ImVec2(ax + (bx - ax) * t, ay + (by - ay) * t);
+                    };
+
+                    // edge midpoints: top, right, bottom, left
+                    ImVec2 eT = lerpEdge(v00, v10, x0, y0, x0 + cellW, y0);
+                    ImVec2 eR = lerpEdge(v10, v11, x0 + cellW, y0, x0 + cellW, y0 + cellH);
+                    ImVec2 eB = lerpEdge(v01, v11, x0, y0 + cellH, x0 + cellW, y0 + cellH);
+                    ImVec2 eL = lerpEdge(v00, v01, x0, y0, x0, y0 + cellH);
+
+                    // draw line segments based on marching squares config
+                    switch (config) {
+                    case 1: case 14: drawList->AddLine(eT, eL, lineColor, 0.8f); break;
+                    case 2: case 13: drawList->AddLine(eT, eR, lineColor, 0.8f); break;
+                    case 3: case 12: drawList->AddLine(eL, eR, lineColor, 0.8f); break;
+                    case 4: case 11: drawList->AddLine(eR, eB, lineColor, 0.8f); break;
+                    case 6: case 9:  drawList->AddLine(eT, eB, lineColor, 0.8f); break;
+                    case 7: case 8:  drawList->AddLine(eL, eB, lineColor, 0.8f); break;
+                    case 5:
+                        drawList->AddLine(eT, eR, lineColor, 0.8f);
+                        drawList->AddLine(eL, eB, lineColor, 0.8f);
+                        break;
+                    case 10:
+                        drawList->AddLine(eT, eL, lineColor, 0.8f);
+                        drawList->AddLine(eR, eB, lineColor, 0.8f);
+                        break;
+                    }
+                }
+            }
+        }
+
         drawList->PopClipRect();
     }
 
@@ -139,13 +216,6 @@ namespace
         const float height = max.y - min.y;
         if (width <= 0.0f || height <= 0.0f)
             return;
-
-        drawList->AddRectFilled(ImVec2(min.x, min.y + 14.0f), ImVec2(max.x, max.y + 14.0f), color::GetGlassShadowU32(0.11f), rounding);
-
-        drawList->PushClipRect(min, max, true);
-        DrawTopographicGroup(drawList, ImVec2(min.x + width * 0.20f, min.y + height * 0.28f), width * 0.18f, height * 0.16f, 5, 12.0f, elapsed * 0.16f + 0.4f, color::GetGlassStrongVec4(0.10f));
-        DrawTopographicGroup(drawList, ImVec2(min.x + width * 0.76f, min.y + height * 0.35f), width * 0.16f, height * 0.13f, 5, 10.0f, elapsed * 0.18f + 1.2f, color::GetGlassSoftVec4(0.08f));
-        drawList->PopClipRect();
 
         drawList->AddRectFilled(min, max, color::GetPanelU32(0.72f), rounding);
         drawList->AddRectFilled(ImVec2(min.x + 1.0f, min.y + 1.0f), ImVec2(max.x - 1.0f, min.y + height * 0.42f), color::GetGlassHighlightU32(0.18f), rounding, ImDrawFlags_RoundCornersTop);
@@ -492,6 +562,8 @@ bool Screen::Initialize() {
     
     LoadIconTextures();
     
+    RegisterAllModules();
+    
     m_Initialized = true;
     return true;
 }
@@ -530,6 +602,7 @@ void Screen::RenderIntro() {
         const ImVec2 wp = ImGui::GetWindowPos();
 
         DrawWindowBase(dl, wp, m_Width, m_Height);
+        DrawTopographicBackground(dl, wp, m_Width, m_Height, elapsed);
 
         const float line1FontSize = 32.0f;
         const float line2FontSize = 22.0f;
@@ -681,6 +754,7 @@ void Screen::RenderInstanceChooser() {
         ImVec2 wp = ImGui::GetWindowPos();
 
         DrawWindowBase(dl, wp, m_Width, m_Height);
+        DrawTopographicBackground(dl, wp, m_Width, m_Height, 0.0f);
 
         {
             const char* title = "Select Instance";
@@ -794,6 +868,7 @@ void Screen::RenderInjecting() {
         ImDrawList* dl = ImGui::GetWindowDrawList();
         ImVec2 wp = ImGui::GetWindowPos();
         DrawWindowBase(dl, wp, m_Width, m_Height);
+        DrawTopographicBackground(dl, wp, m_Width, m_Height, 0.0f);
 
         {
         const char* title = "Injecting";
@@ -841,79 +916,389 @@ void Screen::RenderHUDPreview() {
     }
 }
 
+static void RenderModulesForCategory(ModuleCategory category, float areaWidth, float areaHeight, ImFont* fontBold, ImFont* fontBody, ID3D11Device* device) {
+    // Cache for module prefix icon textures (keyed by image data pointer)
+    static std::unordered_map<const unsigned char*, ID3D11ShaderResourceView*> s_ModuleIconCache;
+    auto& modules = FeatureManager::Get()->GetModules(category);
+    if (modules.empty()) return;
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 origin = ImGui::GetCursorScreenPos();
+
+    const float colGap = 12.0f;
+    const float cardPadX = 14.0f;
+    const float cardPadY = 10.0f;
+    const float cardGapY = 10.0f;
+    const float colW = (areaWidth - colGap) * 0.5f;
+    const float toggleSize = 16.0f;
+    const float bindW = 42.0f;
+    const float optLineH = 28.0f;
+    const float headerH = 28.0f;
+    const float cardRounding = 8.0f;
+
+    static int waitingBindModuleIdx = -1;
+    static ModuleCategory waitingBindCat = ModuleCategory::Combat;
+
+    float colY[2] = { 0.0f, 0.0f };
+
+    for (int mi = 0; mi < (int)modules.size(); mi++) {
+        auto& mod = modules[mi];
+
+        int optCount = 0;
+        for (auto& opt : mod->GetOptions()) { (void)opt; optCount++; }
+        float cardH = headerH + cardPadY;
+        if (optCount > 0) {
+            cardH += optCount * optLineH + 6.0f;
+        }
+
+        int col = (colY[0] <= colY[1]) ? 0 : 1;
+        float cx = origin.x + col * (colW + colGap);
+        float cy = origin.y + colY[col];
+
+        ImVec2 cardMin(cx, cy);
+        ImVec2 cardMax(cx + colW, cy + cardH);
+
+        dl->AddRectFilled(cardMin, cardMax, IM_COL32(230, 230, 230, 180), cardRounding);
+        dl->AddRect(cardMin, cardMax, IM_COL32(200, 200, 200, 120), cardRounding, 0, 1.0f);
+
+        // Render module prefix icon if available
+        const float prefixIconSize = 20.0f;
+        float nameOffsetX = 0.0f;
+        if (mod->GetImageData() && mod->GetImageSize() > 0 && device) {
+            auto it = s_ModuleIconCache.find(mod->GetImageData());
+            if (it == s_ModuleIconCache.end()) {
+                // Load texture from module image data
+                int tw = 0, th = 0, tc = 0;
+                unsigned char* pixels = stbi_load_from_memory(mod->GetImageData(), mod->GetImageSize(), &tw, &th, &tc, 4);
+                ID3D11ShaderResourceView* srv = nullptr;
+                if (pixels && tw > 0 && th > 0) {
+                    D3D11_TEXTURE2D_DESC desc = {};
+                    desc.Width = tw; desc.Height = th;
+                    desc.MipLevels = 1; desc.ArraySize = 1;
+                    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                    desc.SampleDesc.Count = 1;
+                    desc.Usage = D3D11_USAGE_DEFAULT;
+                    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                    D3D11_SUBRESOURCE_DATA sub = {};
+                    sub.pSysMem = pixels; sub.SysMemPitch = tw * 4;
+                    ID3D11Texture2D* tex = nullptr;
+                    if (SUCCEEDED(device->CreateTexture2D(&desc, &sub, &tex))) {
+                        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+                        srvDesc.Texture2D.MipLevels = 1;
+                        device->CreateShaderResourceView(tex, &srvDesc, &srv);
+                        tex->Release();
+                    }
+                    stbi_image_free(pixels);
+                }
+                s_ModuleIconCache[mod->GetImageData()] = srv;
+                it = s_ModuleIconCache.find(mod->GetImageData());
+            }
+            if (it != s_ModuleIconCache.end() && it->second) {
+                float iconY = cy + (headerH - prefixIconSize) * 0.5f;
+                float iconX = cx + cardPadX;
+                dl->AddImage((ImTextureID)it->second, ImVec2(iconX, iconY), ImVec2(iconX + prefixIconSize, iconY + prefixIconSize));
+                nameOffsetX = prefixIconSize + 6.0f;
+            }
+        }
+
+        ImFont* nf = fontBold ? fontBold : ImGui::GetFont();
+        float nameFS = nf->FontSize;
+        dl->AddText(nf, nameFS, ImVec2(cx + cardPadX + nameOffsetX, cy + (headerH - nameFS) * 0.5f), IM_COL32(0, 0, 0, 255), mod->GetName().c_str());
+
+        float rightX = cx + colW - cardPadX;
+
+        std::string bindLabel = mod->GetKeybindName();
+        ImFont* bf = fontBody ? fontBody : ImGui::GetFont();
+        float bfs = bf->FontSize;
+        ImVec2 bindSize = bf->CalcTextSizeA(bfs, FLT_MAX, 0.0f, bindLabel.c_str());
+        float bindBtnW = bindSize.x + 12.0f;
+        if (bindBtnW < bindW) bindBtnW = bindW;
+        float bindX = rightX - bindBtnW;
+        float bindY = cy + (headerH - 18.0f) * 0.5f;
+
+        ImVec2 bindMin(bindX, bindY);
+        ImVec2 bindMax(bindX + bindBtnW, bindY + 18.0f);
+
+        bool isWaiting = (waitingBindModuleIdx == mi && waitingBindCat == category);
+
+        dl->AddRectFilled(bindMin, bindMax, isWaiting ? IM_COL32(180, 180, 180, 200) : IM_COL32(210, 210, 210, 180), 4.0f);
+        dl->AddRect(bindMin, bindMax, IM_COL32(170, 170, 170, 150), 4.0f, 0, 1.0f);
+
+        const char* displayText = isWaiting ? "..." : bindLabel.c_str();
+        ImVec2 dts = bf->CalcTextSizeA(bfs, FLT_MAX, 0.0f, displayText);
+        dl->AddText(bf, bfs, ImVec2(bindMin.x + (bindBtnW - dts.x) * 0.5f, bindMin.y + (18.0f - dts.y) * 0.5f),
+                    IM_COL32(60, 60, 60, 255), displayText);
+
+        ImGui::SetCursorScreenPos(bindMin);
+        char bindBtnId[64];
+        snprintf(bindBtnId, sizeof(bindBtnId), "##bind_%d_%d", (int)category, mi);
+        if (ImGui::InvisibleButton(bindBtnId, ImVec2(bindBtnW, 18.0f))) {
+            if (isWaiting) {
+                waitingBindModuleIdx = -1;
+            } else {
+                waitingBindModuleIdx = mi;
+                waitingBindCat = category;
+            }
+        }
+
+        if (isWaiting) {
+            for (int vk = 1; vk < 256; vk++) {
+                if (vk == VK_LBUTTON || vk == VK_RBUTTON) continue;
+                if (GetAsyncKeyState(vk) & 1) {
+                    if (vk == VK_ESCAPE) {
+                        mod->SetKeybind(0);
+                    } else {
+                        mod->SetKeybind(vk);
+                    }
+                    waitingBindModuleIdx = -1;
+                    break;
+                }
+            }
+        }
+
+        float toggleX = bindX - toggleSize - 10.0f;
+        float toggleY = cy + (headerH - toggleSize) * 0.5f;
+        ImVec2 toggleMin(toggleX, toggleY);
+        ImVec2 toggleMax(toggleX + toggleSize, toggleY + toggleSize);
+
+        bool enabled = mod->IsEnabled();
+        ImU32 toggleBg = enabled ? IM_COL32(60, 60, 60, 255) : IM_COL32(190, 190, 190, 200);
+        dl->AddRectFilled(toggleMin, toggleMax, toggleBg, 4.0f);
+        if (enabled) {
+            float cx2 = toggleX + toggleSize * 0.5f;
+            float cy2 = toggleY + toggleSize * 0.5f;
+            dl->AddLine(ImVec2(cx2 - 4, cy2), ImVec2(cx2 - 1, cy2 + 3), IM_COL32(255, 255, 255, 255), 2.0f);
+            dl->AddLine(ImVec2(cx2 - 1, cy2 + 3), ImVec2(cx2 + 4, cy2 - 3), IM_COL32(255, 255, 255, 255), 2.0f);
+        }
+
+        ImGui::SetCursorScreenPos(toggleMin);
+        char toggleId[64];
+        snprintf(toggleId, sizeof(toggleId), "##toggle_%d_%d", (int)category, mi);
+        if (ImGui::InvisibleButton(toggleId, ImVec2(toggleSize, toggleSize))) {
+            mod->SetEnabled(!enabled);
+            enabled = !enabled;
+        }
+
+        dl->PushClipRect(cardMin, cardMax, true);
+
+        if (optCount > 0) {
+            float optY = cy + headerH + 4.0f;
+            float optX = cx + cardPadX;
+            float optW = colW - cardPadX * 2;
+
+            // Push body font so widgets render at correct 17pt size
+            if (fontBody) ImGui::PushFont(fontBody);
+
+            // Push light style for ImGui widgets on white/light cards
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.93f, 0.93f, 0.93f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.88f, 0.88f, 0.88f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.83f, 0.83f, 0.83f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(0.50f, 0.50f, 0.50f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, ImVec4(0.35f, 0.35f, 0.35f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(0.20f, 0.20f, 0.20f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.15f, 0.15f, 0.15f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.90f, 0.90f, 0.90f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.84f, 0.84f, 0.84f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.78f, 0.78f, 0.78f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.88f, 0.88f, 0.88f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.82f, 0.82f, 0.82f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.76f, 0.76f, 0.76f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.82f, 0.82f, 0.82f, 0.6f));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 2.0f));
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_GrabMinSize, 10.0f);
+
+            float sliderW = optW * 0.40f;
+
+            for (auto& opt : mod->GetOptions()) {
+                ImGui::SetCursorScreenPos(ImVec2(optX, optY));
+
+                char optId[128];
+                snprintf(optId, sizeof(optId), "##opt_%d_%d_%s", (int)category, mi, opt.name.c_str());
+
+                ImFont* labelFont = fontBody ? fontBody : ImGui::GetFont();
+                float labelFS = labelFont->FontSize;
+
+                switch (opt.type) {
+                case OptionType::Toggle: {
+                    // Custom drawn checkbox to match card style
+                    const float cbSize = 14.0f;
+                    float cbX = optX;
+                    float cbY = optY + (optLineH - cbSize) * 0.5f;
+                    ImVec2 cbMin(cbX, cbY);
+                    ImVec2 cbMax(cbX + cbSize, cbY + cbSize);
+
+                    ImU32 cbBg = opt.boolValue ? IM_COL32(60, 60, 60, 255) : IM_COL32(200, 200, 200, 220);
+                    dl->AddRectFilled(cbMin, cbMax, cbBg, 3.0f);
+                    dl->AddRect(cbMin, cbMax, IM_COL32(160, 160, 160, 180), 3.0f, 0, 1.0f);
+                    if (opt.boolValue) {
+                        float cx2 = cbX + cbSize * 0.5f;
+                        float cy2 = cbY + cbSize * 0.5f;
+                        dl->AddLine(ImVec2(cx2 - 3, cy2), ImVec2(cx2 - 1, cy2 + 3), IM_COL32(255, 255, 255, 255), 1.8f);
+                        dl->AddLine(ImVec2(cx2 - 1, cy2 + 3), ImVec2(cx2 + 4, cy2 - 3), IM_COL32(255, 255, 255, 255), 1.8f);
+                    }
+
+                    ImGui::SetCursorScreenPos(cbMin);
+                    ImGui::InvisibleButton(optId, ImVec2(cbSize, cbSize));
+                    if (ImGui::IsItemClicked()) {
+                        opt.boolValue = !opt.boolValue;
+                    }
+
+                    dl->AddText(labelFont, labelFS, ImVec2(cbX + cbSize + 6.0f, optY + (optLineH - labelFS) * 0.5f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+                    break;
+                }
+                case OptionType::SliderInt: {
+                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + (optLineH - labelFS) * 0.5f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+
+                    // Custom thin rounded slider — positioned right after label text
+                    const float sliderH = 6.0f;
+                    const float grabRadius = 7.0f;
+                    ImVec2 labelSize = labelFont->CalcTextSizeA(labelFS, FLT_MAX, 0.0f, opt.name.c_str());
+                    float sliderX = optX + labelSize.x + 12.0f;
+                    float actualSliderW = optX + optW - sliderX - 30.0f;
+                    if (actualSliderW < 40.0f) actualSliderW = 40.0f;
+                    float sliderY = optY + (optLineH - sliderH) * 0.5f;
+                    ImVec2 trackMin(sliderX, sliderY);
+                    ImVec2 trackMax(sliderX + actualSliderW, sliderY + sliderH);
+                    float trackRounding = sliderH * 0.5f;
+
+                    // Track background
+                    dl->AddRectFilled(trackMin, trackMax, IM_COL32(210, 210, 210, 255), trackRounding);
+                    dl->AddRect(trackMin, trackMax, IM_COL32(185, 185, 185, 200), trackRounding, 0, 1.0f);
+
+                    // Filled portion
+                    float tNorm = (opt.intMax > opt.intMin) ? (float)(opt.intValue - opt.intMin) / (float)(opt.intMax - opt.intMin) : 0.0f;
+                    if (tNorm < 0.0f) tNorm = 0.0f; if (tNorm > 1.0f) tNorm = 1.0f;
+                    float fillX = sliderX + tNorm * actualSliderW;
+                    if (fillX > sliderX + 2.0f) {
+                        dl->AddRectFilled(trackMin, ImVec2(fillX, trackMax.y), IM_COL32(80, 80, 80, 255), trackRounding);
+                    }
+
+                    // Grab circle
+                    float grabCX = sliderX + tNorm * actualSliderW;
+                    float grabCY = sliderY + sliderH * 0.5f;
+                    dl->AddCircleFilled(ImVec2(grabCX, grabCY), grabRadius, IM_COL32(60, 60, 60, 255));
+                    dl->AddCircle(ImVec2(grabCX, grabCY), grabRadius, IM_COL32(40, 40, 40, 255), 0, 1.2f);
+
+                    // Invisible button for interaction
+                    ImVec2 interactMin(sliderX - grabRadius, sliderY - grabRadius);
+                    ImVec2 interactMax(sliderX + actualSliderW + grabRadius, sliderY + sliderH + grabRadius);
+                    ImGui::SetCursorScreenPos(interactMin);
+                    ImGui::InvisibleButton(optId, ImVec2(interactMax.x - interactMin.x, interactMax.y - interactMin.y));
+                    if (ImGui::IsItemActive()) {
+                        float mouseX = ImGui::GetIO().MousePos.x;
+                        float newT = (mouseX - sliderX) / actualSliderW;
+                        if (newT < 0.0f) newT = 0.0f; if (newT > 1.0f) newT = 1.0f;
+                        opt.intValue = opt.intMin + (int)(newT * (opt.intMax - opt.intMin) + 0.5f);
+                    }
+
+                    // Value text
+                    char valBuf[32];
+                    snprintf(valBuf, sizeof(valBuf), "%d", opt.intValue);
+                    dl->AddText(labelFont, labelFS, ImVec2(sliderX + actualSliderW + 6.0f, optY + (optLineH - labelFS) * 0.5f), IM_COL32(60, 60, 60, 255), valBuf);
+
+                    break;
+                }
+                case OptionType::SliderFloat: {
+                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + (optLineH - labelFS) * 0.5f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+
+                    // Custom thin rounded slider — positioned right after label text
+                    const float sliderH = 6.0f;
+                    const float grabRadius = 7.0f;
+                    ImVec2 labelSizeF = labelFont->CalcTextSizeA(labelFS, FLT_MAX, 0.0f, opt.name.c_str());
+                    float sliderX = optX + labelSizeF.x + 12.0f;
+                    float actualSliderWF = optX + optW - sliderX - 30.0f;
+                    if (actualSliderWF < 40.0f) actualSliderWF = 40.0f;
+                    float sliderY = optY + (optLineH - sliderH) * 0.5f;
+                    ImVec2 trackMin(sliderX, sliderY);
+                    ImVec2 trackMax(sliderX + actualSliderWF, sliderY + sliderH);
+                    float trackRounding = sliderH * 0.5f;
+
+                    // Track background
+                    dl->AddRectFilled(trackMin, trackMax, IM_COL32(210, 210, 210, 255), trackRounding);
+                    dl->AddRect(trackMin, trackMax, IM_COL32(185, 185, 185, 200), trackRounding, 0, 1.0f);
+
+                    // Filled portion
+                    float tNorm = (opt.floatMax > opt.floatMin) ? (opt.floatValue - opt.floatMin) / (opt.floatMax - opt.floatMin) : 0.0f;
+                    if (tNorm < 0.0f) tNorm = 0.0f; if (tNorm > 1.0f) tNorm = 1.0f;
+                    float fillX = sliderX + tNorm * actualSliderWF;
+                    if (fillX > sliderX + 2.0f) {
+                        dl->AddRectFilled(trackMin, ImVec2(fillX, trackMax.y), IM_COL32(80, 80, 80, 255), trackRounding);
+                    }
+
+                    // Grab circle
+                    float grabCX = sliderX + tNorm * actualSliderWF;
+                    float grabCY = sliderY + sliderH * 0.5f;
+                    dl->AddCircleFilled(ImVec2(grabCX, grabCY), grabRadius, IM_COL32(60, 60, 60, 255));
+                    dl->AddCircle(ImVec2(grabCX, grabCY), grabRadius, IM_COL32(40, 40, 40, 255), 0, 1.2f);
+
+                    // Invisible button for interaction
+                    ImVec2 interactMin(sliderX - grabRadius, sliderY - grabRadius);
+                    ImVec2 interactMax(sliderX + actualSliderWF + grabRadius, sliderY + sliderH + grabRadius);
+                    ImGui::SetCursorScreenPos(interactMin);
+                    ImGui::InvisibleButton(optId, ImVec2(interactMax.x - interactMin.x, interactMax.y - interactMin.y));
+                    if (ImGui::IsItemActive()) {
+                        float mouseX = ImGui::GetIO().MousePos.x;
+                        float newT = (mouseX - sliderX) / actualSliderWF;
+                        if (newT < 0.0f) newT = 0.0f; if (newT > 1.0f) newT = 1.0f;
+                        opt.floatValue = opt.floatMin + newT * (opt.floatMax - opt.floatMin);
+                    }
+
+                    // Value text
+                    char valBuf[32];
+                    snprintf(valBuf, sizeof(valBuf), "%.2f", opt.floatValue);
+                    dl->AddText(labelFont, labelFS, ImVec2(sliderX + actualSliderWF + 6.0f, optY + (optLineH - labelFS) * 0.5f), IM_COL32(60, 60, 60, 255), valBuf);
+
+                    break;
+                }
+                case OptionType::Combo: {
+                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+                    ImGui::SetCursorScreenPos(ImVec2(optX + optW - sliderW, optY));
+                    ImGui::PushItemWidth(sliderW);
+                    std::vector<const char*> items;
+                    for (auto& s : opt.comboItems) items.push_back(s.c_str());
+                    ImGui::Combo(optId, &opt.comboIndex, items.data(), (int)items.size());
+                    ImGui::PopItemWidth();
+                    break;
+                }
+                }
+
+                optY += optLineH;
+            }
+
+            ImGui::PopStyleVar(4);
+            ImGui::PopStyleColor(14);
+
+            if (fontBody) ImGui::PopFont();
+        }
+
+        dl->PopClipRect();
+
+        colY[col] += cardH + cardGapY;
+    }
+}
+
 void Screen::RenderCombatTab() {
-    ImGui::TextColored(color::GetStrongTextVec4(), "combat");
-    ImGui::Separator();
-
-    auto* config = Bridge::Get()->GetConfig();
-    if (!config) {
-        ImGui::TextColored(color::GetModuleAltTextVec4(), "waiting for injection...");
-        return;
-    }
-
-    // auto clicker
-    ImGui::Checkbox("auto clicker", &config->AutoClicker.m_Enabled);
-    if (config->AutoClicker.m_Enabled) {
-        ImGui::Indent(15.f);
-        ImGui::SliderInt("min cps", &config->AutoClicker.m_MinCps, 1, 20);
-        ImGui::SliderInt("max cps", &config->AutoClicker.m_MaxCps, 1, 20);
-        if (config->AutoClicker.m_MinCps > config->AutoClicker.m_MaxCps)
-            config->AutoClicker.m_MinCps = config->AutoClicker.m_MaxCps;
-        ImGui::Checkbox("jitter", &config->AutoClicker.m_Jitter);
-        ImGui::Checkbox("only while holding LMB", &config->AutoClicker.m_OnlyWhileHolding);
-        ImGui::Unindent(15.f);
-    }
-    
-    ImGui::Spacing();
-    ImGui::Separator();
-
-    static bool wtap = false;
-    static bool aimassist = false;
-    ImGui::Checkbox("wtap (em breve)", &wtap);
-    ImGui::Checkbox("aim assist (em breve)", &aimassist);
+    const float contentW = m_Width - 52.0f - 16.0f - 16.0f;
+    RenderModulesForCategory(ModuleCategory::Combat, contentW, m_Height, m_FontBold, m_FontBody, m_Device);
 }
 
 void Screen::RenderMovementTab() {
-    ImGui::TextColored(ImVec4(0, 0, 0, 1), "movement");
-    ImGui::Separator();
-    ImGui::TextColored(ImVec4(0.4f, 0.4f, 0.4f, 1.0f), "em breve...");
+    const float contentW = m_Width - 52.0f - 16.0f - 16.0f;
+    RenderModulesForCategory(ModuleCategory::Movement, contentW, m_Height, m_FontBold, m_FontBody, m_Device);
 }
 
 void Screen::RenderVisualsTab() {
-    ImGui::TextColored(color::GetStrongTextVec4(), "visuals");
-    ImGui::Separator();
-    
-    auto* config = Bridge::Get()->GetConfig();
-    if (config) {
-        ImGui::Checkbox("hud", &config->HUD.m_Enabled);
-        ImGui::Checkbox("rainbow", &config->HUD.m_Rainbow);
-        ImGui::Checkbox("color bar", &config->HUD.m_ColorBar);
-        ImGui::Checkbox("background", &config->HUD.m_Background);
-        
-        ImGui::SliderFloat("rainbow speed", &config->HUD.m_RainbowSpeed, 0.1f, 5.0f);
-        
-        const char* styles[] = { "old", "new" };
-        ImGui::Combo("style", &config->HUD.m_Style, styles, IM_ARRAYSIZE(styles));
-    }
+    const float contentW = m_Width - 52.0f - 16.0f - 16.0f;
+    RenderModulesForCategory(ModuleCategory::Visuals, contentW, m_Height, m_FontBold, m_FontBody, m_Device);
 }
 
 void Screen::RenderSettingsTab() {
-    ImGui::TextColored(color::GetStrongTextVec4(), "configuracoes");
-    ImGui::Separator();
-    
-    if (ImGui::Button("salvar config")) {
-        // TODO: salvar em arquivo
-    }
-    
-    if (ImGui::Button("carregar config")) {
-        // TODO: carregar de arquivo
-    }
-    
-    ImGui::Spacing();
-    if (ImGui::Button("fechar cheat", ImVec2(-1, 30))) {
-        m_ClosingStartTime = (float)ImGui::GetTime();
-        m_State = AppState::Closing;
-    }
+    const float contentW = m_Width - 52.0f - 16.0f - 16.0f;
+    RenderModulesForCategory(ModuleCategory::Settings, contentW, m_Height, m_FontBold, m_FontBody, m_Device);
 }
 
 void Screen::RenderClosing() {
@@ -988,6 +1373,7 @@ void Screen::RenderMainInterface() {
         ImVec2 wp = ImGui::GetWindowPos();
 
         dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(255, 255, 255, 255));
+        DrawTopographicBackground(dl, wp, m_Width, m_Height, 0.0f);
 
         const float sidebarW = 52.0f;
         const float iconSize = 30.0f;
@@ -1049,7 +1435,11 @@ void Screen::RenderMainInterface() {
 
         ImGui::End();
     }
+
+    // Automatically process keybinds and sync all modules to shared memory
+    FeatureManager::Get()->UpdateFrontdoor(Bridge::Get()->GetConfig());
 }
+
 
 void Screen::Render() {
     const ImVec4 clear = color::GetBackgroundVec4();

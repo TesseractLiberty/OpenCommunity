@@ -1,31 +1,64 @@
 #include "pch.h"
 #include "features/render/HUD.h"
-#include "features/combat/AutoClicker.h"
 #include "core/Bridge.h"
 #include "core/RenderHook.h"
+#include "game/jni/GameInstance.h"
+#include "../../shared/common/RegisterModules.h"
+
+static void SafeUpdateModules(FeatureManager* fm, void* config) {
+    __try {
+        fm->UpdateBackdoor(config);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+static DWORD MainThreadImpl() {
+    Sleep(3000);
+    
+    if (!Bridge::Get()->Initialize()) {
+        return 1;
+    }
+    
+    g_Game = new GameInstance();
+    if (!g_Game->Attach()) {
+        delete g_Game;
+        g_Game = nullptr;
+    }
+    
+    if (g_Game && !g_Game->InitializeGame()) {
+        g_Game->Detach();
+        delete g_Game;
+        g_Game = nullptr;
+    }
+    
+    RegisterAllModules();
+    
+    RenderHook::Get()->Initialize();
+    
+    auto* config = Bridge::Get()->GetConfig();
+    auto* fm = FeatureManager::Get();
+
+    while (config && !config->m_Destruct) {
+        SafeUpdateModules(fm, config);
+        Sleep(1);
+    }
+    
+    RenderHook::Get()->Shutdown();
+    
+    if (g_Game) {
+        g_Game->Detach();
+        delete g_Game;
+        g_Game = nullptr;
+    }
+    
+    Bridge::Get()->Shutdown();
+    
+    return 0;
+}
 
 DWORD WINAPI MainThread(LPVOID param) {
     __try {
-        Sleep(3000);
-        
-        if (!Bridge::Get()->Initialize()) {
-            return 1;
-        }
-        
-        RenderHook::Get()->Initialize();
-        
-        auto* config = Bridge::Get()->GetConfig();
-        while (config && !config->m_Destruct) {
-            __try {
-                AutoClicker::Get()->Run();
-                config->Modules.m_AutoClicker = config->AutoClicker.m_Enabled;
-            } __except(EXCEPTION_EXECUTE_HANDLER) {
-            }
-            Sleep(1);
-        }
-        
-        RenderHook::Get()->Shutdown();
-        Bridge::Get()->Shutdown();
+        return MainThreadImpl();
     } __except(EXCEPTION_EXECUTE_HANDLER) {
     }
     

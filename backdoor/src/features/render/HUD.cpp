@@ -1,9 +1,9 @@
 #include "pch.h"
 #include "HUD.h"
 #include "../../core/Bridge.h"
-#include "../../config/ModuleConfig.h"
-#include "../../../vendors/imgui/colors.h"
-#include "../../../vendors/imgui/inter_bold_font.h"
+#include "../../../../shared/common/ModuleConfig.h"
+#include "../../../../deps/imgui/colors.h"
+#include "../../../../deps/imgui/inter_bold_font.h"
 #include <GL/gl.h>
 #include <algorithm>
 #include <cmath>

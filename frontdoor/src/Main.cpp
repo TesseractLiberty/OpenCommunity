@@ -3,7 +3,7 @@
 #include "core/Bridge.h"
 #include "core/Injector.h"
 #include "config/ClientInfo.h"
-#include "config/ModuleConfig.h"
+#include "../../shared/common/ModuleConfig.h"
 
 bool EnableDebugPrivilege() {
     HANDLE token = nullptr;

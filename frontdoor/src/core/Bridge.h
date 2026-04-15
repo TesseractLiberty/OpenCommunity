@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../config/ModuleConfig.h"
+#include "../../../shared/common/ModuleConfig.h"
 
 class Bridge {
 public:
