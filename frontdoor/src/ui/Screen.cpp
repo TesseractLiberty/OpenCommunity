@@ -8,6 +8,13 @@
 #include "../../vendors/imgui/colors.h"
 #include "../../vendors/imgui/inter_bold_font.h"
 #include "../../vendors/imgui/inter_regular_font.h"
+#include "../../vendors/imgui/sword_icon.h"
+#include "../../vendors/imgui/running_icon.h"
+#include "../../vendors/imgui/eye_icon.h"
+#include "../../vendors/imgui/settings_icon.h"
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_STATIC
+#include "../../vendors/imgui/stb_image.h"
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -343,6 +350,70 @@ void Screen::SetupImGuiStyle() {
     colors[ImGuiCol_ModalWindowDimBg] = color::GetBackgroundVec4(0.35f);
 }
 
+bool Screen::LoadTextureFromMemory(const unsigned char* data, unsigned int dataSize, ID3D11ShaderResourceView** outSrv, int* outW, int* outH, bool invertRGB) {
+    int width = 0, height = 0, channels = 0;
+    unsigned char* pixels = stbi_load_from_memory(data, dataSize, &width, &height, &channels, 4);
+    if (!pixels) return false;
+
+    if (invertRGB) {
+        int totalPixels = width * height;
+        for (int p = 0; p < totalPixels; p++) {
+            pixels[p * 4 + 0] = 255 - pixels[p * 4 + 0]; // R
+            pixels[p * 4 + 1] = 255 - pixels[p * 4 + 1]; // G
+            pixels[p * 4 + 2] = 255 - pixels[p * 4 + 2]; // B
+        }
+    }
+
+    D3D11_TEXTURE2D_DESC desc = {};
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    D3D11_SUBRESOURCE_DATA subResource = {};
+    subResource.pSysMem = pixels;
+    subResource.SysMemPitch = width * 4;
+
+    ID3D11Texture2D* texture = nullptr;
+    HRESULT hr = m_Device->CreateTexture2D(&desc, &subResource, &texture);
+    stbi_image_free(pixels);
+    if (FAILED(hr)) return false;
+
+    D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    srvDesc.Texture2D.MipLevels = 1;
+
+    hr = m_Device->CreateShaderResourceView(texture, &srvDesc, outSrv);
+    texture->Release();
+    if (FAILED(hr)) return false;
+
+    if (outW) *outW = width;
+    if (outH) *outH = height;
+    return true;
+}
+
+void Screen::LoadIconTextures() {
+    int w, h;
+    LoadTextureFromMemory(icons::sword_icon_data, icons::sword_icon_data_size, &m_IconCombat, &w, &h, true);
+    LoadTextureFromMemory(icons::running_icon_data, icons::running_icon_data_size, &m_IconMovement, &w, &h, true);
+    LoadTextureFromMemory(icons::eye_icon_data, icons::eye_icon_data_size, &m_IconVisuals, &w, &h, true);
+    LoadTextureFromMemory(icons::settings_icon_data, icons::settings_icon_data_size, &m_IconSettings, &w, &h, true);
+    m_IconW = w;
+    m_IconH = h;
+}
+
+void Screen::ReleaseIconTextures() {
+    if (m_IconCombat) { m_IconCombat->Release(); m_IconCombat = nullptr; }
+    if (m_IconMovement) { m_IconMovement->Release(); m_IconMovement = nullptr; }
+    if (m_IconVisuals) { m_IconVisuals->Release(); m_IconVisuals = nullptr; }
+    if (m_IconSettings) { m_IconSettings->Release(); m_IconSettings = nullptr; }
+}
+
 bool Screen::Initialize() {
     ShowWindow(GetConsoleWindow(), SW_HIDE);
     m_Wc = { sizeof(m_Wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"OpenCommunity", nullptr };
@@ -419,12 +490,16 @@ bool Screen::Initialize() {
     ImGui_ImplWin32_Init(m_Hwnd);
     ImGui_ImplDX11_Init(m_Device, m_Context);
     
+    LoadIconTextures();
+    
     m_Initialized = true;
     return true;
 }
 
 void Screen::Shutdown() {
     if (!m_Initialized) return;
+    
+    ReleaseIconTextures();
     
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
@@ -737,6 +812,7 @@ void Screen::RenderInjecting() {
             ImGui::TextColored(color::GetSecondaryTextVec4(0.92f), "%s", m_InjectionStatus.c_str());
         }
         ImGui::PopFont();
+        }
 
         ImGui::End();
     }
@@ -797,6 +873,12 @@ void Screen::RenderCombatTab() {
     ImGui::Checkbox("aim assist (em breve)", &aimassist);
 }
 
+void Screen::RenderMovementTab() {
+    ImGui::TextColored(ImVec4(0, 0, 0, 1), "movement");
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.4f, 0.4f, 0.4f, 1.0f), "em breve...");
+}
+
 void Screen::RenderVisualsTab() {
     ImGui::TextColored(color::GetStrongTextVec4(), "visuals");
     ImGui::Separator();
@@ -839,32 +921,72 @@ void Screen::RenderMainInterface() {
     
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                              ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-                             ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoBackground;
+                             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground;
     
     if (ImGui::Begin("OpenCommunity", nullptr, flags)) {
         ImDrawList* dl = ImGui::GetWindowDrawList();
         ImVec2 wp = ImGui::GetWindowPos();
-        DrawWindowBase(dl, wp, m_Width, m_Height);
 
-        if (ImGui::BeginMenuBar()) {
-            if (ImGui::MenuItem("combat", nullptr, m_CurrentTab == 0)) m_CurrentTab = 0;
-            if (ImGui::MenuItem("visuals", nullptr, m_CurrentTab == 1)) m_CurrentTab = 1;
-            if (ImGui::MenuItem("settings", nullptr, m_CurrentTab == 2)) m_CurrentTab = 2;
-            ImGui::EndMenuBar();
-        }
-        
-        switch (m_CurrentTab) {
-        case 0: RenderCombatTab(); break;
-        case 1: RenderVisualsTab(); break;
-        case 2: RenderSettingsTab(); break;
-        }
-        
-        if (auto* config = Bridge::Get()->GetConfig()) {
-            if (config->HUD.m_Enabled) {
-                RenderHUDPreview();
+        dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(255, 255, 255, 255));
+
+        const float sidebarW = 52.0f;
+        const float iconSize = 30.0f;
+        const float iconPadY = 20.0f;
+        const float totalIconsH = 4 * iconSize + 3 * iconPadY;
+        const float startY = wp.y + (m_Height - totalIconsH) * 0.5f;
+
+        const float lineX = wp.x + sidebarW;
+        const float lineH = (m_Height - 20.0f) / 1.5f;
+        const float lineMid = wp.y + m_Height * 0.5f;
+        const float lineTop = lineMid - lineH * 0.5f;
+        const float lineBottom = lineMid + lineH * 0.5f;
+        dl->AddLine(ImVec2(lineX, lineTop), ImVec2(lineX, lineBottom), IM_COL32(200, 200, 200, 255), 1.0f);
+
+        ID3D11ShaderResourceView* icons[4] = { m_IconCombat, m_IconMovement, m_IconVisuals, m_IconSettings };
+
+        for (int i = 0; i < 4; i++) {
+            float iconY = startY + i * (iconSize + iconPadY);
+            float iconX = wp.x + (sidebarW - iconSize) * 0.5f;
+
+            ImVec2 iconMin(iconX, iconY);
+            ImVec2 iconMax(iconX + iconSize, iconY + iconSize);
+
+            ImGui::SetCursorScreenPos(iconMin);
+            char btnId[32];
+            snprintf(btnId, sizeof(btnId), "##icon_%d", i);
+            if (ImGui::InvisibleButton(btnId, ImVec2(iconSize, iconSize))) {
+                m_CurrentTab = i;
+            }
+
+            if (icons[i]) {
+                ImU32 tintCol;
+                if (m_CurrentTab == i) {
+                    float hue = fmodf((float)ImGui::GetTime() * 0.5f, 1.0f);
+                    ImVec4 rgb;
+                    ImGui::ColorConvertHSVtoRGB(hue, 0.85f, 1.0f, rgb.x, rgb.y, rgb.z);
+                    tintCol = IM_COL32((int)(rgb.x * 255), (int)(rgb.y * 255), (int)(rgb.z * 255), 255);
+                } else {
+                    tintCol = IM_COL32(0, 0, 0, 255);
+                }
+                dl->AddImage((ImTextureID)icons[i], iconMin, iconMax, ImVec2(0, 0), ImVec2(1, 1), tintCol);
             }
         }
-        
+
+        const float contentX = sidebarW + 16.0f;
+        ImGui::SetCursorScreenPos(ImVec2(wp.x + contentX, wp.y + 16.0f));
+        ImGui::BeginGroup();
+        ImGui::PushClipRect(ImVec2(wp.x + contentX, wp.y), ImVec2(wp.x + m_Width, wp.y + m_Height), true);
+
+        switch (m_CurrentTab) {
+        case 0: RenderCombatTab(); break;
+        case 1: RenderMovementTab(); break;
+        case 2: RenderVisualsTab(); break;
+        case 3: RenderSettingsTab(); break;
+        }
+
+        ImGui::PopClipRect();
+        ImGui::EndGroup();
+
         ImGui::End();
     }
 }

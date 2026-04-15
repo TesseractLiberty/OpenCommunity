@@ -1,5 +1,6 @@
 #pragma once
 
+struct ID3D11ShaderResourceView;
 struct ImFont;
 
 class Screen {
@@ -26,8 +27,13 @@ private:
     void RenderHUDPreview();
 
     void RenderCombatTab();
+    void RenderMovementTab();
     void RenderVisualsTab();
     void RenderSettingsTab();
+
+    bool LoadTextureFromMemory(const unsigned char* data, unsigned int dataSize, ID3D11ShaderResourceView** outSrv, int* outW, int* outH, bool invertRGB = false);
+    void LoadIconTextures();
+    void ReleaseIconTextures();
 
     static LRESULT WINAPI WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
     LRESULT HandleWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -63,6 +69,12 @@ private:
     ImFont* m_FontBodyLarge = nullptr;
     ImFont* m_FontBodyMed = nullptr;
     ImFont* m_FontBoldMed = nullptr;
+
+    ID3D11ShaderResourceView* m_IconCombat = nullptr;
+    ID3D11ShaderResourceView* m_IconMovement = nullptr;
+    ID3D11ShaderResourceView* m_IconVisuals = nullptr;
+    ID3D11ShaderResourceView* m_IconSettings = nullptr;
+    int m_IconW = 0, m_IconH = 0;
 
     void SetupImGuiStyle();
 };
