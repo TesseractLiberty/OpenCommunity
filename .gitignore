@@ -1,0 +1,104 @@
+# Visual Studio
+.vs/
+*.user
+*.userosscache
+*.sln.docstates
+*.suo
+
+# Build outputs
+build/
+Debug/
+Release/
+x64/
+x86/
+ARM/
+ARM64/
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.exp
+*.iobj
+*.ipdb
+
+# Object files
+*.obj
+*.o
+*.obj.enc
+
+# Precompiled Headers
+*.pch
+*.gch
+
+# Static libraries
+*.a
+*.la
+*.lo
+
+# Shared objects
+*.so
+*.so.*
+*.dylib
+
+# Dependency directories
+packages/
+
+# Visual C++ cache files
+ipch/
+*.aps
+*.ncb
+*.opensdf
+*.sdf
+*.cachefile
+*.VC.db
+*.VC.opendb
+
+# Visual Studio profiler
+*.psess
+*.vsp
+*.vspx
+*.sap
+
+# ReSharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# TeamCity
+_TeamCity*
+
+# DotCover
+*.dotCover
+
+# NuGet
+*.nupkg
+*.snupkg
+# NuGet Packages folder is usually better to keep
+# but if you want to exclude it, uncomment:
+# **/packages/*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.tlog
+
+# Backup files
+*.bak
+*~
+
+# IDE specific
+*.idea/
+.vscode/
+*.swp
+*.swo
+
+# Custom
+Blackbone-master/  # Se for dependência externa mantida separadamente
