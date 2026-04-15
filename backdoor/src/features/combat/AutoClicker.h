@@ -47,6 +47,17 @@ public:
         }
     }
 
+    std::string GetTag() const override {
+        int minCps = m_Options.size() >= 1 ? m_Options[0].intValue : 0;
+        int maxCps = m_Options.size() >= 2 ? m_Options[1].intValue : 0;
+        char buf[32];
+        if (minCps == maxCps)
+            snprintf(buf, sizeof(buf), "%dcps", minCps);
+        else
+            snprintf(buf, sizeof(buf), "%d-%dcps", minCps, maxCps);
+        return buf;
+    }
+
 #ifdef _BACKDOOR
     void Tick() override;
     void Run();

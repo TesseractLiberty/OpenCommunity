@@ -1105,6 +1105,13 @@ bool ImGui::ImageButton(ImTextureID user_texture_id, const ImVec2& size, const I
 
 
 
+#ifdef _BACKDOOR
+bool ImGui::Checkbox(const char* label, bool* v)
+{
+    return ImGui::Checkbox2(label, v);
+}
+#endif
+
 static std::map<ImGuiID, float> checkhover_times{};
 bool ImGui::Checkbox2(const char* label, bool* v)
 {
@@ -3239,7 +3246,7 @@ bool ImGui::SliderScalar2(const char* label, ImGuiDataType data_type, void* p_da
 
     ImVec2 label_size = CalcTextSize(label, nullptr, true);
 
-    // Slider maior: 20px mais à esquerda e 70px mais à direita (total +90px)
+    // Slider maior: 20px mais ï¿½ esquerda e 70px mais ï¿½ direita (total +90px)
     ImRect frame_bb(pos + ImVec2(w - 190, 6), pos + ImVec2(w + 68, 10));
     ImRect total_bb(pos, pos + ImVec2(w, label_size.y));
 
@@ -3314,14 +3321,14 @@ bool ImGui::SliderScalar2(const char* label, ImGuiDataType data_type, void* p_da
         actualTime = 0.f;
     }
     
-    // Usar cor do background que você pediu
+    // Usar cor do background que vocï¿½ pediu
     ImU32 background_color = ImGui::GetColorU32(ImVec4(1.f, 1.f, 1.f, 0.25f));
 
     // Desenhar background do slider com a cor customizada
     draw->AddRectFilled(frame_bb.Min, frame_bb.Max, background_color, 5.0f);
-    // Desenhar fill até a posição animada
+    // Desenhar fill atï¿½ a posiï¿½ï¿½o animada
     draw->AddRectFilled(frame_bb.Min, ImVec2(actualPos, frame_bb.Max.y), GetColorU32(ImGuiCol_SliderGrab), 5.0f);
-    // Desenhar "handle" do slider (círculo)
+    // Desenhar "handle" do slider (cï¿½rculo)
     draw->AddCircleFilled(ImVec2(actualPos, frame_bb.GetCenter().y), 6.0f, GetColorU32(ImGuiCol_SliderGrab), 30);
 
     // Renderizar label
@@ -3353,7 +3360,7 @@ bool ImGui::SliderScalar2(const char* label, ImGuiDataType data_type, void* p_da
     char value_buf[64];
     DataTypeFormatString(value_buf, sizeof(value_buf), data_type, p_data, format);
 
-    // Texto do valor um pouco mais à direita (5px a mais que antes)
+    // Texto do valor um pouco mais ï¿½ direita (5px a mais que antes)
     float value_text_x = frame_bb.Max.x - 6.f - CalcTextSize(value_buf, nullptr).x;
     RenderText(ImVec2(value_text_x, frame_bb.Min.y + style.FramePadding.y - 27.f), value_buf);
 
@@ -3414,7 +3421,7 @@ bool ImGui::SliderFloat(const char* label, float* v, float v_min, float v_max, c
 
     // Aplica a cor ao estilo do slider
     ImGui::PushStyleColor(ImGuiCol_SliderGrab, color::GetPurpleVec4()); // Cor roxa para o slider
-    ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, color::GetPurpleVec4()); // Cor roxa quando o slider está ativo
+    ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, color::GetPurpleVec4()); // Cor roxa quando o slider estï¿½ ativo
 
     return SliderScalar(label, ImGuiDataType_Float, v, &v_min, &v_max, format, flags);
 
@@ -3427,7 +3434,7 @@ bool ImGui::SliderFloatABC(const char* label, float* v, float v_min, float v_max
 
     // Aplica a cor ao estilo do slider
     ImGui::PushStyleColor(ImGuiCol_SliderGrab, color::GetPurpleVec4()); // Cor roxa para o slider
-    ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, color::GetPurpleVec4()); // Cor roxa quando o slider está ativo
+    ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, color::GetPurpleVec4()); // Cor roxa quando o slider estï¿½ ativo
 
     return SliderScalar2(label, ImGuiDataType_Float, v, &v_min, &v_max, format, flags);
 
@@ -3468,9 +3475,9 @@ bool ImGui::SliderInt(const char* label, int* v, int v_min, int v_max, const cha
 {
     // Aplica a cor ao estilo do slider usando color::GetPurpleVec4()
     ImGui::PushStyleColor(ImGuiCol_SliderGrab, color::GetPurpleVec4()); // Cor roxa para o slider
-    ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, color::GetPurpleVec4()); // Cor roxa quando o slider está ativo
+    ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, color::GetPurpleVec4()); // Cor roxa quando o slider estï¿½ ativo
 
-    // Chama a função SliderScalar com os parâmetros fornecidos
+    // Chama a funï¿½ï¿½o SliderScalar com os parï¿½metros fornecidos
     bool result = SliderScalar(label, ImGuiDataType_S32, v, &v_min, &v_max, format, flags);
 
     // Restaura a cor anterior
