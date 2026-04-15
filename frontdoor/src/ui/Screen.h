@@ -30,6 +30,7 @@ private:
     void RenderMovementTab();
     void RenderVisualsTab();
     void RenderSettingsTab();
+    void RenderClosing();
 
     bool LoadTextureFromMemory(const unsigned char* data, unsigned int dataSize, ID3D11ShaderResourceView** outSrv, int* outW, int* outH, bool invertRGB = false);
     void LoadIconTextures();
@@ -55,8 +56,9 @@ private:
     int m_CurrentTab = 0;
     float m_IntroStartTime = -1.0f;
 
-    enum class AppState { Intro, InstanceChooser, Injecting, MainInterface };
+    enum class AppState { Intro, InstanceChooser, Injecting, MainInterface, Closing };
     AppState m_State = AppState::Intro;
+    float m_ClosingStartTime = -1.0f;
 
     bool m_InjectionDone = false;
     bool m_InjectionFailed = false;

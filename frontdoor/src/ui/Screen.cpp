@@ -911,7 +911,67 @@ void Screen::RenderSettingsTab() {
     
     ImGui::Spacing();
     if (ImGui::Button("fechar cheat", ImVec2(-1, 30))) {
-        m_Running = false;
+        m_ClosingStartTime = (float)ImGui::GetTime();
+        m_State = AppState::Closing;
+    }
+}
+
+void Screen::RenderClosing() {
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(m_Width, m_Height));
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground;
+
+    if (ImGui::Begin("ClosingAnim", nullptr, flags)) {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImVec2 wp = ImGui::GetWindowPos();
+        float t = (float)ImGui::GetTime() - m_ClosingStartTime;
+
+        const float squeezeDuration = 0.6f;
+        const float textStart = squeezeDuration + 0.2f;
+        const char* message = "Bye! See you again soon!";
+        const int msgLen = 24;
+        const float charsPerSec = 18.0f;
+        const float totalDuration = textStart + (msgLen / charsPerSec) + 1.0f;
+
+        dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(255, 255, 255, 255));
+
+        if (t < squeezeDuration) {
+            float progress = t / squeezeDuration;
+            float ease = 1.0f - (1.0f - progress) * (1.0f - progress);
+            float barW = (m_Width * 0.5f) * ease;
+
+            dl->AddRectFilled(wp, ImVec2(wp.x + barW, wp.y + m_Height), IM_COL32(0, 0, 0, 255));
+            dl->AddRectFilled(ImVec2(wp.x + m_Width - barW, wp.y), ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(0, 0, 0, 255));
+        } else {
+            dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(0, 0, 0, 255));
+
+            if (t >= textStart) {
+                float textT = t - textStart;
+                int charsToShow = (int)(textT * charsPerSec);
+                if (charsToShow > msgLen) charsToShow = msgLen;
+
+                char buf[64] = {};
+                memcpy(buf, message, charsToShow);
+                buf[charsToShow] = '\0';
+
+                ImFont* font = m_FontTitle ? m_FontTitle : ImGui::GetFont();
+                float fontSize = font->FontSize;
+                ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, buf);
+                float tx = wp.x + (m_Width - textSize.x) * 0.5f;
+                float ty = wp.y + (m_Height - textSize.y) * 0.5f;
+
+                dl->AddText(font, fontSize, ImVec2(tx, ty), IM_COL32(255, 255, 255, 255), buf);
+            }
+        }
+
+        if (t >= totalDuration) {
+            m_Running = false;
+        }
+
+        ImGui::End();
     }
 }
 
@@ -1014,6 +1074,9 @@ void Screen::Render() {
         break;
     case AppState::MainInterface:
         RenderMainInterface();
+        break;
+    case AppState::Closing:
+        RenderClosing();
         break;
     }
     
