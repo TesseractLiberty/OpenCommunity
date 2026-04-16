@@ -1160,57 +1160,61 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
         dl->AddText(nf, nameFS, ImVec2(cx + cardPadX + nameOffsetX, cy + (headerH - nameFS) * 0.5f), IM_COL32(0, 0, 0, 255), mod->GetName().c_str());
 
         float rightX = cx + colW - cardPadX;
-
-        std::string bindLabel = mod->GetKeybindName();
         ImFont* bf = fontBody ? fontBody : ImGui::GetFont();
         float bfs = bf->FontSize;
-        ImVec2 bindSize = bf->CalcTextSizeA(bfs, FLT_MAX, 0.0f, bindLabel.c_str());
-        float bindBtnW = bindSize.x + 12.0f;
-        if (bindBtnW < bindW) bindBtnW = bindW;
-        float bindX = rightX - bindBtnW;
-        float bindY = cy + (headerH - 18.0f) * 0.5f;
+        const bool supportsKeybind = mod->SupportsKeybind();
+        float bindX = rightX;
 
-        ImVec2 bindMin(bindX, bindY);
-        ImVec2 bindMax(bindX + bindBtnW, bindY + 18.0f);
+        if (supportsKeybind) {
+            std::string bindLabel = mod->GetKeybindName();
+            ImVec2 bindSize = bf->CalcTextSizeA(bfs, FLT_MAX, 0.0f, bindLabel.c_str());
+            float bindBtnW = bindSize.x + 12.0f;
+            if (bindBtnW < bindW) bindBtnW = bindW;
+            bindX = rightX - bindBtnW;
+            float bindY = cy + (headerH - 18.0f) * 0.5f;
 
-        bool isWaiting = (waitingBindModuleIdx == mi && waitingBindCat == category);
+            ImVec2 bindMin(bindX, bindY);
+            ImVec2 bindMax(bindX + bindBtnW, bindY + 18.0f);
 
-        dl->AddRectFilled(bindMin, bindMax, isWaiting ? IM_COL32(180, 180, 180, 200) : IM_COL32(210, 210, 210, 180), 4.0f);
-        dl->AddRect(bindMin, bindMax, IM_COL32(170, 170, 170, 150), 4.0f, 0, 1.0f);
+            bool isWaiting = (waitingBindModuleIdx == mi && waitingBindCat == category);
 
-        const char* displayText = isWaiting ? "..." : bindLabel.c_str();
-        ImVec2 dts = bf->CalcTextSizeA(bfs, FLT_MAX, 0.0f, displayText);
-        dl->AddText(bf, bfs, ImVec2(bindMin.x + (bindBtnW - dts.x) * 0.5f, bindMin.y + (18.0f - dts.y) * 0.5f),
-                    IM_COL32(60, 60, 60, 255), displayText);
+            dl->AddRectFilled(bindMin, bindMax, isWaiting ? IM_COL32(180, 180, 180, 200) : IM_COL32(210, 210, 210, 180), 4.0f);
+            dl->AddRect(bindMin, bindMax, IM_COL32(170, 170, 170, 150), 4.0f, 0, 1.0f);
 
-        ImGui::SetCursorScreenPos(bindMin);
-        char bindBtnId[64];
-        snprintf(bindBtnId, sizeof(bindBtnId), "##bind_%d_%d", (int)category, mi);
-        if (ImGui::InvisibleButton(bindBtnId, ImVec2(bindBtnW, 18.0f))) {
-            if (isWaiting) {
-                waitingBindModuleIdx = -1;
-            } else {
-                waitingBindModuleIdx = mi;
-                waitingBindCat = category;
-            }
-        }
+            const char* displayText = isWaiting ? "..." : bindLabel.c_str();
+            ImVec2 dts = bf->CalcTextSizeA(bfs, FLT_MAX, 0.0f, displayText);
+            dl->AddText(bf, bfs, ImVec2(bindMin.x + (bindBtnW - dts.x) * 0.5f, bindMin.y + (18.0f - dts.y) * 0.5f),
+                        IM_COL32(60, 60, 60, 255), displayText);
 
-        if (isWaiting) {
-            for (int vk = 1; vk < 256; vk++) {
-                if (vk == VK_LBUTTON || vk == VK_RBUTTON) continue;
-                if (GetAsyncKeyState(vk) & 1) {
-                    if (vk == VK_ESCAPE) {
-                        mod->SetKeybind(0);
-                    } else {
-                        mod->SetKeybind(vk);
-                    }
+            ImGui::SetCursorScreenPos(bindMin);
+            char bindBtnId[64];
+            snprintf(bindBtnId, sizeof(bindBtnId), "##bind_%d_%d", (int)category, mi);
+            if (ImGui::InvisibleButton(bindBtnId, ImVec2(bindBtnW, 18.0f))) {
+                if (isWaiting) {
                     waitingBindModuleIdx = -1;
-                    break;
+                } else {
+                    waitingBindModuleIdx = mi;
+                    waitingBindCat = category;
+                }
+            }
+
+            if (isWaiting) {
+                for (int vk = 1; vk < 256; vk++) {
+                    if (vk == VK_LBUTTON || vk == VK_RBUTTON) continue;
+                    if (GetAsyncKeyState(vk) & 1) {
+                        if (vk == VK_ESCAPE) {
+                            mod->SetKeybind(0);
+                        } else {
+                            mod->SetKeybind(vk);
+                        }
+                        waitingBindModuleIdx = -1;
+                        break;
+                    }
                 }
             }
         }
 
-        float toggleX = bindX - toggleSize - 10.0f;
+        float toggleX = supportsKeybind ? (bindX - toggleSize - 10.0f) : (rightX - toggleSize);
         float toggleY = cy + (headerH - toggleSize) * 0.5f;
         ImVec2 toggleMin(toggleX, toggleY);
         ImVec2 toggleMax(toggleX + toggleSize, toggleY + toggleSize);

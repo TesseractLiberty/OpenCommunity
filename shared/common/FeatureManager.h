@@ -93,6 +93,7 @@ public:
 
     int GetKeybind() const { return m_Keybind; }
     void SetKeybind(int key) { m_Keybind = key; }
+    virtual bool SupportsKeybind() const { return true; }
     std::string GetKeybindName() const {
         if (m_Keybind == 0) return "...";
         char name[32] = {};
@@ -171,6 +172,7 @@ public:
     void ProcessKeybinds() {
         for (auto& [cat, mods] : m_Modules) {
             for (auto& mod : mods) {
+                if (!mod->SupportsKeybind()) continue;
                 int vk = mod->GetKeybind();
                 if (vk == 0) continue;
                 if (GetAsyncKeyState(vk) & 1) {

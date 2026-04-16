@@ -111,6 +111,8 @@
     <ClCompile Include="src\features\combat\AutoClicker.cpp" />
     <ClCompile Include="src\features\combat\ArmorFilter.cpp" />
     <ClCompile Include="src\features\combat\AutoGapple.cpp" />
+    <ClCompile Include="src\features\combat\NoHitDelay.cpp" />
+    <ClCompile Include="src\features\movement\NoJumpDelay.cpp" />
     <ClCompile Include="src\features\visuals\DamageIndicator.cpp" />
     <ClCompile Include="src\game\classes\Container.cpp" />
     <ClCompile Include="src\game\classes\GuiScreen.cpp" />
@@ -142,6 +144,8 @@
     <ClInclude Include="src\features\combat\AutoClicker.h" />
     <ClInclude Include="src\features\combat\ArmorFilter.h" />
     <ClInclude Include="src\features\combat\AutoGapple.h" />
+    <ClInclude Include="src\features\combat\NoHitDelay.h" />
+    <ClInclude Include="src\features\movement\NoJumpDelay.h" />
     <ClInclude Include="src\features\visuals\DamageIndicator.h" />
     <ClInclude Include="src\game\classes\Container.h" />
     <ClInclude Include="src\game\classes\GuiScreen.h" />

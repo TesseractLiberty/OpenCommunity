@@ -37,6 +37,14 @@ struct ModuleConfig {
 
     struct {
         bool m_Enabled = false;
+    } NoHitDelay;
+
+    struct {
+        bool m_Enabled = false;
+    } NoJumpDelay;
+
+    struct {
+        bool m_Enabled = false;
         float m_Scale = 1.0f;
         float m_X = 0.5f;
         float m_Y = 0.5f;
@@ -46,6 +54,8 @@ struct ModuleConfig {
         bool m_AutoClicker = false;
         bool m_ArmorFilter = false;
         bool m_AutoGapple = false;
+        bool m_NoHitDelay = false;
+        bool m_NoJumpDelay = false;
         bool m_DamageIndicator = false;
         bool m_RightClicker = false;
         bool m_WTap = false;

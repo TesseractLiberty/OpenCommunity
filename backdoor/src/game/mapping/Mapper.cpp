@@ -60,6 +60,7 @@ void Mapper::Initialize(const GameVersions version)
 			{"getHeldItem", "bA"},
 			{"isUsingItem", "bS"},
 			{"getActivePotionEffect", "b"},
+			{"jumpTicks", "bn"},
 			{"rotationPitch", "z"},
 			{"rotationYaw", "y"},
 			{"prevRotationYaw", "A"},
@@ -163,6 +164,7 @@ void Mapper::Initialize(const GameVersions version)
 			{"getHeldItem", "getHeldItem"},
 			{"isUsingItem", "isUsingItem"},
 			{"getActivePotionEffect", "getActivePotionEffect"},
+			{"jumpTicks", "jumpTicks"},
 			{"rotationPitch", "rotationPitch"},
 			{"rotationYaw", "rotationYaw"},
 			{"prevRotationYaw", "prevRotationYaw"},
@@ -210,6 +212,7 @@ void Mapper::Initialize(const GameVersions version)
 			{"potionTypes", "potionTypes"},
 			{"duration", "duration"},
 			{"getDuration", "getDuration"},
+			{"setJumping", "setJumping"},
 			{"width", "width"},
 			{"height", "height"}
 		};

@@ -118,3 +118,85 @@ jobject Minecraft::GetKeyBindUseItem(JNIEnv* env) {
     env->DeleteLocalRef(gameSettings);
     return value;
 }
+
+void Minecraft::SetLeftClickCounter(int value, JNIEnv* env) {
+    if (!env) {
+        return;
+    }
+
+    Class* minecraftClass = GetMinecraftClass();
+    if (!minecraftClass) {
+        return;
+    }
+
+    const char* fieldNames[] = {
+        Mapper::Get("leftClickCounter").c_str(),
+        "ag",
+        "field_71429_W"
+    };
+
+    Field* field = nullptr;
+    for (const char* fieldName : fieldNames) {
+        if (!fieldName || !fieldName[0]) {
+            continue;
+        }
+
+        field = minecraftClass->GetField(env, fieldName, "I");
+        if (field) {
+            break;
+        }
+    }
+
+    if (!field) {
+        return;
+    }
+
+    jobject minecraft = GetTheMinecraft(env);
+    if (!minecraft) {
+        return;
+    }
+
+    field->SetIntField(env, minecraft, value);
+    env->DeleteLocalRef(minecraft);
+}
+
+void Minecraft::SetRightClickCounter(int value, JNIEnv* env) {
+    if (!env) {
+        return;
+    }
+
+    Class* minecraftClass = GetMinecraftClass();
+    if (!minecraftClass) {
+        return;
+    }
+
+    const char* fieldNames[] = {
+        Mapper::Get("rightClickDelayTimer").c_str(),
+        "ap",
+        "field_71467_ac"
+    };
+
+    Field* field = nullptr;
+    for (const char* fieldName : fieldNames) {
+        if (!fieldName || !fieldName[0]) {
+            continue;
+        }
+
+        field = minecraftClass->GetField(env, fieldName, "I");
+        if (field) {
+            break;
+        }
+    }
+
+    if (!field) {
+        return;
+    }
+
+    jobject minecraft = GetTheMinecraft(env);
+    if (!minecraft) {
+        return;
+    }
+
+    field->SetIntField(env, minecraft, value);
+    env->DeleteLocalRef(minecraft);
+}

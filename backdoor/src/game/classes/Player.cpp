@@ -266,3 +266,51 @@ jobject Player::GetActivePotionEffect(int potionId, JNIEnv* env) {
     env->DeleteLocalRef(potionObject);
     return effect;
 }
+
+void Player::SetJumpTicks(int ticks, JNIEnv* env) {
+    if (!env || !this) {
+        return;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return;
+    }
+
+    const char* fieldNames[] = {
+        Mapper::Get("jumpTicks").c_str(),
+        "bn",
+        "field_70773_bE"
+    };
+
+    for (const char* fieldName : fieldNames) {
+        if (!fieldName || !fieldName[0]) {
+            continue;
+        }
+
+        Field* jumpTicksField = playerClass->GetField(env, fieldName, "I");
+        if (jumpTicksField) {
+            jumpTicksField->SetIntField(env, this, ticks);
+            break;
+        }
+    }
+
+    const char* methodNames[] = {
+        Mapper::Get("setJumping").c_str(),
+        "setJumping"
+    };
+
+    for (const char* methodName : methodNames) {
+        if (!methodName || !methodName[0]) {
+            continue;
+        }
+
+        Method* setJumpingMethod = playerClass->GetMethod(env, methodName, "(Z)V");
+        if (setJumpingMethod) {
+            setJumpingMethod->CallVoidMethod(env, this, false, false);
+            break;
+        }
+    }
+
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+}
