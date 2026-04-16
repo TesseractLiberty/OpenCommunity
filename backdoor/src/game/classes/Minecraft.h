@@ -6,6 +6,10 @@ class Minecraft {
 public:
     static jobject GetTheMinecraft(JNIEnv* env);
     static jobject GetThePlayer(JNIEnv* env);
+    static jobject GetTheWorld(JNIEnv* env);
     static jobject GetCurrentScreen(JNIEnv* env);
     static jobject GetPlayerController(JNIEnv* env);
+    static jobject GetObjectMouseOver(JNIEnv* env);
+    static jobject GetRenderItem(JNIEnv* env);
+    static jobject GetKeyBindUseItem(JNIEnv* env);
 };

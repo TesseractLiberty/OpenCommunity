@@ -2,10 +2,12 @@
 #include "RenderHook.h"
 #include "../features/render/HUD.h"
 #include "Bridge.h"
+#include "../../../shared/common/FeatureManager.h"
 
 #include "../../../deps/minhook/MinHook.h"
 #include "../../../deps/imgui/imgui.h"
 #include "../../../deps/imgui/imgui_impl_opengl2.hpp"
+#include "../../../deps/imgui/fonts.hpp"
 #include "../../../deps/imgui/play_bold_font.h"
 #include "../../../deps/imgui/play_regular_font.h"
 
@@ -44,6 +46,21 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
             16.0f,
             &fontCfg
         );
+
+        if (g_overlayRegularFont) {
+            static const ImWchar iconRanges[] = { static_cast<ImWchar>(ICON_MIN_MD), static_cast<ImWchar>(ICON_MAX_16_MD), 0 };
+            ImFontConfig iconCfg;
+            iconCfg.MergeMode = true;
+            iconCfg.PixelSnapH = true;
+            io.Fonts->AddFontFromMemoryCompressedTTF(
+                fonts::materialicons_compressed_data,
+                fonts::materialicons_compressed_size,
+                16.0f,
+                &iconCfg,
+                iconRanges
+            );
+        }
+
         fontCfg.FontDataOwnedByAtlas = false;
         g_overlayBoldFont = io.Fonts->AddFontFromMemoryTTF(
             const_cast<unsigned char*>(fonts::play_bold_data),
@@ -90,6 +107,7 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
         ImGui::SetWindowSize(ImVec2((float)viewport[2], (float)viewport[3]), ImGuiCond_Always);
 
         HUD::Get()->Render(config, (float)viewport[2], (float)viewport[3]);
+        FeatureManager::Get()->RenderOverlayAll(ImGui::GetWindowDrawList(), (float)viewport[2], (float)viewport[3]);
     }
     ImGui::End();
     ImGui::PopStyleVar(2);

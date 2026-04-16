@@ -7,6 +7,8 @@
 #include <unordered_map>
 #include <windows.h>
 
+struct ImDrawList;
+
 #define MODULE_INFO(className, moduleName, moduleDescription, moduleCategory) \
     className() : Module(moduleName, moduleDescription, moduleCategory)
 
@@ -108,6 +110,11 @@ public:
 
     virtual bool IsSynchronous() const { return false; }
     virtual void TickSynchronous(void* env) { (void)env; }
+    virtual void RenderOverlay(ImDrawList* drawList, float screenW, float screenH) {
+        (void)drawList;
+        (void)screenW;
+        (void)screenH;
+    }
 
     // Tag displayed in the ArrayList HUD (e.g. "15-25cps")
     virtual std::string GetTag() const { return ""; }
@@ -205,6 +212,14 @@ public:
             for (auto& mod : mods) {
                 if (mod->IsSynchronous())
                     mod->TickSynchronous(env);
+            }
+        }
+    }
+
+    void RenderOverlayAll(ImDrawList* drawList, float screenW, float screenH) {
+        for (auto& [cat, mods] : m_Modules) {
+            for (auto& mod : mods) {
+                mod->RenderOverlay(drawList, screenW, screenH);
             }
         }
     }

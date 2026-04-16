@@ -31,8 +31,22 @@ struct ModuleConfig {
     } ArmorFilter;
 
     struct {
+        bool m_Enabled = false;
+        int m_DelaySeconds = 5;
+    } AutoGapple;
+
+    struct {
+        bool m_Enabled = false;
+        float m_Scale = 1.0f;
+        float m_X = 0.5f;
+        float m_Y = 0.5f;
+    } DamageIndicator;
+
+    struct {
         bool m_AutoClicker = false;
         bool m_ArmorFilter = false;
+        bool m_AutoGapple = false;
+        bool m_DamageIndicator = false;
         bool m_RightClicker = false;
         bool m_WTap = false;
         bool m_AimAssist = false;

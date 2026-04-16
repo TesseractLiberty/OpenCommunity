@@ -41,17 +41,7 @@ namespace {
     }
 
     JNIEnv* GetCurrentEnv() {
-        if (!g_Game || !g_Game->GetJVM()) {
-            return nullptr;
-        }
-
-        JNIEnv* env = nullptr;
-        jint status = g_Game->GetJVM()->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
-        if (status == JNI_EDETACHED) {
-            status = g_Game->GetJVM()->AttachCurrentThreadAsDaemon(reinterpret_cast<void**>(&env), nullptr);
-        }
-
-        return status == JNI_OK ? env : nullptr;
+        return g_Game ? g_Game->GetCurrentEnv() : nullptr;
     }
 
     std::string GetConfigNick(const ModuleConfig* config) {

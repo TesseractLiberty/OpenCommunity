@@ -3,12 +3,35 @@
 #include "Field.h"
 #include "Method.h"
 
+#include <algorithm>
+
 typedef jint(JNICALL* JNI_GetCreatedJavaVMs_t)(JavaVM**, jsize, jsize*);
 
 GameInstance* g_Game = nullptr;
 
+namespace {
+    std::string NormalizeClassName(std::string className) {
+        std::replace(className.begin(), className.end(), '/', '.');
+        return className;
+    }
+}
+
 GameInstance::GameInstance()
 {
+}
+
+JNIEnv* GameInstance::GetCurrentEnv() const
+{
+	if (!m_Jvm)
+		return nullptr;
+
+	JNIEnv* env = nullptr;
+	jint result = m_Jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+	if (result == JNI_EDETACHED) {
+		result = m_Jvm->AttachCurrentThreadAsDaemon(reinterpret_cast<void**>(&env), nullptr);
+	}
+
+	return result == JNI_OK ? env : nullptr;
 }
 
 bool GameInstance::Attach()
@@ -35,52 +58,75 @@ bool GameInstance::Attach()
 		return false;
 	}
 
+	if (m_Jvm->GetEnv(reinterpret_cast<void**>(&m_Jvmti), JVMTI_VERSION_1_1) != JNI_OK) {
+		m_Jvmti = nullptr;
+	}
+
 	return true;
 }
 
 void GameInstance::Detach()
 {
+	JNIEnv* env = GetCurrentEnv();
+	if (env) {
+		std::lock_guard<std::mutex> lock(m_CacheMutex);
+		for (auto& [name, klass] : m_CachedClass) {
+			if (klass) {
+				env->DeleteGlobalRef(reinterpret_cast<jobject>(klass));
+			}
+		}
+		m_CachedClass.clear();
+	}
+
 	if (m_Jvm) {
 		m_Jvm->DetachCurrentThread();
 		m_Env = nullptr;
+		m_Jvmti = nullptr;
 	}
 }
 
 bool GameInstance::PopulateClassCache()
 {
-	if (!m_Env)
+	if (!m_Env || !m_Jvmti)
 		return false;
 
-	jclass classClass = m_Env->FindClass("java/lang/Class");
-	if (!classClass || m_Env->ExceptionCheck()) {
-		if (m_Env->ExceptionCheck()) m_Env->ExceptionClear();
-		return false;
-	}
-
-	jmethodID getClassLoader = m_Env->GetMethodID(classClass, "getClassLoader", "()Ljava/lang/ClassLoader;");
-	jmethodID getName = m_Env->GetMethodID(classClass, "getName", "()Ljava/lang/String;");
-	if (m_Env->ExceptionCheck()) m_Env->ExceptionClear();
-
-	jclass threadClass = m_Env->FindClass("java/lang/Thread");
-	if (!threadClass || m_Env->ExceptionCheck()) {
-		if (m_Env->ExceptionCheck()) m_Env->ExceptionClear();
-		m_Env->DeleteLocalRef(classClass);
+	jclass* classes = nullptr;
+	jint classCount = 0;
+	if (m_Jvmti->GetLoadedClasses(&classCount, &classes) != JVMTI_ERROR_NONE || !classes || classCount <= 0) {
 		return false;
 	}
 
-	jmethodID getAllStackTraces = m_Env->GetStaticMethodID(threadClass, "getAllStackTraces", "()Ljava/util/Map;");
-	if (m_Env->ExceptionCheck()) m_Env->ExceptionClear();
+	for (int index = 0; index < classCount; ++index) {
+		char* signature = nullptr;
+		if (m_Jvmti->GetClassSignature(classes[index], &signature, nullptr) != JVMTI_ERROR_NONE || !signature) {
+			if (classes[index]) {
+				m_Env->DeleteLocalRef(classes[index]);
+			}
+			continue;
+		}
 
+		std::string className(signature);
+		m_Jvmti->Deallocate(reinterpret_cast<unsigned char*>(signature));
 
-	jclass clClass = m_Env->FindClass("java/lang/ClassLoader");
-	if (!clClass || m_Env->ExceptionCheck()) {
-		if (m_Env->ExceptionCheck()) m_Env->ExceptionClear();
+		if (className.length() > 2 && className.front() == 'L' && className.back() == ';') {
+			className = className.substr(1, className.length() - 2);
+			className = NormalizeClassName(className);
+
+			std::lock_guard<std::mutex> lock(m_CacheMutex);
+			if (!m_CachedClass.contains(className)) {
+				auto* globalClass = reinterpret_cast<Class*>(m_Env->NewGlobalRef(classes[index]));
+				if (globalClass) {
+					m_CachedClass.emplace(className, globalClass);
+				}
+			}
+		}
+
+		if (classes[index]) {
+			m_Env->DeleteLocalRef(classes[index]);
+		}
 	}
 
-	m_Env->DeleteLocalRef(classClass);
-	m_Env->DeleteLocalRef(threadClass);
-	if (clClass) m_Env->DeleteLocalRef(clClass);
-
+	m_Jvmti->Deallocate(reinterpret_cast<unsigned char*>(classes));
 	return true;
 }
 
@@ -125,91 +171,86 @@ GameVersions GameInstance::DetectGameVersion()
 	if (title.find("Lunar Client") != std::string::npos)
 		return is1_7 ? LUNAR_1_7_10 : LUNAR_1_8;
 
-	// Check for LaunchWrapper (Forge)
-	jclass launchWrapper = m_Env->FindClass("net/minecraft/launchwrapper/LaunchClassLoader");
-	if (m_Env->ExceptionCheck()) m_Env->ExceptionClear();
-	jclass launchClazz = m_Env->FindClass("net/minecraft/launchwrapper/Launch");
-	if (m_Env->ExceptionCheck()) m_Env->ExceptionClear();
+	Class* launchWrapper = FindClass("net.minecraft.launchwrapper.LaunchClassLoader");
+	Class* launchClass = FindClass("net.minecraft.launchwrapper.Launch");
 
 	bool hasLaunch = false;
-	if (launchClazz && launchWrapper) {
-		jfieldID classLoaderField = m_Env->GetStaticFieldID(launchClazz, "classLoader", "Lnet/minecraft/launchwrapper/LaunchClassLoader;");
-		if (m_Env->ExceptionCheck()) m_Env->ExceptionClear();
-		if (classLoaderField) hasLaunch = true;
+	if (launchClass && launchWrapper) {
+		Field* classLoaderField = launchClass->GetField(m_Env, "classLoader", "Lnet/minecraft/launchwrapper/LaunchClassLoader;", true);
+		if (classLoaderField) {
+			hasLaunch = true;
+		}
 	}
 
 	GameVersions version = UNKNOWN;
 	if (hasLaunch && !vanillaMappings)
 	{
 		version = is1_7 ? FORGE_1_7_10 : FORGE_1_8;
-		jclass mcClass = m_Env->FindClass("net/minecraft/client/Minecraft");
-		if (m_Env->ExceptionCheck()) m_Env->ExceptionClear();
-		if (!mcClass) {
+		if (!FindClass("net.minecraft.client.Minecraft")) {
 			version = is1_7 ? CASUAL_1_7_10 : CASUAL_1_8;
 		}
-		if (mcClass) m_Env->DeleteLocalRef(mcClass);
 	}
 	else {
 		version = is1_7 ? CASUAL_1_7_10 : CASUAL_1_8;
 	}
 
-	// Check for Feather
-	jclass featherClass = m_Env->FindClass("net/digitalingot/featheropt/FeatherCoreMod");
-	if (m_Env->ExceptionCheck()) m_Env->ExceptionClear();
-	if (featherClass) {
+	if (FindClass("net.digitalingot.featheropt.FeatherCoreMod")) {
 		version = FEATHER_1_8;
-		m_Env->DeleteLocalRef(featherClass);
 	}
-
-	if (launchWrapper) m_Env->DeleteLocalRef(launchWrapper);
-	if (launchClazz) m_Env->DeleteLocalRef(launchClazz);
 
 	return version;
 }
 
 Class* GameInstance::FindClass(const std::string& className) const
 {
-	if (!m_Env)
-		return nullptr;
+	const std::string normalizedClassName = NormalizeClassName(className);
 
 	{
 		std::lock_guard<std::mutex> lock(m_CacheMutex);
-		auto it = m_CachedClass.find(className);
+		auto it = m_CachedClass.find(normalizedClassName);
 		if (it != m_CachedClass.end())
 			return it->second;
 	}
 
-	std::string jniName = className;
-	for (auto& c : jniName) {
-		if (c == '.') c = '/';
-	}
+	JNIEnv* env = GetCurrentEnv();
+	if (!env)
+		return nullptr;
 
-	jclass localClass = m_Env->FindClass(jniName.c_str());
-	if (m_Env->ExceptionCheck()) {
-		m_Env->ExceptionClear();
+	std::string jniName = normalizedClassName;
+	std::replace(jniName.begin(), jniName.end(), '.', '/');
+
+	jclass localClass = env->FindClass(jniName.c_str());
+	if (env->ExceptionCheck()) {
+		env->ExceptionClear();
 		return nullptr;
 	}
 	if (!localClass)
 		return nullptr;
 
-	auto* cls = (Class*)m_Env->NewGlobalRef(localClass);
-	m_Env->DeleteLocalRef(localClass);
+	auto* klass = reinterpret_cast<Class*>(env->NewGlobalRef(localClass));
+	env->DeleteLocalRef(localClass);
+	if (!klass) {
+		return nullptr;
+	}
 
 	{
 		std::lock_guard<std::mutex> lock(m_CacheMutex);
-		const_cast<GameInstance*>(this)->m_CachedClass[className] = cls;
+		const_cast<GameInstance*>(this)->m_CachedClass[normalizedClassName] = klass;
 	}
 
-	return cls;
+	return klass;
 }
 
 bool GameInstance::InitializeGame()
 {
+	PopulateClassCache();
+
 	m_GameVersion = DetectGameVersion();
 	if (m_GameVersion == UNKNOWN)
 		return false;
 
 	Mapper::Initialize(m_GameVersion);
+	PopulateClassCache();
 
 	auto mcClassName = Mapper::Get("net/minecraft/client/Minecraft");
 	if (mcClassName.empty())

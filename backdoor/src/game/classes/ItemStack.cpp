@@ -2,6 +2,7 @@
 #include "ItemStack.h"
 
 #include "../jni/Class.h"
+#include "../jni/Field.h"
 #include "../jni/GameInstance.h"
 #include "../jni/Method.h"
 #include "../mapping/Mapper.h"
@@ -38,6 +39,39 @@ bool ItemStack::IsArmor(JNIEnv* env) {
     const bool isArmor = armorClass && env->IsInstanceOf(item, reinterpret_cast<jclass>(armorClass));
     env->DeleteLocalRef(item);
     return isArmor;
+}
+
+bool ItemStack::IsAppleGold(JNIEnv* env) {
+    if (!env || !this || !g_Game || !g_Game->IsInitialized()) {
+        return false;
+    }
+
+    jobject item = GetItem(env);
+    if (!item) {
+        return false;
+    }
+
+    const std::string className = Mapper::Get("net/minecraft/item/ItemAppleGold");
+    Class* appleClass = className.empty() ? nullptr : g_Game->FindClass(className);
+    const bool isGoldenApple = appleClass && env->IsInstanceOf(item, reinterpret_cast<jclass>(appleClass));
+    env->DeleteLocalRef(item);
+    return isGoldenApple;
+}
+
+int ItemStack::GetMetadata(JNIEnv* env) {
+    if (!env || !this || !g_Game || !g_Game->IsInitialized()) {
+        return 0;
+    }
+
+    const std::string className = Mapper::Get("net/minecraft/item/ItemStack");
+    const std::string fieldName = Mapper::Get("metadata");
+    if (className.empty() || fieldName.empty()) {
+        return GetItemDamage(env);
+    }
+
+    Class* itemStackClass = g_Game->FindClass(className);
+    Field* field = itemStackClass ? itemStackClass->GetField(env, fieldName.c_str(), "I") : nullptr;
+    return field ? field->GetIntField(env, this) : GetItemDamage(env);
 }
 
 int ItemStack::GetMaxDamage(JNIEnv* env) {

@@ -4,6 +4,7 @@
 #include "../mapping/Mapper.h"
 
 #include <jni.h>
+#include <jvmti.h>
 #include <unordered_map>
 #include <mutex>
 #include <string>
@@ -19,6 +20,7 @@ public:
 	auto GetGameVersion() const { return m_GameVersion; }
 	bool IsInitialized() const { return m_Initialized; }
 
+	JNIEnv* GetCurrentEnv() const;
 	bool Attach();
 	void Detach();
 	bool InitializeGame();
@@ -36,6 +38,7 @@ private:
 
 	JavaVM* m_Jvm = nullptr;
 	JNIEnv* m_Env = nullptr;
+	jvmtiEnv* m_Jvmti = nullptr;
 };
 
 extern GameInstance* g_Game;

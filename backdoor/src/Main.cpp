@@ -14,6 +14,26 @@ static void SafeUpdateModules(FeatureManager* fm, void* config) {
     }
 }
 
+static void SafeTickSynchronousFallback(FeatureManager* fm) {
+    __try {
+        if (!g_Game || !g_Game->IsInitialized()) {
+            return;
+        }
+
+        auto* env = g_Game->GetCurrentEnv();
+        if (!env || env->PushLocalFrame(256) != 0) {
+            return;
+        }
+
+        fm->TickSynchronousAll(env);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        env->PopLocalFrame(nullptr);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
 static DWORD MainThreadImpl() {
     Sleep(3000);
     
@@ -44,6 +64,9 @@ static DWORD MainThreadImpl() {
 
     while (config && !config->m_Destruct) {
         SafeUpdateModules(fm, config);
+        if (GameThreadHook::ShouldRunFallback()) {
+            SafeTickSynchronousFallback(fm);
+        }
         Sleep(1);
     }
     
