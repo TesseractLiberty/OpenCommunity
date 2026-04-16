@@ -2,8 +2,10 @@
 #include "features/render/HUD.h"
 #include "core/Bridge.h"
 #include "core/RenderHook.h"
+#include "core/GameThreadHook.h"
 #include "game/jni/GameInstance.h"
 #include "../../shared/common/RegisterModules.h"
+#include "../../deps/minhook/MinHook.h"
 
 static void SafeUpdateModules(FeatureManager* fm, void* config) {
     __try {
@@ -33,6 +35,8 @@ static DWORD MainThreadImpl() {
     
     RegisterAllModules();
     
+    MH_Initialize();
+    GameThreadHook::Initialize();
     RenderHook::Get()->Initialize();
     
     auto* config = Bridge::Get()->GetConfig();
@@ -44,6 +48,8 @@ static DWORD MainThreadImpl() {
     }
     
     RenderHook::Get()->Shutdown();
+    GameThreadHook::Shutdown();
+    MH_Uninitialize();
     
     if (g_Game) {
         g_Game->Detach();

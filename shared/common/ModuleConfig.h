@@ -25,7 +25,14 @@ struct ModuleConfig {
     } AutoClicker;
 
     struct {
+        bool m_Enabled = false;
+        int m_Delay = 40;
+        int m_Percentage = 50;
+    } ArmorFilter;
+
+    struct {
         bool m_AutoClicker = false;
+        bool m_ArmorFilter = false;
         bool m_RightClicker = false;
         bool m_WTap = false;
         bool m_AimAssist = false;

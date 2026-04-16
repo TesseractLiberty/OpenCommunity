@@ -103,18 +103,15 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
 bool RenderHook::Initialize() {
     if (m_Installed) return true;
 
-    if (MH_Initialize() != MH_OK) {
+    void* pSwapBuffers = (void*)GetProcAddress(GetModuleHandleW(L"opengl32.dll"), "wglSwapBuffers");
+    if (!pSwapBuffers) return false;
+
+    if (MH_CreateHook(pSwapBuffers, (LPVOID)wglSwapBuffersHook, (void**)&g_origWglSwapBuffers) != MH_OK) {
         return false;
     }
 
-    if (MH_CreateHookApi(L"opengl32.dll", "wglSwapBuffers",
-            (LPVOID)wglSwapBuffersHook, (void**)&g_origWglSwapBuffers) != MH_OK) {
-        MH_Uninitialize();
-        return false;
-    }
-
-    if (MH_EnableHook(MH_ALL_HOOKS) != MH_OK) {
-        MH_Uninitialize();
+    if (MH_EnableHook(pSwapBuffers) != MH_OK) {
+        MH_RemoveHook(pSwapBuffers);
         return false;
     }
 
@@ -126,7 +123,6 @@ void RenderHook::Shutdown() {
     if (!m_Installed) return;
 
     MH_DisableHook(MH_ALL_HOOKS);
-    MH_Uninitialize();
 
     if (g_fontsInitialized) {
         HUD::Get()->SetFonts(nullptr, nullptr);

@@ -106,6 +106,9 @@ public:
     virtual void SyncFromConfig(void* configPtr) { (void)configPtr; }
     virtual void Tick() {}
 
+    virtual bool IsSynchronous() const { return false; }
+    virtual void TickSynchronous(void* env) { (void)env; }
+
     // Tag displayed in the ArrayList HUD (e.g. "15-25cps")
     virtual std::string GetTag() const { return ""; }
 
@@ -191,7 +194,17 @@ public:
     void TickAll() {
         for (auto& [cat, mods] : m_Modules) {
             for (auto& mod : mods) {
-                mod->Tick();
+                if (!mod->IsSynchronous())
+                    mod->Tick();
+            }
+        }
+    }
+
+    void TickSynchronousAll(void* env) {
+        for (auto& [cat, mods] : m_Modules) {
+            for (auto& mod : mods) {
+                if (mod->IsSynchronous())
+                    mod->TickSynchronous(env);
             }
         }
     }
