@@ -3,7 +3,8 @@
 enum class ArrayListMode {
     Default = 0,
     Rise = 1,
-    Tesseract = 2
+    Tesseract = 2,
+    VapeV4 = 3
 };
 
 struct ModuleConfig {

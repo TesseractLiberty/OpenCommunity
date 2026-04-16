@@ -28,6 +28,7 @@ void NoHitDelay::Run(JNIEnv* env) {
     jobject playerObject = Minecraft::GetThePlayer(env);
     if (playerObject) {
         Minecraft::SetLeftClickCounter(0, env);
+        MarkInUse(100);
         env->DeleteLocalRef(playerObject);
     }
 

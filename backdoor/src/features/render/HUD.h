@@ -14,7 +14,7 @@ public:
     ~HUD() = default;
 
     void Render(ModuleConfig* config, float screenW, float screenH);
-    void SetFonts(ImFont* regular, ImFont* bold);
+    void SetFonts(ImFont* regular, ImFont* bold, ImFont* vape = nullptr);
 
     static HUD* Get() {
         static HUD instance;
@@ -26,11 +26,13 @@ private:
         std::string name;
         std::string tag;
         float width;
+        bool inUse = false;
     };
 
     std::vector<ModuleEntry> GetActiveModules(ImFont* nameFont, float nameFontSize, ImFont* tagFont, float tagFontSize);
     void GetRainbowRGB(int offset, float& r, float& g, float& b);
     void GetRiseRGB(int offset, float& r, float& g, float& b);
+    void GetVapeV4RGB(int offset, float& r, float& g, float& b);
     void GetTesseractRGB(int offset, float& r, float& g, float& b);
     void GetTesseractHeaderRGB(int offset, float& r, float& g, float& b);
 
@@ -41,4 +43,5 @@ private:
     std::chrono::steady_clock::time_point m_LastFrameTime = std::chrono::steady_clock::now();
     ImFont* m_RegularFont = nullptr;
     ImFont* m_BoldFont = nullptr;
+    ImFont* m_VapeFont = nullptr;
 };

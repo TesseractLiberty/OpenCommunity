@@ -87,6 +87,7 @@ void DamageIndicator::RenderOverlay(ImDrawList* drawList, float screenW, float s
     }
 
     const float scale = GetScale();
+    MarkInUse(100);
     const float width = 250.0f * scale;
     const float height = 92.0f * scale;
     const ImVec2 origin(

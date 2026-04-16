@@ -190,6 +190,7 @@ void ArmorSwap::Run(JNIEnv* env) {
             s_IsWorking = true;
             m_StatusMsg = "Trocando set";
             m_StatusTime = now;
+            MarkInUse(250);
         } else if (needsArmor) {
             if (missingAnyPiece && !hasAnyArmorInInventory) {
                 m_StatusMsg = "Sem set";
@@ -214,6 +215,7 @@ void ArmorSwap::Run(JNIEnv* env) {
 
     switch (m_State) {
     case State::Opening: {
+        MarkInUse(250);
         jobject screenObject = Minecraft::GetCurrentScreen(env);
         auto* gui = reinterpret_cast<GuiScreen*>(screenObject);
 
@@ -242,6 +244,7 @@ void ArmorSwap::Run(JNIEnv* env) {
     }
 
     case State::Processing: {
+        MarkInUse(250);
         jobject screenObject = Minecraft::GetCurrentScreen(env);
         auto* gui = reinterpret_cast<GuiScreen*>(screenObject);
         if (!screenObject || !gui->IsInventory(env)) {
@@ -317,12 +320,14 @@ void ArmorSwap::Run(JNIEnv* env) {
     }
 
     case State::Organizing:
+        MarkInUse(250);
         OrganizeInventory(playerObject, env);
         m_LastActionTime = now;
         m_State = State::Closing;
         break;
 
     case State::Closing: {
+        MarkInUse(250);
         jobject screenObject = Minecraft::GetCurrentScreen(env);
         if (screenObject) {
             auto* gui = reinterpret_cast<GuiScreen*>(screenObject);

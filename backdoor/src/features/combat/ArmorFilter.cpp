@@ -91,6 +91,7 @@ void ArmorFilter::Run(JNIEnv* env) {
                 if (percentage <= durabilityThreshold) {
                     PlayerController::WindowClick(playerObject, windowId, slotId, 1, 4, env);
                     m_LastActionTime = std::chrono::steady_clock::now();
+                    MarkInUse(250);
                     ReleaseLocal(env, stackObject);
                     ReleaseLocal(env, slotObject);
                     break;

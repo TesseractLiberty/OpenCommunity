@@ -172,9 +172,10 @@ namespace {
     }
 }
 
-void HUD::SetFonts(ImFont* regular, ImFont* bold) {
+void HUD::SetFonts(ImFont* regular, ImFont* bold, ImFont* vape) {
     m_RegularFont = regular;
     m_BoldFont = bold;
+    m_VapeFont = vape;
 }
 
 void HUD::GetRainbowRGB(int offset, float& r, float& g, float& b) {
@@ -192,6 +193,19 @@ void HUD::GetRiseRGB(int offset, float& r, float& g, float& b) {
     const float phase = 0.5f + 0.5f * sinf(seconds * 1.35f + offset * 0.5f);
     const float hue = 0.58f - phase * 0.18f;
     ImGui::ColorConvertHSVtoRGB(hue, 0.72f, 0.95f, r, g, b);
+}
+
+void HUD::GetVapeV4RGB(int offset, float& r, float& g, float& b) {
+    const auto now = std::chrono::steady_clock::now();
+    const float seconds = std::chrono::duration<float>(now.time_since_epoch()).count();
+    const float phase = 0.5f + 0.5f * sinf(seconds * 1.55f + offset * 0.45f);
+
+    const ImVec4 pink(1.0f, 0.43f, 0.74f, 1.0f);
+    const ImVec4 softPurple(0.82f, 0.50f, 0.98f, 1.0f);
+
+    r = softPurple.x + (pink.x - softPurple.x) * phase;
+    g = softPurple.y + (pink.y - softPurple.y) * phase;
+    b = softPurple.z + (pink.z - softPurple.z) * phase;
 }
 
 void HUD::GetTesseractRGB(int offset, float& r, float& g, float& b) {
@@ -238,7 +252,7 @@ std::vector<HUD::ModuleEntry> HUD::GetActiveModules(ImFont* nameFont, float name
             width += spaceWidth + CalcTextSize(resolvedTagFont, resolvedTagSize, tag).x;
         }
 
-        modules.push_back({ displayName, tag, width });
+        modules.push_back({ displayName, tag, width, mod->IsInUse() });
     }
 
     std::sort(modules.begin(), modules.end(), [](const ModuleEntry& a, const ModuleEntry& b) {
@@ -262,27 +276,33 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
 
     ImFont* regularFont = m_RegularFont ? m_RegularFont : ImGui::GetFont();
     ImFont* boldFont = m_BoldFont ? m_BoldFont : regularFont;
-    if (!regularFont || !boldFont) {
+    ImFont* vapeFont = m_VapeFont ? m_VapeFont : regularFont;
+    if (!regularFont || !boldFont || !vapeFont) {
         return;
     }
 
     const bool riseMode = config->HUD.m_Mode == static_cast<int>(ArrayListMode::Rise);
     const bool tesseractMode = config->HUD.m_Mode == static_cast<int>(ArrayListMode::Tesseract);
-    ImFont* nameFont = (riseMode || tesseractMode) ? regularFont : boldFont;
+    const bool vapeMode = config->HUD.m_Mode == static_cast<int>(ArrayListMode::VapeV4);
+    const bool riseLikeMode = riseMode || vapeMode;
+    ImFont* tagFont = vapeMode ? vapeFont : regularFont;
+    ImFont* nameFont = vapeMode ? vapeFont : ((riseMode || tesseractMode) ? regularFont : boldFont);
     const float nameSize = nameFont->FontSize;
-    const float regularSize = regularFont->FontSize;
+    const float tagSize = tagFont->FontSize;
     const float topY = 4.0f;
-    const float lineHeight = (std::max)(regularSize, nameSize);
-    const float moduleSpacing = riseMode ? 0.0f : 2.0f;
-    const float itemHeight = riseMode ? (lineHeight + 6.0f) : (tesseractMode ? (nameSize + 4.0f) : (lineHeight + 2.0f));
-    const float spaceWidth = CalcTextSize(regularFont, regularSize, " ").x;
+    const float lineHeight = (std::max)(tagSize, nameSize);
+    const float moduleSpacing = riseLikeMode ? 0.0f : 2.0f;
+    const float itemHeight = riseLikeMode ? (lineHeight + 6.0f) : (tesseractMode ? (nameSize + 4.0f) : (lineHeight + 2.0f));
+    const float spaceWidth = CalcTextSize(tagFont, tagSize, " ").x;
     const ImU32 shadowColor = IM_COL32(0, 0, 0, 120);
-    const ImU32 secondaryColor = riseMode ? IM_COL32(154, 154, 154, 255) : IM_COL32(200, 200, 200, 255);
+    const ImU32 secondaryColor = riseLikeMode ? IM_COL32(154, 154, 154, 255) : IM_COL32(200, 200, 200, 255);
     const ImU32 riseBackgroundColor = IM_COL32(0, 0, 0, 88);
     const ImU32 riseWatermarkTextColor = IM_COL32(232, 232, 232, 255);
+    const ImU32 vapeTagActiveColor = IM_COL32(255, 85, 85, 255);
     const float risePadX = 4.0f;
     const float risePadY = 2.0f;
     const float riseRectWidth = 2.0f;
+    const float vapeLeftRounding = 6.0f;
     const ImU32 tesseractBackgroundColor = IM_COL32(25, 25, 30, 240);
     const float tesseractPadding = 6.0f;
     const float tesseractGapAfterText = 4.0f;
@@ -302,9 +322,9 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
 
     float deltaTime = std::chrono::duration<float>(now - m_LastFrameTime).count();
     m_LastFrameTime = now;
-        if (deltaTime > 0.1f) {
-            deltaTime = 0.1f;
-        }
+    if (deltaTime > 0.1f) {
+        deltaTime = 0.1f;
+    }
 
     if (config->HUD.m_Watermark) {
         float r = 1.0f;
@@ -312,6 +332,8 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
         float b = 1.0f;
         if (riseMode) {
             GetRiseRGB(0, r, g, b);
+        } else if (vapeMode) {
+            GetVapeV4RGB(0, r, g, b);
         } else if (tesseractMode) {
             GetTesseractHeaderRGB(0, r, g, b);
         } else if (config->HUD.m_Rainbow) {
@@ -328,31 +350,36 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
 
         const ImU32 accentColor = MakeColorU32(r, g, b);
         const std::string segment = " | " + nick + " | ";
-        const float textY = riseMode ? (topY + risePadY) : (tesseractMode ? 6.0f : topY);
-        float cursorX = riseMode ? (10.0f + risePadX) : (tesseractMode ? 10.0f : 10.0f);
+        const float textY = riseLikeMode ? (topY + risePadY) : (tesseractMode ? 6.0f : topY);
+        float cursorX = riseLikeMode ? (10.0f + risePadX) : 10.0f;
 
         const float titleWidth = CalcTextSize(nameFont, nameSize, "OpenCommunity").x;
-        const float segmentWidth = CalcTextSize(regularFont, regularSize, segment).x;
-        const float fpsWidth = CalcTextSize(regularFont, regularSize, fpsText).x;
+        const float segmentWidth = CalcTextSize(tagFont, tagSize, segment).x;
+        const float fpsWidth = CalcTextSize(tagFont, tagSize, fpsText).x;
 
-        if (riseMode) {
+        if (riseLikeMode) {
             const float boxWidth = titleWidth + segmentWidth + fpsWidth + risePadX * 2.0f + riseRectWidth + 1.0f;
             const ImVec2 boxMin(10.0f, topY);
             const ImVec2 boxMax(boxMin.x + boxWidth, topY + itemHeight);
-            drawList->AddRectFilled(boxMin, boxMax, riseBackgroundColor, 0.0f);
+            drawList->AddRectFilled(
+                boxMin,
+                boxMax,
+                riseBackgroundColor,
+                vapeMode ? vapeLeftRounding : 0.0f,
+                vapeMode ? ImDrawFlags_RoundCornersLeft : ImDrawFlags_RoundCornersNone);
             drawList->AddRectFilled(ImVec2(boxMax.x - riseRectWidth, boxMin.y), boxMax, accentColor, 0.0f);
         }
 
         DrawShadowedText(drawList, nameFont, nameSize, ImVec2(cursorX, textY), riseMode ? riseWatermarkTextColor : accentColor, shadowColor, "OpenCommunity");
         cursorX += titleWidth;
 
-        DrawShadowedText(drawList, regularFont, regularSize, ImVec2(cursorX, textY), secondaryColor, shadowColor, segment);
+        DrawShadowedText(drawList, tagFont, tagSize, ImVec2(cursorX, textY), secondaryColor, shadowColor, segment);
         cursorX += segmentWidth;
 
-        DrawShadowedText(drawList, regularFont, regularSize, ImVec2(cursorX, textY), secondaryColor, shadowColor, fpsText);
+        DrawShadowedText(drawList, tagFont, tagSize, ImVec2(cursorX, textY), secondaryColor, shadowColor, fpsText);
     }
 
-    const auto modules = GetActiveModules(nameFont, nameSize, regularFont, regularSize);
+    const auto modules = GetActiveModules(nameFont, nameSize, tagFont, tagSize);
     std::vector<std::string> activeKeys;
     activeKeys.reserve(modules.size());
 
@@ -363,6 +390,8 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
         float b;
         if (riseMode) {
             GetRiseRGB(index, r, g, b);
+        } else if (vapeMode) {
+            GetVapeV4RGB(index, r, g, b);
         } else if (tesseractMode) {
             GetTesseractRGB(index, r, g, b);
         } else if (config->HUD.m_Rainbow) {
@@ -392,26 +421,31 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
         if (tesseractMode) {
             layoutWidth = CalcTextSize(nameFont, nameSize, mod.name).x;
             if (!mod.tag.empty()) {
-                layoutWidth += 4.0f + CalcTextSize(regularFont, regularSize, mod.tag).x;
+                layoutWidth += 4.0f + CalcTextSize(tagFont, tagSize, mod.tag).x;
             }
         }
 
-        const float boxWidth = riseMode
+        const float boxWidth = riseLikeMode
             ? (layoutWidth + risePadX * 2.0f + riseRectWidth + 1.0f)
             : (tesseractMode ? (layoutWidth + tesseractPadding + tesseractGapAfterText + tesseractRectWidth) : layoutWidth);
-        const float rightMargin = riseMode ? riseRightMargin : (tesseractMode ? tesseractMarginRight : defaultRightMargin);
+        const float rightMargin = riseLikeMode ? riseRightMargin : (tesseractMode ? tesseractMarginRight : defaultRightMargin);
         const float targetX = screenW - boxWidth - rightMargin;
         const float currentX = screenW + (targetX - screenW) * eased;
         const float baseY = tesseractMode ? 2.0f : topY;
         const float currentY = baseY + index * (itemHeight + moduleSpacing);
         const ImU32 accentColor = MakeColorU32(r, g, b);
-        const float textX = riseMode ? (currentX + risePadX) : (tesseractMode ? (currentX + tesseractPadding) : currentX);
-        const float textY = riseMode ? (currentY + risePadY) : (tesseractMode ? (currentY + 2.0f) : currentY);
+        const float textX = riseLikeMode ? (currentX + risePadX) : (tesseractMode ? (currentX + tesseractPadding) : currentX);
+        const float textY = riseLikeMode ? (currentY + risePadY) : (tesseractMode ? (currentY + 2.0f) : currentY);
 
-        if (riseMode) {
+        if (riseLikeMode) {
             const ImVec2 boxMin(currentX, currentY);
             const ImVec2 boxMax(currentX + boxWidth, currentY + itemHeight);
-            drawList->AddRectFilled(boxMin, boxMax, riseBackgroundColor, 0.0f);
+            drawList->AddRectFilled(
+                boxMin,
+                boxMax,
+                riseBackgroundColor,
+                vapeMode ? vapeLeftRounding : 0.0f,
+                vapeMode ? ImDrawFlags_RoundCornersLeft : ImDrawFlags_RoundCornersNone);
             drawList->AddRectFilled(ImVec2(boxMax.x - riseRectWidth, boxMin.y), boxMax, accentColor, 0.0f);
         } else if (tesseractMode) {
             const ImVec2 boxMin(currentX, currentY);
@@ -424,7 +458,8 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
 
         if (!mod.tag.empty()) {
             const float tagX = textX + CalcTextSize(nameFont, nameSize, mod.name).x + (tesseractMode ? 4.0f : spaceWidth);
-            DrawShadowedText(drawList, regularFont, regularSize, ImVec2(tagX, textY), secondaryColor, shadowColor, mod.tag);
+            const ImU32 tagColor = (vapeMode && mod.inUse) ? vapeTagActiveColor : secondaryColor;
+            DrawShadowedText(drawList, tagFont, tagSize, ImVec2(tagX, textY), tagColor, shadowColor, mod.tag);
         }
 
         index++;

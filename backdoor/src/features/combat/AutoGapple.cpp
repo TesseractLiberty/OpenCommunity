@@ -135,6 +135,7 @@ void AutoGapple::Run(JNIEnv* env) {
     const long long nowMs = NowMs();
 
     if (g_consuming) {
+        MarkInUse(200);
         EnforceLockedSlotDuringConsume(env, player);
 
         jobject useItemKey = Minecraft::GetKeyBindUseItem(env);
@@ -224,5 +225,6 @@ void AutoGapple::Run(JNIEnv* env) {
     g_consuming = true;
     g_startedConsumeAtMs = nowMs;
     g_lastAttemptAtMs = nowMs;
+    MarkInUse(300);
     env->PopLocalFrame(nullptr);
 }

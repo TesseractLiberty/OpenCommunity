@@ -11,7 +11,7 @@ public:
     MODULE_INFO(ArrayList, "ArrayList", "Displays active modules on the HUD.", ModuleCategory::Visuals) {
         SetImagePrefix(module_icons::view_details_icon_data, module_icons::view_details_icon_data_size);
         SetEnabled(true);
-        AddOption(ModuleOption::Combo("Mode", { "Default", "Rise", "Tesseract" }, static_cast<int>(ArrayListMode::Default)));
+        AddOption(ModuleOption::Combo("Mode", { "Default", "Rise", "Tesseract", "VapeV4" }, static_cast<int>(ArrayListMode::Default)));
         AddOption(ModuleOption::Toggle("Watermark", true));
         AddOption(ModuleOption::Toggle("Spaced Modules", false));
     }

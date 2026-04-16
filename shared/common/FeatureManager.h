@@ -5,6 +5,8 @@
 #include <functional>
 #include <memory>
 #include <unordered_map>
+#include <atomic>
+#include <chrono>
 #include <windows.h>
 
 struct ImDrawList;
@@ -88,8 +90,13 @@ public:
     const std::string& GetDescription() const { return m_Description; }
     ModuleCategory GetCategory() const { return m_Category; }
     bool IsEnabled() const { return m_Enabled; }
-    void SetEnabled(bool enabled) { m_Enabled = enabled; }
-    void Toggle() { m_Enabled = !m_Enabled; }
+    void SetEnabled(bool enabled) {
+        m_Enabled = enabled;
+        if (!enabled) {
+            ClearInUse();
+        }
+    }
+    void Toggle() { SetEnabled(!m_Enabled); }
 
     int GetKeybind() const { return m_Keybind; }
     void SetKeybind(int key) { m_Keybind = key; }
@@ -123,6 +130,9 @@ public:
 
     // Tag displayed in the ArrayList HUD (e.g. "15-25cps")
     virtual std::string GetTag() const { return ""; }
+    bool IsInUse() const {
+        return m_Enabled && GetUsageNowMs() <= m_InUseUntilMs.load(std::memory_order_relaxed);
+    }
 
     const unsigned char* GetImageData() const { return m_ImageData; }
     unsigned int GetImageSize() const { return m_ImageSize; }
@@ -137,6 +147,20 @@ protected:
         m_ImageSize = size;
     }
 
+    void MarkInUse(int holdMs = 150) {
+        const long long durationMs = (holdMs < 0) ? 0 : holdMs;
+        const long long target = GetUsageNowMs() + durationMs;
+
+        long long current = m_InUseUntilMs.load(std::memory_order_relaxed);
+        while (current < target &&
+               !m_InUseUntilMs.compare_exchange_weak(current, target, std::memory_order_relaxed)) {
+        }
+    }
+
+    void ClearInUse() {
+        m_InUseUntilMs.store(0, std::memory_order_relaxed);
+    }
+
     std::string m_Name;
     std::string m_Description;
     ModuleCategory m_Category;
@@ -145,6 +169,14 @@ protected:
     std::vector<ModuleOption> m_Options;
     const unsigned char* m_ImageData = nullptr;
     unsigned int m_ImageSize = 0;
+
+private:
+    static long long GetUsageNowMs() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    std::atomic<long long> m_InUseUntilMs{ 0 };
 };
 
 class FeatureManager {

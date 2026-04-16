@@ -11,6 +11,7 @@
 #include "../../../deps/imgui/play_bold_font.h"
 #include "../../../deps/imgui/play_regular_font.h"
 
+#include <filesystem>
 #include <gl/GL.h>
 #include <mutex>
 
@@ -19,6 +20,39 @@ static bool g_fontsInitialized = false;
 static std::once_flag g_fontsOnce;
 static ImFont* g_overlayRegularFont = nullptr;
 static ImFont* g_overlayBoldFont = nullptr;
+static ImFont* g_overlayVapeFont = nullptr;
+
+extern "C" IMAGE_DOS_HEADER __ImageBase;
+
+namespace {
+    std::filesystem::path FindOverlayFontPath() {
+        wchar_t modulePath[MAX_PATH] = {};
+        if (GetModuleFileNameW(reinterpret_cast<HMODULE>(&__ImageBase), modulePath, MAX_PATH) == 0) {
+            return {};
+        }
+
+        auto current = std::filesystem::path(modulePath).parent_path();
+        while (!current.empty()) {
+            const auto otfCandidate = current / "Proxima Nova.otf";
+            if (std::filesystem::exists(otfCandidate)) {
+                return otfCandidate;
+            }
+
+            const auto ttfCandidate = current / "Proxima Nova Light.ttf";
+            if (std::filesystem::exists(ttfCandidate)) {
+                return ttfCandidate;
+            }
+
+            const auto parent = current.parent_path();
+            if (parent == current) {
+                break;
+            }
+            current = parent;
+        }
+
+        return {};
+    }
+}
 
 bool __stdcall wglSwapBuffersHook(HDC hdc)
 {
@@ -69,6 +103,17 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
             &fontCfg
         );
 
+        const auto vapeFontPath = FindOverlayFontPath();
+        if (!vapeFontPath.empty()) {
+            ImFontConfig vapeCfg;
+            vapeCfg.FontDataOwnedByAtlas = false;
+            g_overlayVapeFont = io.Fonts->AddFontFromFileTTF(
+                vapeFontPath.string().c_str(),
+                16.0f,
+                &vapeCfg
+            );
+        }
+
         if (g_overlayRegularFont) {
             io.FontDefault = g_overlayRegularFont;
         } else {
@@ -78,8 +123,11 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
         if (!g_overlayBoldFont) {
             g_overlayBoldFont = g_overlayRegularFont;
         }
+        if (!g_overlayVapeFont) {
+            g_overlayVapeFont = g_overlayRegularFont;
+        }
 
-        HUD::Get()->SetFonts(g_overlayRegularFont, g_overlayBoldFont);
+        HUD::Get()->SetFonts(g_overlayRegularFont, g_overlayBoldFont, g_overlayVapeFont);
         ImGui_ImplOpenGL2_Init();
         g_fontsInitialized = true;
     });
@@ -143,11 +191,12 @@ void RenderHook::Shutdown() {
     MH_DisableHook(MH_ALL_HOOKS);
 
     if (g_fontsInitialized) {
-        HUD::Get()->SetFonts(nullptr, nullptr);
+        HUD::Get()->SetFonts(nullptr, nullptr, nullptr);
         ImGui_ImplOpenGL2_Shutdown();
         ImGui::DestroyContext();
         g_overlayRegularFont = nullptr;
         g_overlayBoldFont = nullptr;
+        g_overlayVapeFont = nullptr;
         g_fontsInitialized = false;
     }
 

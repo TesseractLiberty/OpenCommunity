@@ -29,6 +29,7 @@ void NoJumpDelay::Run(JNIEnv* env) {
     if (playerObject) {
         auto* player = reinterpret_cast<Player*>(playerObject);
         player->SetJumpTicks(0, env);
+        MarkInUse(100);
         env->DeleteLocalRef(playerObject);
     }
 

@@ -195,6 +195,7 @@ void AutoClicker::Run() {
     // Reset again right before click for maximum effectiveness
     ResetLeftClickCounter();
     PostLeftClick(mcWindow);
+    MarkInUse(175);
 
     now = Clock::now();
     auto nextInterval = NextInterval();
