@@ -32,6 +32,25 @@ struct ModuleConfig {
 
     struct {
         bool m_Enabled = false;
+        int m_Delay = 80;
+        bool m_SwapAll = false;
+        int m_Percentage = 25;
+        int m_HelmetPct = 25;
+        int m_ChestPct = 25;
+        int m_LegsPct = 25;
+        int m_BootsPct = 25;
+        bool m_AutoDrop = false;
+        bool m_MultiSwap = false;
+        bool m_OpenInventory = true;
+        bool m_InventoryOrganizer = false;
+        int m_HelmetSlot = 1;
+        int m_ChestSlot = 2;
+        int m_LegsSlot = 3;
+        int m_BootsSlot = 4;
+    } ArmorSwap;
+
+    struct {
+        bool m_Enabled = false;
         int m_DelaySeconds = 5;
     } AutoGapple;
 
@@ -53,6 +72,7 @@ struct ModuleConfig {
     struct {
         bool m_AutoClicker = false;
         bool m_ArmorFilter = false;
+        bool m_ArmorSwap = false;
         bool m_AutoGapple = false;
         bool m_NoHitDelay = false;
         bool m_NoJumpDelay = false;

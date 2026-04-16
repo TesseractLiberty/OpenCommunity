@@ -12,6 +12,8 @@ public:
     static jobject GetObjectMouseOver(JNIEnv* env);
     static jobject GetRenderItem(JNIEnv* env);
     static jobject GetKeyBindUseItem(JNIEnv* env);
+    static void DisplayGuiScreen(jobject guiScreen, JNIEnv* env);
+    static jobject CreateGuiInventory(jobject player, JNIEnv* env);
     static void SetLeftClickCounter(int value, JNIEnv* env);
     static void SetRightClickCounter(int value, JNIEnv* env);
 };

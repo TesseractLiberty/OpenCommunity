@@ -14,5 +14,6 @@ public:
     jobject GetCurrentArmor(int slot, JNIEnv* env);
     bool IsUsingItem(JNIEnv* env);
     jobject GetActivePotionEffect(int potionId, JNIEnv* env);
+    void SendPacket(jobject packet, JNIEnv* env);
     void SetJumpTicks(int ticks, JNIEnv* env);
 };

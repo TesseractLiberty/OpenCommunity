@@ -4,6 +4,7 @@
 #include "../jni/Class.h"
 #include "../jni/Field.h"
 #include "../jni/GameInstance.h"
+#include "../jni/Method.h"
 #include "../mapping/Mapper.h"
 
 namespace {
@@ -117,6 +118,56 @@ jobject Minecraft::GetKeyBindUseItem(JNIEnv* env) {
     jobject value = field ? field->GetObjectField(env, gameSettings) : nullptr;
     env->DeleteLocalRef(gameSettings);
     return value;
+}
+
+void Minecraft::DisplayGuiScreen(jobject guiScreen, JNIEnv* env) {
+    if (!env) {
+        return;
+    }
+
+    Class* minecraftClass = GetMinecraftClass();
+    if (!minecraftClass) {
+        return;
+    }
+
+    const std::string screenSignature = Mapper::Get("net/minecraft/client/gui/GuiScreen", 2);
+    const std::string methodName = Mapper::Get("displayGuiScreen");
+    if (screenSignature.empty() || methodName.empty()) {
+        return;
+    }
+
+    Method* method = minecraftClass->GetMethod(env, methodName.c_str(), ("(" + screenSignature + ")V").c_str());
+    if (!method) {
+        return;
+    }
+
+    jobject minecraft = GetTheMinecraft(env);
+    if (!minecraft) {
+        return;
+    }
+
+    method->CallVoidMethod(env, minecraft, false, guiScreen);
+    env->DeleteLocalRef(minecraft);
+}
+
+jobject Minecraft::CreateGuiInventory(jobject player, JNIEnv* env) {
+    if (!env || !player || !g_Game || !g_Game->IsInitialized()) {
+        return nullptr;
+    }
+
+    const std::string className = Mapper::Get("net/minecraft/client/gui/inventory/GuiInventory");
+    const std::string playerSignature = Mapper::Get("net/minecraft/entity/player/EntityPlayer", 2);
+    if (className.empty() || playerSignature.empty()) {
+        return nullptr;
+    }
+
+    jclass inventoryClass = reinterpret_cast<jclass>(g_Game->FindClass(className));
+    if (!inventoryClass) {
+        return nullptr;
+    }
+
+    jmethodID constructor = env->GetMethodID(inventoryClass, "<init>", ("(" + playerSignature + ")V").c_str());
+    return constructor ? env->NewObject(inventoryClass, constructor, player) : nullptr;
 }
 
 void Minecraft::SetLeftClickCounter(int value, JNIEnv* env) {

@@ -110,6 +110,7 @@
     <ClCompile Include="src\features\render\HUD.cpp" />
     <ClCompile Include="src\features\combat\AutoClicker.cpp" />
     <ClCompile Include="src\features\combat\ArmorFilter.cpp" />
+    <ClCompile Include="src\features\combat\ArmorSwap.cpp" />
     <ClCompile Include="src\features\combat\AutoGapple.cpp" />
     <ClCompile Include="src\features\combat\NoHitDelay.cpp" />
     <ClCompile Include="src\features\movement\NoJumpDelay.cpp" />
@@ -117,9 +118,11 @@
     <ClCompile Include="src\game\classes\Container.cpp" />
     <ClCompile Include="src\game\classes\GuiScreen.cpp" />
     <ClCompile Include="src\game\classes\InventoryPlayer.cpp" />
+    <ClCompile Include="src\game\classes\ItemArmor.cpp" />
     <ClCompile Include="src\game\classes\ItemStack.cpp" />
     <ClCompile Include="src\game\classes\KeyBinding.cpp" />
     <ClCompile Include="src\game\classes\Minecraft.cpp" />
+    <ClCompile Include="src\game\classes\PacketClientStatus.cpp" />
     <ClCompile Include="src\game\classes\MovingObjectPosition.cpp" />
     <ClCompile Include="src\game\classes\Player.cpp" />
     <ClCompile Include="src\game\classes\PlayerController.cpp" />
@@ -143,6 +146,7 @@
     <ClInclude Include="src\features\render\HUD.h" />
     <ClInclude Include="src\features\combat\AutoClicker.h" />
     <ClInclude Include="src\features\combat\ArmorFilter.h" />
+    <ClInclude Include="src\features\combat\ArmorSwap.h" />
     <ClInclude Include="src\features\combat\AutoGapple.h" />
     <ClInclude Include="src\features\combat\NoHitDelay.h" />
     <ClInclude Include="src\features\movement\NoJumpDelay.h" />
@@ -150,9 +154,11 @@
     <ClInclude Include="src\game\classes\Container.h" />
     <ClInclude Include="src\game\classes\GuiScreen.h" />
     <ClInclude Include="src\game\classes\InventoryPlayer.h" />
+    <ClInclude Include="src\game\classes\ItemArmor.h" />
     <ClInclude Include="src\game\classes\ItemStack.h" />
     <ClInclude Include="src\game\classes\KeyBinding.h" />
     <ClInclude Include="src\game\classes\Minecraft.h" />
+    <ClInclude Include="src\game\classes\PacketClientStatus.h" />
     <ClInclude Include="src\game\classes\MovingObjectPosition.h" />
     <ClInclude Include="src\game\classes\Player.h" />
     <ClInclude Include="src\game\classes\PlayerController.h" />

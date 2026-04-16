@@ -104,6 +104,10 @@ public:
 
     std::vector<ModuleOption>& GetOptions() { return m_Options; }
     const std::vector<ModuleOption>& GetOptions() const { return m_Options; }
+    virtual bool ShouldRenderOption(size_t optionIndex) const {
+        (void)optionIndex;
+        return true;
+    }
 
     virtual void SyncToConfig(void* configPtr) { (void)configPtr; }
     virtual void SyncFromConfig(void* configPtr) { (void)configPtr; }

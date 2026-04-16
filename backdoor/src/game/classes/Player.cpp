@@ -267,6 +267,47 @@ jobject Player::GetActivePotionEffect(int potionId, JNIEnv* env) {
     return effect;
 }
 
+void Player::SendPacket(jobject packet, JNIEnv* env) {
+    if (!env || !this || !packet) {
+        return;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return;
+    }
+
+    const std::string sendQueueFieldName = Mapper::Get("sendQueue");
+    const std::string sendQueueSignature = Mapper::Get("net/minecraft/client/network/NetHandlerPlayClient", 2);
+    const std::string packetSignature = Mapper::Get("net/minecraft/network/Packet", 2);
+    const std::string addToSendQueueName = Mapper::Get("addToSendQueue");
+    if (sendQueueFieldName.empty() || sendQueueSignature.empty() || packetSignature.empty() || addToSendQueueName.empty()) {
+        env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+        return;
+    }
+
+    Field* sendQueueField = playerClass->GetField(env, sendQueueFieldName.c_str(), sendQueueSignature.c_str());
+    jobject sendQueue = sendQueueField ? sendQueueField->GetObjectField(env, this) : nullptr;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    if (!sendQueue) {
+        return;
+    }
+
+    auto* sendQueueClass = reinterpret_cast<Class*>(env->GetObjectClass(sendQueue));
+    if (!sendQueueClass) {
+        env->DeleteLocalRef(sendQueue);
+        return;
+    }
+
+    Method* addToSendQueueMethod = sendQueueClass->GetMethod(env, addToSendQueueName.c_str(), ("(" + packetSignature + ")V").c_str());
+    if (addToSendQueueMethod) {
+        addToSendQueueMethod->CallVoidMethod(env, sendQueue, false, packet);
+    }
+
+    env->DeleteLocalRef(reinterpret_cast<jclass>(sendQueueClass));
+    env->DeleteLocalRef(sendQueue);
+}
+
 void Player::SetJumpTicks(int ticks, JNIEnv* env) {
     if (!env || !this) {
         return;

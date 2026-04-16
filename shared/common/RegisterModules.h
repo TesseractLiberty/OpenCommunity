@@ -4,6 +4,7 @@
 
 #include "../../backdoor/src/features/combat/AutoClicker.h"
 #include "../../backdoor/src/features/combat/ArmorFilter.h"
+#include "../../backdoor/src/features/combat/ArmorSwap.h"
 #include "../../backdoor/src/features/combat/AutoGapple.h"
 #include "../../backdoor/src/features/combat/NoHitDelay.h"
 #include "../../backdoor/src/features/movement/NoJumpDelay.h"
@@ -15,6 +16,7 @@ inline void RegisterAllModules() {
 
     fm->RegisterModule(std::make_shared<AutoClicker>());
     fm->RegisterModule(std::make_shared<ArmorFilter>());
+    fm->RegisterModule(std::make_shared<ArmorSwap>());
     fm->RegisterModule(std::make_shared<AutoGapple>());
     fm->RegisterModule(std::make_shared<NoHitDelay>());
     fm->RegisterModule(std::make_shared<NoJumpDelay>());
