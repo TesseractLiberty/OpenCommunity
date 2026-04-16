@@ -1071,6 +1071,7 @@ void Screen::RenderHUDPreview() {
 static void RenderModulesForCategory(ModuleCategory category, float areaWidth, float areaHeight, ImFont* fontBold, ImFont* fontBody, ID3D11Device* device) {
     // Cache for module prefix icon textures (keyed by image data pointer)
     static std::unordered_map<const unsigned char*, ID3D11ShaderResourceView*> s_ModuleIconCache;
+    static float s_CategoryScroll[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     auto& modules = FeatureManager::Get()->GetModules(category);
     if (modules.empty()) return;
 
@@ -1087,21 +1088,58 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
     const float optLineH = 28.0f;
     const float headerH = 28.0f;
     const float cardRounding = 8.0f;
+    const float contentBottomPad = 16.0f;
+    const float visibleHeight = (areaHeight > contentBottomPad) ? (areaHeight - contentBottomPad) : areaHeight;
+
+    auto getCardHeight = [&](const std::shared_ptr<Module>& mod) -> float {
+        int optCount = 0;
+        for (size_t optionIndex = 0; optionIndex < mod->GetOptions().size(); ++optionIndex) {
+            if (mod->ShouldRenderOption(optionIndex)) {
+                ++optCount;
+            }
+        }
+
+        float cardHeight = headerH + cardPadY;
+        if (optCount > 0) {
+            cardHeight += optCount * optLineH + 6.0f;
+        }
+        return cardHeight;
+    };
 
     static int waitingBindModuleIdx = -1;
     static ModuleCategory waitingBindCat = ModuleCategory::Combat;
 
-    float colY[2] = { 0.0f, 0.0f };
+    float layoutColY[2] = { 0.0f, 0.0f };
+    for (const auto& mod : modules) {
+        const float cardHeight = getCardHeight(mod);
+        const int col = (layoutColY[0] <= layoutColY[1]) ? 0 : 1;
+        layoutColY[col] += cardHeight + cardGapY;
+    }
+
+    const float totalContentHeight = (std::max)(0.0f, (std::max)(layoutColY[0], layoutColY[1]) - cardGapY);
+    const float maxScroll = (std::max)(0.0f, totalContentHeight - visibleHeight);
+    const int categoryIndex = static_cast<int>(category);
+    float& scrollOffset = s_CategoryScroll[categoryIndex];
+    scrollOffset = (std::clamp)(scrollOffset, 0.0f, maxScroll);
+
+    const ImVec2 viewMin(origin.x, origin.y);
+    const ImVec2 viewMax(origin.x + areaWidth, origin.y + visibleHeight);
+    ImGuiIO& io = ImGui::GetIO();
+    if (ImGui::IsMouseHoveringRect(viewMin, viewMax, true) && io.MouseWheel != 0.0f && !ImGui::IsAnyItemActive()) {
+        scrollOffset = (std::clamp)(scrollOffset - io.MouseWheel * 38.0f, 0.0f, maxScroll);
+    }
+
+    float colY[2] = { -scrollOffset, -scrollOffset };
 
     for (int mi = 0; mi < (int)modules.size(); mi++) {
         auto& mod = modules[mi];
-
         int optCount = 0;
-        for (auto& opt : mod->GetOptions()) { (void)opt; optCount++; }
-        float cardH = headerH + cardPadY;
-        if (optCount > 0) {
-            cardH += optCount * optLineH + 6.0f;
+        for (size_t optionIndex = 0; optionIndex < mod->GetOptions().size(); ++optionIndex) {
+            if (mod->ShouldRenderOption(optionIndex)) {
+                ++optCount;
+            }
         }
+        const float cardH = getCardHeight(mod);
 
         int col = (colY[0] <= colY[1]) ? 0 : 1;
         float cx = origin.x + col * (colW + colGap);
@@ -1269,11 +1307,16 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
 
             float sliderW = optW * 0.40f;
 
-            for (auto& opt : mod->GetOptions()) {
+            for (size_t optionIndex = 0; optionIndex < mod->GetOptions().size(); ++optionIndex) {
+                if (!mod->ShouldRenderOption(optionIndex)) {
+                    continue;
+                }
+
+                auto& opt = mod->GetOptions()[optionIndex];
                 ImGui::SetCursorScreenPos(ImVec2(optX, optY));
 
                 char optId[128];
-                snprintf(optId, sizeof(optId), "##opt_%d_%d_%s", (int)category, mi, opt.name.c_str());
+                snprintf(optId, sizeof(optId), "##opt_%d_%d_%zu_%s", (int)category, mi, optionIndex, opt.name.c_str());
 
                 ImFont* labelFont = fontBody ? fontBody : ImGui::GetFont();
                 float labelFS = labelFont->FontSize;
