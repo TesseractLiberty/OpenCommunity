@@ -12,6 +12,7 @@
 #include "../../../../deps/imgui/imgui.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
 #include <cmath>
 #include <cstring>
@@ -42,6 +43,42 @@ namespace {
 
     JNIEnv* GetCurrentEnv() {
         return g_Game ? g_Game->GetCurrentEnv() : nullptr;
+    }
+
+    ImU32 MakeColorU32(float r, float g, float b, float a = 1.0f) {
+        return ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, a));
+    }
+
+    void DrawShadowedText(ImDrawList* drawList, ImFont* font, float fontSize, const ImVec2& pos, ImU32 color, ImU32 shadowColor, const std::string& text) {
+        drawList->AddText(font, fontSize, ImVec2(pos.x + 1.0f, pos.y + 1.0f), shadowColor, text.c_str());
+        drawList->AddText(font, fontSize, pos, color, text.c_str());
+    }
+
+    std::string FormatModuleName(const std::string& name, bool spacedModules) {
+        if (!spacedModules || name.empty()) {
+            return name;
+        }
+
+        std::string result;
+        result.reserve(name.size() + 4);
+
+        for (size_t i = 0; i < name.size(); ++i) {
+            const unsigned char current = static_cast<unsigned char>(name[i]);
+            if (i > 0 && std::isupper(current)) {
+                const unsigned char previous = static_cast<unsigned char>(name[i - 1]);
+                const bool followsLowercase = std::islower(previous) != 0;
+                const bool breaksAcronym = std::isupper(previous) != 0 &&
+                    (i + 1) < name.size() &&
+                    std::islower(static_cast<unsigned char>(name[i + 1])) != 0;
+                if (followsLowercase || breaksAcronym) {
+                    result.push_back(' ');
+                }
+            }
+
+            result.push_back(static_cast<char>(current));
+        }
+
+        return result;
     }
 
     std::string GetConfigNick(const ModuleConfig* config) {
@@ -149,14 +186,40 @@ void HUD::GetRainbowRGB(int offset, float& r, float& g, float& b) {
     b = themed.z;
 }
 
-std::vector<HUD::ModuleEntry> HUD::GetActiveModules() {
+void HUD::GetRiseRGB(int offset, float& r, float& g, float& b) {
+    const auto now = std::chrono::steady_clock::now();
+    const float seconds = std::chrono::duration<float>(now.time_since_epoch()).count();
+    const float phase = 0.5f + 0.5f * sinf(seconds * 1.35f + offset * 0.5f);
+    const float hue = 0.58f - phase * 0.18f;
+    ImGui::ColorConvertHSVtoRGB(hue, 0.72f, 0.95f, r, g, b);
+}
+
+void HUD::GetTesseractRGB(int offset, float& r, float& g, float& b) {
+    const double tMs = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    const float goldenRatio = 0.618033988749895f;
+    const float baseHue = (float)fmod(tMs / 2000.0, 1.0);
+    const float hueOffset = fmodf(offset * goldenRatio, 1.0f);
+    const float hue = fmodf(baseHue + hueOffset, 1.0f);
+    ImGui::ColorConvertHSVtoRGB(hue, 0.75f, 0.9f, r, g, b);
+}
+
+void HUD::GetTesseractHeaderRGB(int offset, float& r, float& g, float& b) {
+    const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    const float state = ceilf((float)(millis + offset) / 20.0f);
+    const float hue = fmodf(state, 360.0f) / 360.0f;
+    ImGui::ColorConvertHSVtoRGB(hue, 0.7f, 0.8f, r, g, b);
+}
+
+std::vector<HUD::ModuleEntry> HUD::GetActiveModules(ImFont* nameFont, float nameFontSize, ImFont* tagFont, float tagFontSize) {
     std::vector<ModuleEntry> modules;
 
-    ImFont* boldFont = m_BoldFont ? m_BoldFont : ImGui::GetFont();
-    ImFont* regularFont = m_RegularFont ? m_RegularFont : ImGui::GetFont();
-    const float boldSize = boldFont ? boldFont->FontSize : ImGui::GetFontSize();
-    const float regularSize = regularFont ? regularFont->FontSize : ImGui::GetFontSize();
-    const float spaceWidth = CalcTextSize(regularFont, regularSize, " ").x;
+    ImFont* resolvedNameFont = nameFont ? nameFont : ImGui::GetFont();
+    ImFont* resolvedTagFont = tagFont ? tagFont : resolvedNameFont;
+    const float resolvedNameSize = resolvedNameFont ? nameFontSize : ImGui::GetFontSize();
+    const float resolvedTagSize = resolvedTagFont ? tagFontSize : resolvedNameSize;
+    const float spaceWidth = CalcTextSize(resolvedTagFont, resolvedTagSize, " ").x;
 
     for (const auto& mod : FeatureManager::Get()->GetAllModules()) {
         if (!mod->IsEnabled()) {
@@ -168,13 +231,14 @@ std::vector<HUD::ModuleEntry> HUD::GetActiveModules() {
             continue;
         }
 
+        const std::string displayName = FormatModuleName(name, Bridge::Get()->GetConfig() && Bridge::Get()->GetConfig()->HUD.m_SpacedModules);
         const std::string tag = mod->GetTag();
-        float width = CalcTextSize(boldFont, boldSize, name).x;
+        float width = CalcTextSize(resolvedNameFont, resolvedNameSize, displayName).x;
         if (!tag.empty()) {
-            width += spaceWidth + CalcTextSize(regularFont, regularSize, tag).x;
+            width += spaceWidth + CalcTextSize(resolvedTagFont, resolvedTagSize, tag).x;
         }
 
-        modules.push_back({ name, tag, width });
+        modules.push_back({ displayName, tag, width });
     }
 
     std::sort(modules.begin(), modules.end(), [](const ModuleEntry& a, const ModuleEntry& b) {
@@ -202,15 +266,30 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
         return;
     }
 
+    const bool riseMode = config->HUD.m_Mode == static_cast<int>(ArrayListMode::Rise);
+    const bool tesseractMode = config->HUD.m_Mode == static_cast<int>(ArrayListMode::Tesseract);
+    ImFont* nameFont = (riseMode || tesseractMode) ? regularFont : boldFont;
+    const float nameSize = nameFont->FontSize;
     const float regularSize = regularFont->FontSize;
-    const float boldSize = boldFont->FontSize;
-    const float shadowOffset = 1.0f;
     const float topY = 4.0f;
-    const float moduleSpacing = 2.0f;
-    const float itemHeight = std::max(regularSize, boldSize) + 2.0f;
+    const float lineHeight = (std::max)(regularSize, nameSize);
+    const float moduleSpacing = riseMode ? 0.0f : 2.0f;
+    const float itemHeight = riseMode ? (lineHeight + 6.0f) : (tesseractMode ? (nameSize + 4.0f) : (lineHeight + 2.0f));
     const float spaceWidth = CalcTextSize(regularFont, regularSize, " ").x;
     const ImU32 shadowColor = IM_COL32(0, 0, 0, 120);
-    const ImU32 secondaryColor = IM_COL32(200, 200, 200, 255);
+    const ImU32 secondaryColor = riseMode ? IM_COL32(154, 154, 154, 255) : IM_COL32(200, 200, 200, 255);
+    const ImU32 riseBackgroundColor = IM_COL32(0, 0, 0, 88);
+    const ImU32 riseWatermarkTextColor = IM_COL32(232, 232, 232, 255);
+    const float risePadX = 4.0f;
+    const float risePadY = 2.0f;
+    const float riseRectWidth = 2.0f;
+    const ImU32 tesseractBackgroundColor = IM_COL32(25, 25, 30, 240);
+    const float tesseractPadding = 6.0f;
+    const float tesseractGapAfterText = 4.0f;
+    const float tesseractRectWidth = 3.0f;
+    const float tesseractMarginRight = 6.0f;
+    const float defaultRightMargin = 6.0f;
+    const float riseRightMargin = 4.0f;
 
     m_FrameCount++;
     const auto now = std::chrono::steady_clock::now();
@@ -223,20 +302,20 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
 
     float deltaTime = std::chrono::duration<float>(now - m_LastFrameTime).count();
     m_LastFrameTime = now;
-    if (deltaTime > 0.1f) {
-        deltaTime = 0.1f;
-    }
+        if (deltaTime > 0.1f) {
+            deltaTime = 0.1f;
+        }
 
     if (config->HUD.m_Watermark) {
-        float r;
-        float g;
-        float b;
-        if (config->HUD.m_Rainbow) {
+        float r = 1.0f;
+        float g = 1.0f;
+        float b = 1.0f;
+        if (riseMode) {
+            GetRiseRGB(0, r, g, b);
+        } else if (tesseractMode) {
+            GetTesseractHeaderRGB(0, r, g, b);
+        } else if (config->HUD.m_Rainbow) {
             GetRainbowRGB(0, r, g, b);
-        } else {
-            r = 1.0f;
-            g = 1.0f;
-            b = 1.0f;
         }
 
         std::string nick = ResolvePlayerNick(config);
@@ -247,24 +326,33 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
         char fpsText[16];
         snprintf(fpsText, sizeof(fpsText), "%d FPS", m_Fps);
 
-        const ImU32 accentColor = ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, 1.0f));
+        const ImU32 accentColor = MakeColorU32(r, g, b);
         const std::string segment = " | " + nick + " | ";
-        const float textY = topY;
-        float cursorX = 10.0f;
+        const float textY = riseMode ? (topY + risePadY) : (tesseractMode ? 6.0f : topY);
+        float cursorX = riseMode ? (10.0f + risePadX) : (tesseractMode ? 10.0f : 10.0f);
 
-        drawList->AddText(boldFont, boldSize, ImVec2(cursorX + shadowOffset, textY + shadowOffset), shadowColor, "OpenCommunity");
-        drawList->AddText(boldFont, boldSize, ImVec2(cursorX, textY), accentColor, "OpenCommunity");
-        cursorX += CalcTextSize(boldFont, boldSize, "OpenCommunity").x;
+        const float titleWidth = CalcTextSize(nameFont, nameSize, "OpenCommunity").x;
+        const float segmentWidth = CalcTextSize(regularFont, regularSize, segment).x;
+        const float fpsWidth = CalcTextSize(regularFont, regularSize, fpsText).x;
 
-        drawList->AddText(regularFont, regularSize, ImVec2(cursorX + shadowOffset, textY + shadowOffset), shadowColor, segment.c_str());
-        drawList->AddText(regularFont, regularSize, ImVec2(cursorX, textY), secondaryColor, segment.c_str());
-        cursorX += CalcTextSize(regularFont, regularSize, segment).x;
+        if (riseMode) {
+            const float boxWidth = titleWidth + segmentWidth + fpsWidth + risePadX * 2.0f + riseRectWidth + 1.0f;
+            const ImVec2 boxMin(10.0f, topY);
+            const ImVec2 boxMax(boxMin.x + boxWidth, topY + itemHeight);
+            drawList->AddRectFilled(boxMin, boxMax, riseBackgroundColor, 0.0f);
+            drawList->AddRectFilled(ImVec2(boxMax.x - riseRectWidth, boxMin.y), boxMax, accentColor, 0.0f);
+        }
 
-        drawList->AddText(regularFont, regularSize, ImVec2(cursorX + shadowOffset, textY + shadowOffset), shadowColor, fpsText);
-        drawList->AddText(regularFont, regularSize, ImVec2(cursorX, textY), secondaryColor, fpsText);
+        DrawShadowedText(drawList, nameFont, nameSize, ImVec2(cursorX, textY), riseMode ? riseWatermarkTextColor : accentColor, shadowColor, "OpenCommunity");
+        cursorX += titleWidth;
+
+        DrawShadowedText(drawList, regularFont, regularSize, ImVec2(cursorX, textY), secondaryColor, shadowColor, segment);
+        cursorX += segmentWidth;
+
+        DrawShadowedText(drawList, regularFont, regularSize, ImVec2(cursorX, textY), secondaryColor, shadowColor, fpsText);
     }
 
-    const auto modules = GetActiveModules();
+    const auto modules = GetActiveModules(nameFont, nameSize, regularFont, regularSize);
     std::vector<std::string> activeKeys;
     activeKeys.reserve(modules.size());
 
@@ -273,7 +361,11 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
         float r;
         float g;
         float b;
-        if (config->HUD.m_Rainbow) {
+        if (riseMode) {
+            GetRiseRGB(index, r, g, b);
+        } else if (tesseractMode) {
+            GetTesseractRGB(index, r, g, b);
+        } else if (config->HUD.m_Rainbow) {
             GetRainbowRGB(index * 400, r, g, b);
         } else {
             const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
@@ -296,18 +388,43 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
         }
 
         const float eased = 1.0f - powf(1.0f - progress, 3.0f);
-        const float targetX = screenW - mod.width - 6.0f;
-        const float currentX = screenW + (targetX - screenW) * eased;
-        const float currentY = topY + index * (itemHeight + moduleSpacing);
-        const ImU32 accentColor = ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, 1.0f));
+        float layoutWidth = mod.width;
+        if (tesseractMode) {
+            layoutWidth = CalcTextSize(nameFont, nameSize, mod.name).x;
+            if (!mod.tag.empty()) {
+                layoutWidth += 4.0f + CalcTextSize(regularFont, regularSize, mod.tag).x;
+            }
+        }
 
-        drawList->AddText(boldFont, boldSize, ImVec2(currentX + shadowOffset, currentY + shadowOffset), shadowColor, mod.name.c_str());
-        drawList->AddText(boldFont, boldSize, ImVec2(currentX, currentY), accentColor, mod.name.c_str());
+        const float boxWidth = riseMode
+            ? (layoutWidth + risePadX * 2.0f + riseRectWidth + 1.0f)
+            : (tesseractMode ? (layoutWidth + tesseractPadding + tesseractGapAfterText + tesseractRectWidth) : layoutWidth);
+        const float rightMargin = riseMode ? riseRightMargin : (tesseractMode ? tesseractMarginRight : defaultRightMargin);
+        const float targetX = screenW - boxWidth - rightMargin;
+        const float currentX = screenW + (targetX - screenW) * eased;
+        const float baseY = tesseractMode ? 2.0f : topY;
+        const float currentY = baseY + index * (itemHeight + moduleSpacing);
+        const ImU32 accentColor = MakeColorU32(r, g, b);
+        const float textX = riseMode ? (currentX + risePadX) : (tesseractMode ? (currentX + tesseractPadding) : currentX);
+        const float textY = riseMode ? (currentY + risePadY) : (tesseractMode ? (currentY + 2.0f) : currentY);
+
+        if (riseMode) {
+            const ImVec2 boxMin(currentX, currentY);
+            const ImVec2 boxMax(currentX + boxWidth, currentY + itemHeight);
+            drawList->AddRectFilled(boxMin, boxMax, riseBackgroundColor, 0.0f);
+            drawList->AddRectFilled(ImVec2(boxMax.x - riseRectWidth, boxMin.y), boxMax, accentColor, 0.0f);
+        } else if (tesseractMode) {
+            const ImVec2 boxMin(currentX, currentY);
+            const ImVec2 boxMax(currentX + boxWidth, currentY + itemHeight);
+            drawList->AddRectFilled(boxMin, boxMax, tesseractBackgroundColor, 5.0f, ImDrawFlags_RoundCornersLeft);
+            drawList->AddRectFilled(ImVec2(boxMax.x - tesseractRectWidth, boxMin.y), boxMax, accentColor);
+        }
+
+        DrawShadowedText(drawList, nameFont, nameSize, ImVec2(textX, textY), accentColor, shadowColor, mod.name);
 
         if (!mod.tag.empty()) {
-            const float tagX = currentX + CalcTextSize(boldFont, boldSize, mod.name).x + spaceWidth;
-            drawList->AddText(regularFont, regularSize, ImVec2(tagX + shadowOffset, currentY + shadowOffset), shadowColor, mod.tag.c_str());
-            drawList->AddText(regularFont, regularSize, ImVec2(tagX, currentY), secondaryColor, mod.tag.c_str());
+            const float tagX = textX + CalcTextSize(nameFont, nameSize, mod.name).x + (tesseractMode ? 4.0f : spaceWidth);
+            DrawShadowedText(drawList, regularFont, regularSize, ImVec2(tagX, textY), secondaryColor, shadowColor, mod.tag);
         }
 
         index++;

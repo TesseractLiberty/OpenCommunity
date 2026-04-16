@@ -28,8 +28,11 @@ private:
         float width;
     };
 
-    std::vector<ModuleEntry> GetActiveModules();
+    std::vector<ModuleEntry> GetActiveModules(ImFont* nameFont, float nameFontSize, ImFont* tagFont, float tagFontSize);
     void GetRainbowRGB(int offset, float& r, float& g, float& b);
+    void GetRiseRGB(int offset, float& r, float& g, float& b);
+    void GetTesseractRGB(int offset, float& r, float& g, float& b);
+    void GetTesseractHeaderRGB(int offset, float& r, float& g, float& b);
 
     int m_Fps = 0;
     int m_FrameCount = 0;

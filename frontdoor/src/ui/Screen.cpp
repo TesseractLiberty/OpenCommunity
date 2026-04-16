@@ -19,6 +19,7 @@
 #include "../../../deps/imgui/stb_image.h"
 #include "../../../shared/common/RegisterModules.h"
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
 #include <cmath>
 
@@ -65,6 +66,73 @@ namespace
         if (!font)
             return ImGui::CalcTextSize(text);
         return font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text);
+    }
+
+    ImU32 MakeColorU32(float r, float g, float b, float a = 1.0f)
+    {
+        return ImGui::ColorConvertFloat4ToU32(ImVec4(r, g, b, a));
+    }
+
+    void DrawShadowedText(ImDrawList* drawList, ImFont* font, float fontSize, const ImVec2& pos, ImU32 color, ImU32 shadowColor, const std::string& text)
+    {
+        drawList->AddText(font, fontSize, ImVec2(pos.x + 1.0f, pos.y + 1.0f), shadowColor, text.c_str());
+        drawList->AddText(font, fontSize, pos, color, text.c_str());
+    }
+
+    std::string FormatModuleName(const std::string& name, bool spacedModules)
+    {
+        if (!spacedModules || name.empty()) {
+            return name;
+        }
+
+        std::string result;
+        result.reserve(name.size() + 4);
+
+        for (size_t i = 0; i < name.size(); ++i) {
+            const unsigned char current = static_cast<unsigned char>(name[i]);
+            if (i > 0 && std::isupper(current)) {
+                const unsigned char previous = static_cast<unsigned char>(name[i - 1]);
+                const bool followsLowercase = std::islower(previous) != 0;
+                const bool breaksAcronym = std::isupper(previous) != 0 &&
+                    (i + 1) < name.size() &&
+                    std::islower(static_cast<unsigned char>(name[i + 1])) != 0;
+                if (followsLowercase || breaksAcronym) {
+                    result.push_back(' ');
+                }
+            }
+
+            result.push_back(static_cast<char>(current));
+        }
+
+        return result;
+    }
+
+    void GetRiseRGB(int offset, float& r, float& g, float& b)
+    {
+        const float seconds = std::chrono::duration<float>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        const float phase = 0.5f + 0.5f * sinf(seconds * 1.35f + offset * 0.5f);
+        const float hue = 0.58f - phase * 0.18f;
+        ImGui::ColorConvertHSVtoRGB(hue, 0.72f, 0.95f, r, g, b);
+    }
+
+    void GetTesseractRGB(int offset, float& r, float& g, float& b)
+    {
+        const double tMs = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        const float goldenRatio = 0.618033988749895f;
+        const float baseHue = (float)fmod(tMs / 2000.0, 1.0);
+        const float hueOffset = fmodf(offset * goldenRatio, 1.0f);
+        const float hue = fmodf(baseHue + hueOffset, 1.0f);
+        ImGui::ColorConvertHSVtoRGB(hue, 0.75f, 0.9f, r, g, b);
+    }
+
+    void GetTesseractHeaderRGB(int offset, float& r, float& g, float& b)
+    {
+        const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        const float state = ceilf((float)(millis + offset) / 20.0f);
+        const float hue = fmodf(state, 360.0f) / 360.0f;
+        ImGui::ColorConvertHSVtoRGB(hue, 0.7f, 0.8f, r, g, b);
     }
 
     void ApplyRoundedWindowRegion(HWND hwnd, int width, int height, int radius)
@@ -933,49 +1001,76 @@ void Screen::RenderHUDPreview() {
         return;
     }
 
-    ImFont* detailFont = m_FontOverlayRegular ? m_FontOverlayRegular : ImGui::GetFont();
-    ImFont* nameFont = m_FontOverlayBold ? m_FontOverlayBold : detailFont;
-    if (!detailFont || !nameFont) {
+    ImFont* regularFont = m_FontOverlayRegular ? m_FontOverlayRegular : ImGui::GetFont();
+    ImFont* boldFont = m_FontOverlayBold ? m_FontOverlayBold : regularFont;
+    if (!regularFont || !boldFont) {
         return;
     }
 
-    const float detailFontSize = detailFont->FontSize;
+    auto* config = Bridge::Get()->GetConfig();
+    const bool riseMode = config && config->HUD.m_Mode == static_cast<int>(ArrayListMode::Rise);
+    const bool tesseractMode = config && config->HUD.m_Mode == static_cast<int>(ArrayListMode::Tesseract);
+    ImFont* nameFont = (riseMode || tesseractMode) ? regularFont : boldFont;
+    const float detailFontSize = regularFont->FontSize;
     const float nameFontSize = nameFont->FontSize;
     const float topY = 4.0f;
-    const float shadowOffset = 1.0f;
-    const float itemHeight = std::max(detailFontSize, nameFontSize) + 2.0f;
-    const float itemSpacing = 2.0f;
-    const float spaceWidth = CalcTextSizeWithFont(detailFont, " ", detailFontSize).x;
+    const float risePadX = 4.0f;
+    const float risePadY = 2.0f;
+    const float riseRectWidth = 2.0f;
+    const float itemHeight = riseMode ? ((std::max)(detailFontSize, nameFontSize) + 6.0f) : (tesseractMode ? (nameFontSize + 4.0f) : ((std::max)(detailFontSize, nameFontSize) + 2.0f));
+    const float itemSpacing = riseMode ? 0.0f : 2.0f;
+    const float spaceWidth = CalcTextSizeWithFont(regularFont, " ", detailFontSize).x;
     const float screenW = ImGui::GetIO().DisplaySize.x;
     const ImU32 shadowColor = IM_COL32(0, 0, 0, 120);
-    const ImU32 secondaryColor = IM_COL32(200, 200, 200, 255);
-    auto* config = Bridge::Get()->GetConfig();
+    const ImU32 secondaryColor = riseMode ? IM_COL32(154, 154, 154, 255) : IM_COL32(200, 200, 200, 255);
+    const ImU32 riseBackgroundColor = IM_COL32(0, 0, 0, 88);
+    const ImU32 riseWatermarkTextColor = IM_COL32(232, 232, 232, 255);
+    const ImU32 tesseractBackgroundColor = IM_COL32(25, 25, 30, 240);
+    const float tesseractPadding = 6.0f;
+    const float tesseractGapAfterText = 4.0f;
+    const float tesseractRectWidth = 3.0f;
 
     if (config && config->HUD.m_Watermark) {
         std::string nick = config->m_Username[0] != '\0' ? config->m_Username : "player";
         char fpsText[16];
         snprintf(fpsText, sizeof(fpsText), "%d FPS", (int)(ImGui::GetIO().Framerate + 0.5f));
 
-        const double tMs = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
         float hueR;
         float hueG;
         float hueB;
-        ImGui::ColorConvertHSVtoRGB((float)fmod(tMs / 2000.0, 1.0), 0.75f, 0.9f, hueR, hueG, hueB);
-        const ImU32 accentColor = IM_COL32((int)(hueR * 255), (int)(hueG * 255), (int)(hueB * 255), 255);
+        if (riseMode) {
+            GetRiseRGB(0, hueR, hueG, hueB);
+        } else if (tesseractMode) {
+            GetTesseractHeaderRGB(0, hueR, hueG, hueB);
+        } else {
+            const double tMs = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            ImGui::ColorConvertHSVtoRGB((float)fmod(tMs / 2000.0, 1.0), 0.75f, 0.9f, hueR, hueG, hueB);
+        }
+        const ImU32 accentColor = MakeColorU32(hueR, hueG, hueB);
         const std::string middle = " | " + nick + " | ";
+        const float textY = riseMode ? (topY + risePadY) : (tesseractMode ? 6.0f : topY);
+        float cursorX = riseMode ? (10.0f + risePadX) : 10.0f;
 
-        float cursorX = 10.0f;
-        drawList->AddText(nameFont, nameFontSize, ImVec2(cursorX + shadowOffset, topY + shadowOffset), shadowColor, "OpenCommunity");
-        drawList->AddText(nameFont, nameFontSize, ImVec2(cursorX, topY), accentColor, "OpenCommunity");
-        cursorX += CalcTextSizeWithFont(nameFont, "OpenCommunity", nameFontSize).x;
+        const float titleWidth = CalcTextSizeWithFont(nameFont, "OpenCommunity", nameFontSize).x;
+        const float middleWidth = CalcTextSizeWithFont(regularFont, middle.c_str(), detailFontSize).x;
+        const float fpsWidth = CalcTextSizeWithFont(regularFont, fpsText, detailFontSize).x;
 
-        drawList->AddText(detailFont, detailFontSize, ImVec2(cursorX + shadowOffset, topY + shadowOffset), shadowColor, middle.c_str());
-        drawList->AddText(detailFont, detailFontSize, ImVec2(cursorX, topY), secondaryColor, middle.c_str());
-        cursorX += CalcTextSizeWithFont(detailFont, middle.c_str(), detailFontSize).x;
+        if (riseMode) {
+            const float boxWidth = titleWidth + middleWidth + fpsWidth + risePadX * 2.0f + riseRectWidth + 1.0f;
+            const ImVec2 boxMin(10.0f, topY);
+            const ImVec2 boxMax(boxMin.x + boxWidth, topY + itemHeight);
+            drawList->AddRectFilled(boxMin, boxMax, riseBackgroundColor, 0.0f);
+            drawList->AddRectFilled(ImVec2(boxMax.x - riseRectWidth, boxMin.y), boxMax, accentColor, 0.0f);
+        }
 
-        drawList->AddText(detailFont, detailFontSize, ImVec2(cursorX + shadowOffset, topY + shadowOffset), shadowColor, fpsText);
-        drawList->AddText(detailFont, detailFontSize, ImVec2(cursorX, topY), secondaryColor, fpsText);
+        DrawShadowedText(drawList, nameFont, nameFontSize, ImVec2(cursorX, textY), riseMode ? riseWatermarkTextColor : accentColor, shadowColor, "OpenCommunity");
+        cursorX += titleWidth;
+
+        DrawShadowedText(drawList, regularFont, detailFontSize, ImVec2(cursorX, textY), secondaryColor, shadowColor, middle);
+        cursorX += middleWidth;
+
+        DrawShadowedText(drawList, regularFont, detailFontSize, ImVec2(cursorX, textY), secondaryColor, shadowColor, fpsText);
     }
 
     struct ModEntry {
@@ -994,11 +1089,11 @@ void Screen::RenderHUDPreview() {
                 continue;
             }
 
-            const std::string name = mod->GetName();
+            const std::string name = FormatModuleName(mod->GetName(), config && config->HUD.m_SpacedModules);
             const std::string tag = mod->GetTag();
             float totalWidth = CalcTextSizeWithFont(nameFont, name.c_str(), nameFontSize).x;
             if (!tag.empty()) {
-                totalWidth += spaceWidth + CalcTextSizeWithFont(detailFont, tag.c_str(), detailFontSize).x;
+                totalWidth += spaceWidth + CalcTextSizeWithFont(regularFont, tag.c_str(), detailFontSize).x;
             }
 
             activeModules.push_back({ name, tag, totalWidth });
@@ -1026,17 +1121,23 @@ void Screen::RenderHUDPreview() {
         const ImVec2 nameSizePx = CalcTextSizeWithFont(nameFont, mod.name.c_str(), nameFontSize);
         float contentWidth = nameSizePx.x;
         if (!mod.tag.empty()) {
-            contentWidth += spaceWidth + CalcTextSizeWithFont(detailFont, mod.tag.c_str(), detailFontSize).x;
+            contentWidth += spaceWidth + CalcTextSizeWithFont(regularFont, mod.tag.c_str(), detailFontSize).x;
         }
 
-        double tMsD = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
-        float bHue = (float)fmod(tMsD / 2000.0, 1.0);
-        float hueOffset = fmodf(idx * goldenRatio, 1.0f);
-        float hue = fmodf(bHue + hueOffset, 1.0f);
         float cr, cg, cb;
-        ImGui::ColorConvertHSVtoRGB(hue, 0.75f, 0.9f, cr, cg, cb);
-        ImU32 modColor = IM_COL32((int)(cr * 255), (int)(cg * 255), (int)(cb * 255), 255);
+        if (riseMode) {
+            GetRiseRGB(idx, cr, cg, cb);
+        } else if (tesseractMode) {
+            GetTesseractRGB(idx, cr, cg, cb);
+        } else {
+            double tMsD = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            float bHue = (float)fmod(tMsD / 2000.0, 1.0);
+            float hueOffset = fmodf(idx * goldenRatio, 1.0f);
+            float hue = fmodf(bHue + hueOffset, 1.0f);
+            ImGui::ColorConvertHSVtoRGB(hue, 0.75f, 0.9f, cr, cg, cb);
+        }
+        const ImU32 modColor = MakeColorU32(cr, cg, cb);
 
         if (slideProgress.find(mod.name) == slideProgress.end())
             slideProgress[mod.name] = 0.0f;
@@ -1049,19 +1150,40 @@ void Screen::RenderHUDPreview() {
         }
         float eased = 1.0f - (1.0f - progress) * (1.0f - progress) * (1.0f - progress);
 
-        float targetX = screenW - contentWidth - 6.0f;
-        float currentX = screenW + (targetX - screenW) * eased;
-        float yPos = topY + idx * (itemHeight + itemSpacing);
-        float textX = currentX;
-        float textY = yPos;
+        float layoutWidth = contentWidth;
+        if (tesseractMode) {
+            layoutWidth = nameSizePx.x;
+            if (!mod.tag.empty()) {
+                layoutWidth += 4.0f + CalcTextSizeWithFont(regularFont, mod.tag.c_str(), detailFontSize).x;
+            }
+        }
 
-        drawList->AddText(nameFont, nameFontSize, ImVec2(textX + shadowOffset, textY + shadowOffset), shadowColor, mod.name.c_str());
-        drawList->AddText(nameFont, nameFontSize, ImVec2(textX, textY), modColor, mod.name.c_str());
+        const float boxWidth = riseMode
+            ? (layoutWidth + risePadX * 2.0f + riseRectWidth + 1.0f)
+            : (tesseractMode ? (layoutWidth + tesseractPadding + tesseractGapAfterText + tesseractRectWidth) : layoutWidth);
+        float targetX = screenW - boxWidth - (riseMode ? 4.0f : 6.0f);
+        float currentX = screenW + (targetX - screenW) * eased;
+        float yPos = (tesseractMode ? 2.0f : topY) + idx * (itemHeight + itemSpacing);
+        float textX = riseMode ? (currentX + risePadX) : (tesseractMode ? (currentX + tesseractPadding) : currentX);
+        float textY = riseMode ? (yPos + risePadY) : (tesseractMode ? (yPos + 2.0f) : yPos);
+
+        if (riseMode) {
+            const ImVec2 boxMin(currentX, yPos);
+            const ImVec2 boxMax(currentX + boxWidth, yPos + itemHeight);
+            drawList->AddRectFilled(boxMin, boxMax, riseBackgroundColor, 0.0f);
+            drawList->AddRectFilled(ImVec2(boxMax.x - riseRectWidth, boxMin.y), boxMax, modColor, 0.0f);
+        } else if (tesseractMode) {
+            const ImVec2 boxMin(currentX, yPos);
+            const ImVec2 boxMax(currentX + boxWidth, yPos + itemHeight);
+            drawList->AddRectFilled(boxMin, boxMax, tesseractBackgroundColor, 5.0f, ImDrawFlags_RoundCornersLeft);
+            drawList->AddRectFilled(ImVec2(boxMax.x - tesseractRectWidth, boxMin.y), boxMax, modColor);
+        }
+
+        DrawShadowedText(drawList, nameFont, nameFontSize, ImVec2(textX, textY), modColor, shadowColor, mod.name);
 
         if (!mod.tag.empty()) {
-            float tagX = textX + nameSizePx.x + spaceWidth;
-            drawList->AddText(detailFont, detailFontSize, ImVec2(tagX + shadowOffset, textY + shadowOffset), shadowColor, mod.tag.c_str());
-            drawList->AddText(detailFont, detailFontSize, ImVec2(tagX, textY), secondaryColor, mod.tag.c_str());
+            float tagX = textX + nameSizePx.x + (tesseractMode ? 4.0f : spaceWidth);
+            DrawShadowedText(drawList, regularFont, detailFontSize, ImVec2(tagX, textY), secondaryColor, shadowColor, mod.tag);
         }
 
         idx++;

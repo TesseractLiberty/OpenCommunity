@@ -1,19 +1,26 @@
 #pragma once
 
+enum class ArrayListMode {
+    Default = 0,
+    Rise = 1,
+    Tesseract = 2
+};
+
 struct ModuleConfig {
     bool m_Destruct = false;
     bool m_FullDestruct = false;
     char m_Username[64] = {};
 
     struct {
-        bool m_Enabled = false;
+        bool m_Enabled = true;
         bool m_Watermark = true;
+        bool m_SpacedModules = false;
         bool m_ColorBar = true;
         bool m_Rainbow = true;
         bool m_Background = true;
         float m_RainbowSpeed = 1.0f;
         float m_Color[4] = { 78.0f / 255.0f, 86.0f / 255.0f, 107.0f / 255.0f, 1.0f };
-        int m_Style = 1;
+        int m_Mode = static_cast<int>(ArrayListMode::Default);
     } HUD;
 
     struct {
