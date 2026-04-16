@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "RenderHook.h"
 #include "../features/render/HUD.h"
+#include "../features/visuals/DamageIndicator.h"
 #include "Bridge.h"
 #include "../../../shared/common/FeatureManager.h"
 
@@ -8,6 +9,8 @@
 #include "../../../deps/imgui/imgui.h"
 #include "../../../deps/imgui/imgui_impl_opengl2.hpp"
 #include "../../../deps/imgui/fonts.hpp"
+#include "../../../deps/imgui/open_sans_bold_font.h"
+#include "../../../deps/imgui/open_sans_regular_font.h"
 #include "../../../deps/imgui/play_bold_font.h"
 #include "../../../deps/imgui/play_regular_font.h"
 
@@ -21,6 +24,8 @@ static std::once_flag g_fontsOnce;
 static ImFont* g_overlayRegularFont = nullptr;
 static ImFont* g_overlayBoldFont = nullptr;
 static ImFont* g_overlayVapeFont = nullptr;
+static ImFont* g_overlayOpenSansRegularFont = nullptr;
+static ImFont* g_overlayOpenSansBoldFont = nullptr;
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
@@ -103,6 +108,22 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
             &fontCfg
         );
 
+        fontCfg.FontDataOwnedByAtlas = false;
+        g_overlayOpenSansRegularFont = io.Fonts->AddFontFromMemoryTTF(
+            const_cast<unsigned char*>(fonts::open_sans_regular_data),
+            fonts::open_sans_regular_size,
+            16.0f,
+            &fontCfg
+        );
+
+        fontCfg.FontDataOwnedByAtlas = false;
+        g_overlayOpenSansBoldFont = io.Fonts->AddFontFromMemoryTTF(
+            const_cast<unsigned char*>(fonts::open_sans_bold_data),
+            fonts::open_sans_bold_size,
+            16.0f,
+            &fontCfg
+        );
+
         const auto vapeFontPath = FindOverlayFontPath();
         if (!vapeFontPath.empty()) {
             ImFontConfig vapeCfg;
@@ -126,8 +147,15 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
         if (!g_overlayVapeFont) {
             g_overlayVapeFont = g_overlayRegularFont;
         }
+        if (!g_overlayOpenSansRegularFont) {
+            g_overlayOpenSansRegularFont = g_overlayRegularFont;
+        }
+        if (!g_overlayOpenSansBoldFont) {
+            g_overlayOpenSansBoldFont = g_overlayOpenSansRegularFont;
+        }
 
         HUD::Get()->SetFonts(g_overlayRegularFont, g_overlayBoldFont, g_overlayVapeFont);
+        DamageIndicator::SetFonts(g_overlayOpenSansRegularFont, g_overlayOpenSansBoldFont);
         ImGui_ImplOpenGL2_Init();
         g_fontsInitialized = true;
     });
@@ -197,6 +225,8 @@ void RenderHook::Shutdown() {
         g_overlayRegularFont = nullptr;
         g_overlayBoldFont = nullptr;
         g_overlayVapeFont = nullptr;
+        g_overlayOpenSansRegularFont = nullptr;
+        g_overlayOpenSansBoldFont = nullptr;
         g_fontsInitialized = false;
     }
 

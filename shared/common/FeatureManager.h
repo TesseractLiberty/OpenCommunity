@@ -25,7 +25,8 @@ enum class OptionType {
     Toggle,
     SliderInt,
     SliderFloat,
-    Combo
+    Combo,
+    Color
 };
 
 struct ModuleOption {
@@ -35,6 +36,7 @@ struct ModuleOption {
     bool boolValue = false;
     int intValue = 0;
     float floatValue = 0.0f;
+    float colorValue[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 
     int intMin = 0, intMax = 100;
     float floatMin = 0.0f, floatMax = 1.0f;
@@ -76,6 +78,17 @@ struct ModuleOption {
         o.type = OptionType::Combo;
         o.comboItems = items;
         o.comboIndex = defaultIndex;
+        return o;
+    }
+
+    static ModuleOption Color(const std::string& name, float r, float g, float b, float a = 1.0f) {
+        ModuleOption o;
+        o.name = name;
+        o.type = OptionType::Color;
+        o.colorValue[0] = r;
+        o.colorValue[1] = g;
+        o.colorValue[2] = b;
+        o.colorValue[3] = a;
         return o;
     }
 };

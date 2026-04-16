@@ -1585,6 +1585,15 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     ImGui::PopItemWidth();
                     break;
                 }
+                case OptionType::Color: {
+                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+                    ImGui::SetCursorScreenPos(ImVec2(optX + optW - sliderW, optY));
+                    ImGui::PushItemWidth(sliderW);
+                    ImGui::ColorEdit3(optId, opt.colorValue, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
+                    opt.colorValue[3] = 1.0f;
+                    ImGui::PopItemWidth();
+                    break;
+                }
                 }
 
                 optY += optLineH;

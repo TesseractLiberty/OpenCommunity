@@ -7,6 +7,11 @@ enum class ArrayListMode {
     VapeV4 = 3
 };
 
+enum class DamageIndicatorMode {
+    J3Ultimate = 0,
+    Astralis = 1
+};
+
 struct ModuleConfig {
     bool m_Destruct = false;
     bool m_FullDestruct = false;
@@ -72,6 +77,8 @@ struct ModuleConfig {
 
     struct {
         bool m_Enabled = false;
+        int m_Mode = static_cast<int>(DamageIndicatorMode::J3Ultimate);
+        float m_Color[4] = { 242.0f / 255.0f, 141.0f / 255.0f, 39.0f / 255.0f, 1.0f };
         float m_Scale = 1.0f;
         float m_X = 0.5f;
         float m_Y = 0.5f;
