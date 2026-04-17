@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "HUD.h"
 #include "../../core/Bridge.h"
+#include "../../game/classes/Minecraft.h"
 #include "../../game/jni/Class.h"
 #include "../../game/jni/Field.h"
 #include "../../game/jni/GameInstance.h"
@@ -43,6 +44,32 @@ namespace {
 
     JNIEnv* GetCurrentEnv() {
         return g_Game ? g_Game->GetCurrentEnv() : nullptr;
+    }
+
+    bool ShouldRenderIngameHud() {
+        if (!g_Game || !g_Game->IsInitialized()) {
+            return false;
+        }
+
+        JNIEnv* env = GetCurrentEnv();
+        if (!env) {
+            return false;
+        }
+
+        jobject world = Minecraft::GetTheWorld(env);
+        if (!world) {
+            return false;
+        }
+
+        jobject player = Minecraft::GetThePlayer(env);
+        if (!player) {
+            env->DeleteLocalRef(world);
+            return false;
+        }
+
+        env->DeleteLocalRef(player);
+        env->DeleteLocalRef(world);
+        return true;
     }
 
     ImU32 MakeColorU32(float r, float g, float b, float a = 1.0f) {
@@ -396,6 +423,14 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
     (void)screenH;
 
     if (!config || !config->HUD.m_Enabled) {
+        return;
+    }
+
+    if (!ShouldRenderIngameHud()) {
+        const auto now = std::chrono::steady_clock::now();
+        m_FrameCount = 0;
+        m_LastFpsTime = now;
+        m_LastFrameTime = now;
         return;
     }
 
