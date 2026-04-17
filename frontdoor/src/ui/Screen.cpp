@@ -25,11 +25,53 @@
 #include <mutex>
 #include <thread>
 #include <urlmon.h>
+#include <winhttp.h>
 
 #pragma comment(lib, "urlmon.lib")
+#pragma comment(lib, "winhttp.lib")
 
 namespace
 {
+    constexpr const char* kCreatorProfileUrl = "https://github.com/Lopesnextgen";
+    constexpr const char* kDiscordProfileUrl = "https://discord.com/fuckscriptkiddies";
+    constexpr const char* kProjectRepositoryUrl = "https://github.com/TesseractLiberty/OpenCommunity";
+    constexpr const char* kProjectReleasesUrl = "https://github.com/TesseractLiberty/OpenCommunity/releases";
+    constexpr wchar_t kGitHubApiHost[] = L"api.github.com";
+    constexpr wchar_t kGitHubLatestReleasePath[] = L"/repos/TesseractLiberty/OpenCommunity/releases/latest";
+
+    enum class ReleaseCheckState {
+        Idle,
+        Checking,
+        UpToDate,
+        UpdateAvailable,
+        LocalBuild,
+        Error
+    };
+
+    struct LocalBuildInfo
+    {
+        std::string label = "local build";
+        std::string releaseTag;
+        std::string commitHash;
+        bool isReleaseTag = false;
+    };
+
+    struct ReleaseCheckStatus
+    {
+        ReleaseCheckState state = ReleaseCheckState::Idle;
+        std::string currentLabel = "local build";
+        std::string latestTag;
+        std::string latestUrl = kProjectReleasesUrl;
+        std::string message = "Use Verify updates to compare this build with the latest GitHub release.";
+    };
+
+    struct SettingsTextSegment
+    {
+        std::string text;
+        const char* url = nullptr;
+        bool accent = false;
+    };
+
     struct PlayerHeadTextureEntry
     {
         ID3D11ShaderResourceView* texture = nullptr;
@@ -40,6 +82,442 @@ namespace
 
     std::mutex g_PlayerHeadCacheMutex;
     std::unordered_map<std::string, PlayerHeadTextureEntry> g_PlayerHeadCache;
+    std::mutex g_ReleaseCheckMutex;
+    std::atomic<bool> g_ReleaseCheckInProgress = false;
+
+    std::string ReadTextFile(const std::filesystem::path& filePath)
+    {
+        std::ifstream file(filePath, std::ios::binary);
+        if (!file) {
+            return {};
+        }
+
+        std::ostringstream buffer;
+        buffer << file.rdbuf();
+        return buffer.str();
+    }
+
+    std::string TrimCopy(std::string value)
+    {
+        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
+            value.erase(value.begin());
+        }
+        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
+            value.pop_back();
+        }
+        return value;
+    }
+
+    std::filesystem::path ResolveRepositoryRoot()
+    {
+        wchar_t modulePath[MAX_PATH] = {};
+        if (GetModuleFileNameW(nullptr, modulePath, MAX_PATH) == 0) {
+            return {};
+        }
+
+        auto current = std::filesystem::path(modulePath).parent_path();
+        while (!current.empty()) {
+            if (std::filesystem::exists(current / ".git")) {
+                return current;
+            }
+
+            const auto parent = current.parent_path();
+            if (parent == current) {
+                break;
+            }
+            current = parent;
+        }
+
+        return {};
+    }
+
+    std::filesystem::path ResolveGitDirectory(const std::filesystem::path& repositoryRoot)
+    {
+        const auto gitPath = repositoryRoot / ".git";
+        if (std::filesystem::is_directory(gitPath)) {
+            return gitPath;
+        }
+
+        if (!std::filesystem::is_regular_file(gitPath)) {
+            return {};
+        }
+
+        const std::string descriptor = TrimCopy(ReadTextFile(gitPath));
+        constexpr std::string_view prefix = "gitdir:";
+        if (descriptor.rfind(prefix.data(), 0) != 0) {
+            return {};
+        }
+
+        std::filesystem::path resolvedPath = TrimCopy(descriptor.substr(prefix.size()));
+        if (resolvedPath.is_relative()) {
+            resolvedPath = repositoryRoot / resolvedPath;
+        }
+
+        return resolvedPath;
+    }
+
+    std::string FindPackedRefHash(const std::filesystem::path& gitDirectory, const std::string& refName)
+    {
+        std::ifstream file(gitDirectory / "packed-refs");
+        if (!file) {
+            return {};
+        }
+
+        std::string line;
+        while (std::getline(file, line)) {
+            const std::string trimmed = TrimCopy(line);
+            if (trimmed.empty() || trimmed[0] == '#' || trimmed[0] == '^') {
+                continue;
+            }
+
+            const size_t split = trimmed.find(' ');
+            if (split == std::string::npos) {
+                continue;
+            }
+
+            if (trimmed.substr(split + 1) == refName) {
+                return trimmed.substr(0, split);
+            }
+        }
+
+        return {};
+    }
+
+    std::string ResolveGitReferenceHash(const std::filesystem::path& gitDirectory, const std::string& refName)
+    {
+        const auto refPath = gitDirectory / std::filesystem::path(refName);
+        const std::string directHash = TrimCopy(ReadTextFile(refPath));
+        if (!directHash.empty()) {
+            return directHash;
+        }
+
+        return FindPackedRefHash(gitDirectory, refName);
+    }
+
+    std::string ResolveGitTagForHash(const std::filesystem::path& gitDirectory, const std::string& headHash)
+    {
+        if (headHash.empty()) {
+            return {};
+        }
+
+        const auto tagsDirectory = gitDirectory / "refs" / "tags";
+        if (std::filesystem::exists(tagsDirectory)) {
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(tagsDirectory)) {
+                if (!entry.is_regular_file()) {
+                    continue;
+                }
+
+                if (TrimCopy(ReadTextFile(entry.path())) != headHash) {
+                    continue;
+                }
+
+                std::error_code relativeError;
+                const auto relative = std::filesystem::relative(entry.path(), tagsDirectory, relativeError);
+                if (!relativeError) {
+                    return relative.generic_string();
+                }
+            }
+        }
+
+        std::ifstream packedRefs(gitDirectory / "packed-refs");
+        if (!packedRefs) {
+            return {};
+        }
+
+        std::string line;
+        while (std::getline(packedRefs, line)) {
+            const std::string trimmed = TrimCopy(line);
+            if (trimmed.empty() || trimmed[0] == '#' || trimmed[0] == '^') {
+                continue;
+            }
+
+            const size_t split = trimmed.find(' ');
+            if (split == std::string::npos) {
+                continue;
+            }
+
+            const std::string hash = trimmed.substr(0, split);
+            const std::string refName = trimmed.substr(split + 1);
+            if (hash == headHash && refName.rfind("refs/tags/", 0) == 0) {
+                return refName.substr(strlen("refs/tags/"));
+            }
+        }
+
+        return {};
+    }
+
+    LocalBuildInfo BuildLocalBuildInfo()
+    {
+        LocalBuildInfo info;
+
+        const auto repositoryRoot = ResolveRepositoryRoot();
+        if (repositoryRoot.empty()) {
+            return info;
+        }
+
+        const auto gitDirectory = ResolveGitDirectory(repositoryRoot);
+        if (gitDirectory.empty()) {
+            return info;
+        }
+
+        const std::string headContent = TrimCopy(ReadTextFile(gitDirectory / "HEAD"));
+        if (headContent.empty()) {
+            return info;
+        }
+
+        std::string headHash;
+        constexpr std::string_view refPrefix = "ref:";
+        if (headContent.rfind(refPrefix.data(), 0) == 0) {
+            const std::string refName = TrimCopy(headContent.substr(refPrefix.size()));
+            headHash = ResolveGitReferenceHash(gitDirectory, refName);
+        } else {
+            headHash = headContent;
+        }
+
+        if (headHash.empty()) {
+            return info;
+        }
+
+        info.commitHash = headHash;
+
+        const std::string releaseTag = ResolveGitTagForHash(gitDirectory, headHash);
+        if (!releaseTag.empty()) {
+            info.label = releaseTag;
+            info.releaseTag = releaseTag;
+            info.isReleaseTag = true;
+            return info;
+        }
+
+        const size_t shortHashLength = (std::min)(static_cast<size_t>(7), headHash.size());
+        info.label = "commit " + headHash.substr(0, shortHashLength);
+        return info;
+    }
+
+    const LocalBuildInfo& GetCurrentBuildInfo()
+    {
+        static const LocalBuildInfo buildInfo = BuildLocalBuildInfo();
+        return buildInfo;
+    }
+
+    ReleaseCheckStatus CreateDefaultReleaseCheckStatus()
+    {
+        ReleaseCheckStatus status;
+        status.currentLabel = GetCurrentBuildInfo().label;
+        return status;
+    }
+
+    ReleaseCheckStatus g_ReleaseCheckStatus = CreateDefaultReleaseCheckStatus();
+
+    void OpenExternalUrl(const char* url)
+    {
+        if (!url || !url[0]) {
+            return;
+        }
+
+        ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
+    }
+
+    bool FetchLatestReleaseJson(std::string& outBody, DWORD& outStatusCode, std::string& outError)
+    {
+        outBody.clear();
+        outStatusCode = 0;
+        outError.clear();
+
+        HINTERNET session = WinHttpOpen(L"OpenCommunity/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+        if (!session) {
+            outError = "Failed to initialize HTTP session.";
+            return false;
+        }
+
+        HINTERNET connection = WinHttpConnect(session, kGitHubApiHost, static_cast<INTERNET_PORT>(443), 0);
+        if (!connection) {
+            WinHttpCloseHandle(session);
+            outError = "Failed to connect to GitHub.";
+            return false;
+        }
+
+        HINTERNET request = WinHttpOpenRequest(
+            connection,
+            L"GET",
+            kGitHubLatestReleasePath,
+            nullptr,
+            WINHTTP_NO_REFERER,
+            WINHTTP_DEFAULT_ACCEPT_TYPES,
+            WINHTTP_FLAG_SECURE);
+        if (!request) {
+            WinHttpCloseHandle(connection);
+            WinHttpCloseHandle(session);
+            outError = "Failed to create the update request.";
+            return false;
+        }
+
+        const wchar_t* requestHeaders =
+            L"Accept: application/vnd.github+json\r\n"
+            L"X-GitHub-Api-Version: 2022-11-28\r\n";
+        WinHttpAddRequestHeaders(request, requestHeaders, -1L, WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
+
+        const bool sent = WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) == TRUE;
+        const bool received = sent && WinHttpReceiveResponse(request, nullptr) == TRUE;
+        if (!received) {
+            WinHttpCloseHandle(request);
+            WinHttpCloseHandle(connection);
+            WinHttpCloseHandle(session);
+            outError = "Failed to fetch the latest release.";
+            return false;
+        }
+
+        DWORD statusCodeSize = sizeof(outStatusCode);
+        WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &outStatusCode, &statusCodeSize, WINHTTP_NO_HEADER_INDEX);
+
+        for (;;) {
+            DWORD availableBytes = 0;
+            if (WinHttpQueryDataAvailable(request, &availableBytes) != TRUE) {
+                outError = "Failed while reading the update response.";
+                WinHttpCloseHandle(request);
+                WinHttpCloseHandle(connection);
+                WinHttpCloseHandle(session);
+                return false;
+            }
+
+            if (availableBytes == 0) {
+                break;
+            }
+
+            std::string chunk(availableBytes, '\0');
+            DWORD bytesRead = 0;
+            if (WinHttpReadData(request, chunk.data(), availableBytes, &bytesRead) != TRUE) {
+                outError = "Failed while reading the update response.";
+                WinHttpCloseHandle(request);
+                WinHttpCloseHandle(connection);
+                WinHttpCloseHandle(session);
+                return false;
+            }
+
+            chunk.resize(bytesRead);
+            outBody += chunk;
+        }
+
+        WinHttpCloseHandle(request);
+        WinHttpCloseHandle(connection);
+        WinHttpCloseHandle(session);
+        return true;
+    }
+
+    std::string ExtractJsonStringValue(const std::string& json, const char* key)
+    {
+        if (!key || !key[0]) {
+            return {};
+        }
+
+        const std::string pattern = "\"" + std::string(key) + "\"";
+        const size_t keyPos = json.find(pattern);
+        if (keyPos == std::string::npos) {
+            return {};
+        }
+
+        const size_t colonPos = json.find(':', keyPos + pattern.size());
+        if (colonPos == std::string::npos) {
+            return {};
+        }
+
+        const size_t firstQuote = json.find('"', colonPos + 1);
+        if (firstQuote == std::string::npos) {
+            return {};
+        }
+
+        std::string result;
+        bool escaping = false;
+        for (size_t index = firstQuote + 1; index < json.size(); ++index) {
+            const char current = json[index];
+            if (escaping) {
+                switch (current) {
+                case '"': result.push_back('"'); break;
+                case '\\': result.push_back('\\'); break;
+                case '/': result.push_back('/'); break;
+                case 'b': result.push_back('\b'); break;
+                case 'f': result.push_back('\f'); break;
+                case 'n': result.push_back('\n'); break;
+                case 'r': result.push_back('\r'); break;
+                case 't': result.push_back('\t'); break;
+                default: result.push_back(current); break;
+                }
+                escaping = false;
+                continue;
+            }
+
+            if (current == '\\') {
+                escaping = true;
+                continue;
+            }
+
+            if (current == '"') {
+                return result;
+            }
+
+            result.push_back(current);
+        }
+
+        return {};
+    }
+
+    void StartReleaseCheckAsync()
+    {
+        if (g_ReleaseCheckInProgress.exchange(true)) {
+            return;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(g_ReleaseCheckMutex);
+            g_ReleaseCheckStatus = CreateDefaultReleaseCheckStatus();
+            g_ReleaseCheckStatus.state = ReleaseCheckState::Checking;
+            g_ReleaseCheckStatus.message = "Checking the latest GitHub release...";
+        }
+
+        std::thread([]() {
+            ReleaseCheckStatus nextStatus = CreateDefaultReleaseCheckStatus();
+            nextStatus.state = ReleaseCheckState::Error;
+
+            DWORD statusCode = 0;
+            std::string responseBody;
+            std::string requestError;
+            if (!FetchLatestReleaseJson(responseBody, statusCode, requestError)) {
+                nextStatus.message = requestError.empty() ? "Unable to verify updates right now." : requestError;
+            } else if (statusCode == 404) {
+                nextStatus.message = "No published GitHub release was found yet.";
+            } else if (statusCode != 200) {
+                nextStatus.message = "GitHub returned HTTP " + std::to_string(statusCode) + " while checking releases.";
+            } else {
+                nextStatus.latestTag = ExtractJsonStringValue(responseBody, "tag_name");
+                nextStatus.latestUrl = ExtractJsonStringValue(responseBody, "html_url");
+                if (nextStatus.latestUrl.empty()) {
+                    nextStatus.latestUrl = kProjectReleasesUrl;
+                }
+
+                if (nextStatus.latestTag.empty()) {
+                    nextStatus.message = "The latest release response did not include a tag.";
+                } else {
+                    const auto& buildInfo = GetCurrentBuildInfo();
+                    if (buildInfo.isReleaseTag && _stricmp(buildInfo.releaseTag.c_str(), nextStatus.latestTag.c_str()) == 0) {
+                        nextStatus.state = ReleaseCheckState::UpToDate;
+                        nextStatus.message = "This build matches the latest published release.";
+                    } else if (buildInfo.isReleaseTag) {
+                        nextStatus.state = ReleaseCheckState::UpdateAvailable;
+                        nextStatus.message = "A newer published release is available.";
+                    } else {
+                        nextStatus.state = ReleaseCheckState::LocalBuild;
+                        nextStatus.message = "This build is local and does not map to a published release tag.";
+                    }
+                }
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(g_ReleaseCheckMutex);
+                g_ReleaseCheckStatus = std::move(nextStatus);
+            }
+
+            g_ReleaseCheckInProgress.store(false);
+        }).detach();
+    }
 
     float Clamp01(float value)
     {
@@ -82,6 +560,101 @@ namespace
         if (!font)
             return ImGui::CalcTextSize(text);
         return font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, text);
+    }
+
+    std::vector<std::string> TokenizeWrappedText(const std::string& text)
+    {
+        std::vector<std::string> tokens;
+        size_t index = 0;
+        while (index < text.size()) {
+            const bool isWhitespace = std::isspace(static_cast<unsigned char>(text[index])) != 0;
+            size_t next = index + 1;
+            while (next < text.size() && (std::isspace(static_cast<unsigned char>(text[next])) != 0) == isWhitespace) {
+                ++next;
+            }
+
+            tokens.push_back(text.substr(index, next - index));
+            index = next;
+        }
+
+        return tokens;
+    }
+
+    float DrawWrappedSettingsLine(
+        ImDrawList* drawList,
+        const ImVec2& startPos,
+        float maxWidth,
+        const std::vector<SettingsTextSegment>& segments,
+        ImFont* regularFont,
+        ImFont* accentFont,
+        float fontSize,
+        ImU32 textColor,
+        ImU32 accentColor,
+        ImU32 accentHoverColor)
+    {
+        if (maxWidth <= 0.0f) {
+            return 0.0f;
+        }
+
+        const bool canDraw = drawList != nullptr;
+        const float lineAdvance = fontSize + 8.0f;
+        float cursorX = startPos.x;
+        float cursorY = startPos.y;
+
+        for (const auto& segment : segments) {
+            ImFont* font = segment.accent && accentFont ? accentFont : regularFont;
+            if (!font) {
+                font = ImGui::GetFont();
+            }
+
+            for (const auto& token : TokenizeWrappedText(segment.text)) {
+                if (token.empty()) {
+                    continue;
+                }
+
+                const bool whitespaceOnly = std::all_of(token.begin(), token.end(), [](unsigned char ch) {
+                    return std::isspace(ch) != 0;
+                });
+
+                const ImVec2 tokenSize = CalcTextSizeWithFont(font, token.c_str(), fontSize);
+                if (!whitespaceOnly && cursorX > startPos.x && (cursorX + tokenSize.x) > (startPos.x + maxWidth)) {
+                    cursorX = startPos.x;
+                    cursorY += lineAdvance;
+                }
+
+                if (whitespaceOnly && cursorX <= startPos.x) {
+                    continue;
+                }
+
+                const bool isLink = segment.url && segment.url[0] && !whitespaceOnly;
+                ImU32 drawColor = segment.accent ? accentColor : textColor;
+                if (isLink && canDraw) {
+                    const ImVec2 tokenMin(cursorX, cursorY);
+                    const ImVec2 tokenMax(cursorX + tokenSize.x, cursorY + fontSize + 2.0f);
+                    const bool hovered = ImGui::IsMouseHoveringRect(tokenMin, tokenMax, false);
+                    drawColor = hovered ? accentHoverColor : accentColor;
+                    if (hovered) {
+                        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                            OpenExternalUrl(segment.url);
+                        }
+                    }
+                }
+
+                if (canDraw) {
+                    drawList->AddText(font, fontSize, ImVec2(cursorX, cursorY), drawColor, token.c_str());
+                }
+
+                if (isLink && canDraw) {
+                    const float underlineY = cursorY + fontSize + 1.0f;
+                    drawList->AddLine(ImVec2(cursorX, underlineY), ImVec2(cursorX + tokenSize.x, underlineY), drawColor, 1.0f);
+                }
+
+                cursorX += tokenSize.x;
+            }
+        }
+
+        return (cursorY - startPos.y) + lineAdvance;
     }
 
     ImU32 MakeColorU32(float r, float g, float b, float a = 1.0f)
@@ -729,6 +1302,96 @@ namespace
         drawList->AddRect(ImVec2(min.x + 1.0f, min.y + 1.0f), ImVec2(max.x - 1.0f, max.y - 1.0f), color::GetGlassHighlightU32(0.26f), rounding - 1.0f, 0, 1.0f);
     }
 
+    void DrawWindowMoveBlurOverlay(ImDrawList* drawList, const ImVec2& origin, float width, float height, float time)
+    {
+        if (!drawList || width <= 0.0f || height <= 0.0f) {
+            return;
+        }
+
+        const float pulse = 0.5f + 0.5f * std::sinf(time * 4.5f);
+        const int outerAlpha = 118 + static_cast<int>(pulse * 20.0f);
+        const int innerAlpha = 72 + static_cast<int>(pulse * 18.0f);
+        const int edgeAlpha = 38 + static_cast<int>(pulse * 10.0f);
+
+        const ImVec2 max(origin.x + width, origin.y + height);
+        drawList->AddRectFilled(origin, max, IM_COL32(255, 255, 255, outerAlpha), 0.0f);
+        drawList->AddRectFilled(origin, max, IM_COL32(248, 250, 255, innerAlpha), 0.0f);
+
+        for (int index = 0; index < 4; ++index) {
+            const float inset = 14.0f + index * 10.0f;
+            const int alpha = (std::max)(8, edgeAlpha - index * 8);
+            drawList->AddRect(
+                ImVec2(origin.x + inset, origin.y + inset),
+                ImVec2(max.x - inset, max.y - inset),
+                IM_COL32(255, 255, 255, alpha),
+                26.0f,
+                0,
+                1.0f);
+        }
+
+        drawList->AddRectFilled(origin, ImVec2(max.x, origin.y + 42.0f), IM_COL32(244, 247, 252, 190), 0.0f);
+        drawList->AddLine(ImVec2(origin.x, origin.y + 42.0f), ImVec2(max.x, origin.y + 42.0f), IM_COL32(214, 220, 230, 210), 1.0f);
+    }
+
+    bool DrawRoundedActionButton(
+        ImDrawList* drawList,
+        const char* id,
+        const char* label,
+        const ImVec2& pos,
+        const ImVec2& size,
+        float rounding,
+        ImU32 baseColor,
+        ImU32 hoverColor,
+        ImU32 activeColor,
+        ImU32 borderColor,
+        ImU32 textColor,
+        ImFont* font,
+        float fontSize,
+        bool enabled)
+    {
+        if (!drawList || !id || !label || size.x <= 0.0f || size.y <= 0.0f) {
+            return false;
+        }
+
+        ImGui::SetCursorScreenPos(pos);
+        const bool pressed = ImGui::InvisibleButton(id, size) && enabled;
+        const bool hovered = enabled && ImGui::IsItemHovered();
+        const bool held = enabled && ImGui::IsItemActive();
+        if (hovered) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        }
+
+        ImU32 fillColor = baseColor;
+        if (!enabled) {
+            fillColor = IM_COL32(150, 156, 167, 190);
+            borderColor = IM_COL32(130, 136, 146, 120);
+            textColor = IM_COL32(245, 246, 250, 215);
+        } else if (held) {
+            fillColor = activeColor;
+        } else if (hovered) {
+            fillColor = hoverColor;
+        }
+
+        const ImVec2 min = pos;
+        const ImVec2 max(pos.x + size.x, pos.y + size.y);
+        drawList->AddRectFilled(min, max, fillColor, rounding);
+        drawList->AddRectFilled(
+            ImVec2(min.x + 1.0f, min.y + 1.0f),
+            ImVec2(max.x - 1.0f, max.y - 1.0f),
+            IM_COL32(255, 255, 255, enabled ? (hovered ? 18 : 10) : 6),
+            rounding - 1.0f);
+        drawList->AddRect(min, max, borderColor, rounding, 0, 1.0f);
+
+        ImFont* textFont = font ? font : ImGui::GetFont();
+        const float textFontSize = fontSize > 0.0f ? fontSize : ImGui::GetFontSize();
+        const ImVec2 textSize = CalcTextSizeWithFont(textFont, label, textFontSize);
+        const ImVec2 textPos(
+            min.x + (size.x - textSize.x) * 0.5f,
+            min.y + (size.y - textSize.y) * 0.5f - 1.0f);
+        drawList->AddText(textFont, textFontSize, textPos, textColor, label);
+        return pressed;
+    }
+
     void DrawCloseButton(float width, bool& running)
     {
         ImGui::SetCursorPos(ImVec2(width - 60.0f, 26.0f));
@@ -772,6 +1435,35 @@ LRESULT WINAPI Screen::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 }
 
 LRESULT Screen::HandleWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_NCHITTEST: {
+        const LRESULT defaultHit = DefWindowProcW(hwnd, msg, wParam, lParam);
+        if (defaultHit != HTCLIENT) {
+            return defaultHit;
+        }
+
+        POINT cursorPoint = {
+            static_cast<LONG>(static_cast<SHORT>(LOWORD(lParam))),
+            static_cast<LONG>(static_cast<SHORT>(HIWORD(lParam)))
+        };
+        ScreenToClient(hwnd, &cursorPoint);
+        constexpr LONG dragHeight = 42;
+        if (cursorPoint.y >= 0 && cursorPoint.y < dragHeight) {
+            return HTCAPTION;
+        }
+        return HTCLIENT;
+    }
+    case WM_ENTERSIZEMOVE:
+        m_IsWindowMoveActive = true;
+        return 0;
+    case WM_EXITSIZEMOVE:
+        m_IsWindowMoveActive = false;
+        return 0;
+    case WM_CAPTURECHANGED:
+        m_IsWindowMoveActive = false;
+        break;
+    }
+
     if (ImGui_ImplWin32_WndProcHandler(hwnd, msg, wParam, lParam)) {
         return true;
     }
@@ -803,6 +1495,7 @@ LRESULT Screen::HandleWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         
     case WM_CLOSE:
     case WM_DESTROY:
+        m_IsWindowMoveActive = false;
         m_Running = false;
         PostQuitMessage(0);
         return 0;
@@ -979,6 +1672,10 @@ void Screen::LoadIconTextures() {
     LoadTextureFromMemory(icons::running_icon_data, icons::running_icon_data_size, &m_IconMovement, &w, &h, true);
     LoadTextureFromMemory(icons::eye_icon_data, icons::eye_icon_data_size, &m_IconVisuals, &w, &h, true);
     LoadTextureFromMemory(icons::settings_icon_data, icons::settings_icon_data_size, &m_IconSettings, &w, &h, true);
+    const auto infoLampPath = ResolveModuleImagePath("Light-Bulb-256.png");
+    if (!infoLampPath.empty()) {
+        m_InfoLampTexture = CreateTextureFromFile(m_Device, infoLampPath);
+    }
     m_IconW = w;
     m_IconH = h;
 }
@@ -988,6 +1685,7 @@ void Screen::ReleaseIconTextures() {
     if (m_IconMovement) { m_IconMovement->Release(); m_IconMovement = nullptr; }
     if (m_IconVisuals) { m_IconVisuals->Release(); m_IconVisuals = nullptr; }
     if (m_IconSettings) { m_IconSettings->Release(); m_IconSettings = nullptr; }
+    if (m_InfoLampTexture) { m_InfoLampTexture->Release(); m_InfoLampTexture = nullptr; }
 }
 
 bool Screen::Initialize() {
@@ -2230,7 +2928,296 @@ void Screen::RenderVisualsTab() {
 
 void Screen::RenderSettingsTab() {
     const float contentW = m_Width - 52.0f - 16.0f - 16.0f;
-    RenderModulesForCategory(ModuleCategory::Settings, contentW, m_Height, m_FontBold, m_FontBody, m_Device);
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    if (!drawList) {
+        return;
+    }
+
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float pageX = origin.x + 4.0f;
+    const float basePageY = origin.y + 4.0f;
+    const float pageWidth = contentW - 12.0f;
+    const float updatesHeight = 104.0f;
+    const float buttonHeight = 52.0f;
+    const float cardGap = 14.0f;
+    const float cardRounding = 18.0f;
+    const float cardPadding = 20.0f;
+
+    const ImU32 panelColor = IM_COL32(244, 247, 252, 232);
+    const ImU32 panelInnerColor = IM_COL32(250, 252, 255, 214);
+    const ImU32 panelBorderColor = IM_COL32(194, 202, 214, 255);
+    const ImU32 panelShadowColor = IM_COL32(160, 172, 189, 40);
+    const ImU32 titleColor = IM_COL32(26, 31, 41, 255);
+    const ImU32 bodyColor = IM_COL32(78, 86, 97, 255);
+    const ImU32 linkColor = IM_COL32(58, 123, 255, 255);
+    const ImU32 linkHoverColor = IM_COL32(35, 98, 228, 255);
+    const ImU32 dividerColor = IM_COL32(202, 210, 221, 255);
+
+    ImFont* titleFont = m_FontBoldMed ? m_FontBoldMed : (m_FontBold ? m_FontBold : ImGui::GetFont());
+    const float titleFontSize = titleFont ? titleFont->FontSize : ImGui::GetFontSize();
+    ImFont* bodyFont = m_FontBody ? m_FontBody : ImGui::GetFont();
+    ImFont* accentFont = m_FontBold ? m_FontBold : bodyFont;
+    const float bodyFontSize = bodyFont ? bodyFont->FontSize : ImGui::GetFontSize();
+    const float textWidth = pageWidth - cardPadding * 2.0f;
+    const float infoHeaderHeight = 66.0f;
+    const float infoBottomPadding = 24.0f;
+
+    const std::vector<std::vector<SettingsTextSegment>> infoLines = {
+        {
+            { "Hey there! It's " },
+            { "Lopes", kCreatorProfileUrl, true },
+            { "!" }
+        },
+        {
+            { "I whipped up this client to give the community something free, something that actually works, and best of all, it's totally free and safe. If you're out here eating dirt and still paying to cheat in some janky game, then congrats, you're a total loser. And since I absolutely hate it when these clowns sell Minecraft hacks, I decided to bring you EVERYTHING they offer, completely free and Open Source." }
+        },
+        {
+            { "Feel free to use, tweak, or share my client - do whatever the heck you want with it. It's super obvious I suck at design, so don't even think about ragging on me because it looks ugly, or not perfectly pretty, aesthetic, whatever, the modules actually work!" }
+        },
+        {
+            { "If you run into any bugs, errors, something's not working, crashing your game, or causing a memory leak (which, uh, might be happening, my bad), please hit me up on " },
+            { "Discord", kDiscordProfileUrl, true },
+            { " or open a New Issue on " },
+            { "GitHub", kProjectRepositoryUrl, true },
+            { "." }
+        },
+        {
+            { "Good luck! 67" }
+        }
+    };
+
+    float measuredInfoTextHeight = 0.0f;
+    for (size_t lineIndex = 0; lineIndex < infoLines.size(); ++lineIndex) {
+        measuredInfoTextHeight += DrawWrappedSettingsLine(
+            nullptr,
+            ImVec2(0.0f, measuredInfoTextHeight),
+            textWidth,
+            infoLines[lineIndex],
+            bodyFont,
+            accentFont,
+            bodyFontSize,
+            bodyColor,
+            linkColor,
+            linkHoverColor);
+
+        if (lineIndex + 1 < infoLines.size()) {
+            measuredInfoTextHeight += 4.0f;
+        }
+    }
+
+    const float totalContentHeight = infoHeaderHeight + measuredInfoTextHeight + infoBottomPadding + cardGap + updatesHeight + cardGap + buttonHeight + 8.0f;
+    const float visibleHeight = (std::max)(120.0f, (m_Height - 40.0f));
+    const float maxScroll = (std::max)(0.0f, totalContentHeight - visibleHeight);
+    static float s_SettingsScrollOffset = 0.0f;
+    s_SettingsScrollOffset = (std::clamp)(s_SettingsScrollOffset, 0.0f, maxScroll);
+
+    const ImVec2 scrollViewMin(pageX, basePageY);
+    const ImVec2 scrollViewMax(pageX + pageWidth, basePageY + visibleHeight);
+    ImGuiIO& io = ImGui::GetIO();
+    if (ImGui::IsMouseHoveringRect(scrollViewMin, scrollViewMax, true) && io.MouseWheel != 0.0f && !ImGui::IsAnyItemActive()) {
+        s_SettingsScrollOffset = (std::clamp)(s_SettingsScrollOffset - io.MouseWheel * 42.0f, 0.0f, maxScroll);
+    }
+
+    drawList->PushClipRect(scrollViewMin, scrollViewMax, true);
+    const float pageY = basePageY - s_SettingsScrollOffset;
+
+    const float infoHeight = infoHeaderHeight + measuredInfoTextHeight + infoBottomPadding;
+    const ImVec2 infoMin(pageX, pageY);
+    const ImVec2 infoMax(pageX + pageWidth, pageY + infoHeight);
+    const ImVec2 updatesMin(pageX, infoMax.y + cardGap);
+    const ImVec2 updatesMax(pageX + pageWidth, updatesMin.y + updatesHeight);
+    const ImVec2 closeMin(pageX, updatesMax.y + cardGap);
+    const ImVec2 closeMax(pageX + pageWidth, closeMin.y + buttonHeight);
+
+    drawList->AddRectFilled(ImVec2(infoMin.x, infoMin.y + 6.0f), ImVec2(infoMax.x, infoMax.y + 6.0f), panelShadowColor, cardRounding);
+    drawList->AddRectFilled(infoMin, infoMax, panelColor, cardRounding);
+    drawList->AddRectFilled(ImVec2(infoMin.x + 1.0f, infoMin.y + 1.0f), ImVec2(infoMax.x - 1.0f, infoMax.y - 1.0f), panelInnerColor, cardRounding - 1.0f);
+    drawList->AddRect(infoMin, infoMax, panelBorderColor, cardRounding, 0, 1.0f);
+
+    drawList->AddRectFilled(ImVec2(updatesMin.x, updatesMin.y + 6.0f), ImVec2(updatesMax.x, updatesMax.y + 6.0f), panelShadowColor, cardRounding);
+    drawList->AddRectFilled(updatesMin, updatesMax, panelColor, cardRounding);
+    drawList->AddRectFilled(ImVec2(updatesMin.x + 1.0f, updatesMin.y + 1.0f), ImVec2(updatesMax.x - 1.0f, updatesMax.y - 1.0f), panelInnerColor, cardRounding - 1.0f);
+    drawList->AddRect(updatesMin, updatesMax, panelBorderColor, cardRounding, 0, 1.0f);
+
+    const float titleY = infoMin.y + 18.0f;
+    float titleX = infoMin.x + cardPadding;
+    const float lampSize = 24.0f;
+    if (m_InfoLampTexture) {
+        const ImVec2 lampMin(titleX, titleY - 1.0f);
+        const ImVec2 lampMax(lampMin.x + lampSize, lampMin.y + lampSize);
+        drawList->AddImageRounded(reinterpret_cast<ImTextureID>(m_InfoLampTexture), lampMin, lampMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32_WHITE, 7.0f, ImDrawFlags_RoundCornersAll);
+        titleX += lampSize + 10.0f;
+    }
+
+    drawList->AddText(titleFont, titleFontSize, ImVec2(titleX, titleY), titleColor, "Informations");
+    drawList->AddLine(ImVec2(infoMin.x + cardPadding, infoMin.y + 52.0f), ImVec2(infoMax.x - cardPadding, infoMin.y + 52.0f), dividerColor, 1.0f);
+
+    float textY = infoMin.y + infoHeaderHeight;
+
+    for (size_t lineIndex = 0; lineIndex < infoLines.size(); ++lineIndex) {
+        textY += DrawWrappedSettingsLine(
+            drawList,
+            ImVec2(infoMin.x + cardPadding, textY),
+            textWidth,
+            infoLines[lineIndex],
+            bodyFont,
+            accentFont,
+            bodyFontSize,
+            bodyColor,
+            linkColor,
+            linkHoverColor);
+
+        if (lineIndex + 1 < infoLines.size()) {
+            textY += 4.0f;
+        }
+    }
+
+    ReleaseCheckStatus releaseStatus;
+    {
+        std::lock_guard<std::mutex> lock(g_ReleaseCheckMutex);
+        releaseStatus = g_ReleaseCheckStatus;
+    }
+
+    const bool isCheckingUpdates = g_ReleaseCheckInProgress.load();
+    ImU32 releaseAccentColor = linkColor;
+    switch (releaseStatus.state) {
+    case ReleaseCheckState::UpToDate:
+        releaseAccentColor = IM_COL32(66, 157, 93, 255);
+        break;
+    case ReleaseCheckState::UpdateAvailable:
+        releaseAccentColor = IM_COL32(212, 135, 46, 255);
+        break;
+    case ReleaseCheckState::Checking:
+        releaseAccentColor = IM_COL32(64, 118, 220, 255);
+        break;
+    case ReleaseCheckState::Error:
+        releaseAccentColor = IM_COL32(196, 79, 79, 255);
+        break;
+    case ReleaseCheckState::LocalBuild:
+    case ReleaseCheckState::Idle:
+    default:
+        releaseAccentColor = linkColor;
+        break;
+    }
+
+    drawList->AddText(titleFont, titleFontSize, ImVec2(updatesMin.x + cardPadding, updatesMin.y + 16.0f), titleColor, "Updates");
+
+    std::vector<SettingsTextSegment> currentBuildLine = {
+        { "Current build: " },
+        { releaseStatus.currentLabel, nullptr, true }
+    };
+
+    std::vector<SettingsTextSegment> releaseLine;
+    switch (releaseStatus.state) {
+    case ReleaseCheckState::UpToDate:
+        releaseLine = {
+            { "You're up to date with " },
+            { releaseStatus.latestTag, releaseStatus.latestUrl.c_str(), true },
+            { "." }
+        };
+        break;
+    case ReleaseCheckState::UpdateAvailable:
+        releaseLine = {
+            { "A new release is available: " },
+            { releaseStatus.latestTag, releaseStatus.latestUrl.c_str(), true },
+            { "." }
+        };
+        break;
+    case ReleaseCheckState::LocalBuild:
+        releaseLine = {
+            { "Latest published release: " },
+            { releaseStatus.latestTag.empty() ? std::string("unknown") : releaseStatus.latestTag, releaseStatus.latestTag.empty() ? nullptr : releaseStatus.latestUrl.c_str(), true },
+            { "." }
+        };
+        break;
+    case ReleaseCheckState::Error:
+        releaseLine = {
+            { releaseStatus.message }
+        };
+        break;
+    case ReleaseCheckState::Checking:
+        releaseLine = {
+            { "Checking the latest GitHub release..." }
+        };
+        break;
+    case ReleaseCheckState::Idle:
+    default:
+        releaseLine = {
+            { "Click Verify updates to compare this build with the latest GitHub release." }
+        };
+        break;
+    }
+
+    const float updateTextWidth = pageWidth - cardPadding * 2.0f - 184.0f;
+    float updateTextY = updatesMin.y + 46.0f;
+    updateTextY += DrawWrappedSettingsLine(
+        drawList,
+        ImVec2(updatesMin.x + cardPadding, updateTextY),
+        updateTextWidth,
+        currentBuildLine,
+        bodyFont,
+        accentFont,
+        bodyFontSize,
+        bodyColor,
+        releaseAccentColor,
+        linkHoverColor);
+
+    DrawWrappedSettingsLine(
+        drawList,
+        ImVec2(updatesMin.x + cardPadding, updateTextY - 2.0f),
+        updateTextWidth,
+        releaseLine,
+        bodyFont,
+        accentFont,
+        bodyFontSize,
+        bodyColor,
+        releaseAccentColor,
+        linkHoverColor);
+
+    const float updateButtonWidth = 168.0f;
+    const float updateButtonHeight = 42.0f;
+    const ImVec2 updateButtonPos(updatesMax.x - cardPadding - updateButtonWidth, updatesMin.y + (updatesHeight - updateButtonHeight) * 0.5f);
+    if (DrawRoundedActionButton(
+            drawList,
+            "##settings_verify_updates",
+            isCheckingUpdates ? "Checking..." : "Verify updates",
+            updateButtonPos,
+            ImVec2(updateButtonWidth, updateButtonHeight),
+            14.0f,
+            IM_COL32(43, 115, 232, 255),
+            IM_COL32(34, 100, 213, 255),
+            IM_COL32(26, 84, 190, 255),
+            IM_COL32(27, 86, 178, 255),
+            IM_COL32(255, 255, 255, 255),
+            accentFont,
+            bodyFontSize,
+            !isCheckingUpdates)) {
+        StartReleaseCheckAsync();
+    }
+
+    if (DrawRoundedActionButton(
+            drawList,
+            "##settings_close_application",
+            "Close OpenCommunity Application",
+            closeMin,
+            ImVec2(pageWidth, buttonHeight),
+            16.0f,
+            IM_COL32(24, 29, 39, 255),
+            IM_COL32(32, 39, 51, 255),
+            IM_COL32(42, 49, 61, 255),
+            IM_COL32(18, 22, 30, 255),
+            IM_COL32(247, 249, 252, 255),
+            accentFont,
+            bodyFontSize,
+            true)) {
+        m_State = AppState::Closing;
+        m_ClosingStartTime = static_cast<float>(ImGui::GetTime());
+    }
+
+    drawList->PopClipRect();
+
+    ImGui::SetCursorScreenPos(ImVec2(pageX, closeMax.y + 2.0f));
+    ImGui::Dummy(ImVec2(pageWidth, 1.0f));
 }
 
 void Screen::RenderClosing() {
@@ -2248,8 +3235,8 @@ void Screen::RenderClosing() {
 
         const float squeezeDuration = 0.6f;
         const float textStart = squeezeDuration + 0.2f;
-        const char* message = "Bye! See you again soon!";
-        const int msgLen = 24;
+        const char* message = "Bye, see you again soon.";
+        const int msgLen = static_cast<int>(strlen(message));
         const float charsPerSec = 18.0f;
         const float totalDuration = textStart + (msgLen / charsPerSec) + 1.0f;
 
@@ -2260,10 +3247,10 @@ void Screen::RenderClosing() {
             float ease = 1.0f - (1.0f - progress) * (1.0f - progress);
             float barW = (m_Width * 0.5f) * ease;
 
-            dl->AddRectFilled(wp, ImVec2(wp.x + barW, wp.y + m_Height), IM_COL32(0, 0, 0, 255));
-            dl->AddRectFilled(ImVec2(wp.x + m_Width - barW, wp.y), ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(0, 0, 0, 255));
+            dl->AddRectFilled(wp, ImVec2(wp.x + barW, wp.y + m_Height), IM_COL32(241, 244, 248, 255));
+            dl->AddRectFilled(ImVec2(wp.x + m_Width - barW, wp.y), ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(241, 244, 248, 255));
         } else {
-            dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(0, 0, 0, 255));
+            dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(255, 255, 255, 255));
 
             if (t >= textStart) {
                 float textT = t - textStart;
@@ -2280,7 +3267,7 @@ void Screen::RenderClosing() {
                 float tx = wp.x + (m_Width - textSize.x) * 0.5f;
                 float ty = wp.y + (m_Height - textSize.y) * 0.5f;
 
-                dl->AddText(font, fontSize, ImVec2(tx, ty), IM_COL32(255, 255, 255, 255), buf);
+                dl->AddText(font, fontSize, ImVec2(tx, ty), IM_COL32(20, 24, 32, 255), buf);
             }
         }
 
@@ -2403,6 +3390,10 @@ void Screen::Render() {
     case AppState::Closing:
         RenderClosing();
         break;
+    }
+
+    if (m_IsWindowMoveActive) {
+        DrawWindowMoveBlurOverlay(ImGui::GetForegroundDrawList(), ImVec2(0.0f, 0.0f), m_Width, m_Height, static_cast<float>(ImGui::GetTime()));
     }
     
     ImGui::Render();

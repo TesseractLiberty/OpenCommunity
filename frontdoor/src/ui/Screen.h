@@ -53,6 +53,7 @@ private:
     bool m_Running = true;
     bool m_Initialized = false;
     bool m_Minimized = false;
+    bool m_IsWindowMoveActive = false;
     int m_CurrentTab = 0;
     float m_IntroStartTime = -1.0f;
 
@@ -78,6 +79,7 @@ private:
     ID3D11ShaderResourceView* m_IconMovement = nullptr;
     ID3D11ShaderResourceView* m_IconVisuals = nullptr;
     ID3D11ShaderResourceView* m_IconSettings = nullptr;
+    ID3D11ShaderResourceView* m_InfoLampTexture = nullptr;
     int m_IconW = 0, m_IconH = 0;
 
     void SetupImGuiStyle();
