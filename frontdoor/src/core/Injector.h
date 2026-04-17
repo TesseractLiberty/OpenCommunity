@@ -1,6 +1,6 @@
 #pragma once
 
-#include <blackbone/Process/Process.h>
+#include <BlackBone/Process/Process.h>
 
 class Injector {
 public:

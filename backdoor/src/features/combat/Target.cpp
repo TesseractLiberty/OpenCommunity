@@ -16,6 +16,8 @@
 #include <limits>
 
 namespace {
+    constexpr int kOnlineTargetPlayerLimit = 100;
+
     struct BrowseCacheState {
         bool active = false;
         std::string clanTagDisplay;
@@ -113,6 +115,86 @@ namespace {
         if (changed) {
             SyncBrowseCacheToConfig(snapshot);
         }
+    }
+
+    bool CaseInsensitiveNameLess(const std::string& lhs, const std::string& rhs) {
+        return std::lexicographical_compare(
+            lhs.begin(),
+            lhs.end(),
+            rhs.begin(),
+            rhs.end(),
+            [](unsigned char left, unsigned char right) {
+                return std::tolower(left) < std::tolower(right);
+            });
+    }
+
+    void ClearOnlinePlayersToConfig(ModuleConfig* config) {
+        if (!config) {
+            return;
+        }
+
+        config->Target.m_OnlinePlayersCount = 0;
+        memset(config->Target.m_OnlinePlayerNames, 0, sizeof(config->Target.m_OnlinePlayerNames));
+    }
+
+    void SyncOnlinePlayersToConfig(JNIEnv* env, World* world, jobject localPlayerObject, ModuleConfig* config) {
+        if (!config) {
+            return;
+        }
+
+        static auto lastSyncTime = std::chrono::steady_clock::time_point{};
+        const auto now = std::chrono::steady_clock::now();
+        if (world && lastSyncTime.time_since_epoch().count() != 0 &&
+            std::chrono::duration_cast<std::chrono::milliseconds>(now - lastSyncTime).count() < 200) {
+            return;
+        }
+        lastSyncTime = now;
+
+        ClearOnlinePlayersToConfig(config);
+        if (!env || !world) {
+            return;
+        }
+
+        std::vector<std::string> onlinePlayers;
+        onlinePlayers.reserve(kOnlineTargetPlayerLimit);
+
+        const auto players = world->GetPlayerEntities(env);
+        for (auto* player : players) {
+            if (!player) {
+                continue;
+            }
+
+            if (localPlayerObject && env->IsSameObject(reinterpret_cast<jobject>(player), localPlayerObject)) {
+                env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+                continue;
+            }
+
+            const std::string playerName = player->GetName(env, true);
+            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+
+            if (playerName.empty()) {
+                continue;
+            }
+
+            onlinePlayers.push_back(playerName);
+        }
+
+        std::sort(onlinePlayers.begin(), onlinePlayers.end(), CaseInsensitiveNameLess);
+        onlinePlayers.erase(std::unique(onlinePlayers.begin(), onlinePlayers.end(), [](const std::string& lhs, const std::string& rhs) {
+            return _stricmp(lhs.c_str(), rhs.c_str()) == 0;
+        }), onlinePlayers.end());
+
+        int count = 0;
+        for (const auto& playerName : onlinePlayers) {
+            if (count >= kOnlineTargetPlayerLimit) {
+                break;
+            }
+
+            strncpy_s(config->Target.m_OnlinePlayerNames[count], playerName.c_str(), _TRUNCATE);
+            ++count;
+        }
+
+        config->Target.m_OnlinePlayersCount = count;
     }
 
     bool IsSameClanLikeHideClans(JNIEnv* env, Player* player, Player* localPlayer, Scoreboard* scoreboard) {
@@ -393,7 +475,12 @@ void Target::OnEntityAttacked(JNIEnv* env, Player* attackedPlayer) {
 void Target::TickSynchronous(void* envPtr) {
     auto* env = static_cast<JNIEnv*>(envPtr);
     auto* config = Bridge::Get()->GetConfig();
-    if (!env || !config) {
+    if (!config) {
+        return;
+    }
+
+    if (!env) {
+        ClearOnlinePlayersToConfig(config);
         return;
     }
 
@@ -404,10 +491,14 @@ void Target::TickSynchronous(void* envPtr) {
 
     jobject worldObject = Minecraft::GetTheWorld(env);
     if (!worldObject) {
+        ClearOnlinePlayersToConfig(config);
         return;
     }
 
     auto* world = reinterpret_cast<World*>(worldObject);
+    jobject localPlayerObject = Minecraft::GetThePlayer(env);
+    SyncOnlinePlayersToConfig(env, world, localPlayerObject, config);
+
     if (!IsEnabled()) {
         g_TargetActiveManages.store(false);
         if (m_WasEnabled) {
@@ -425,6 +516,9 @@ void Target::TickSynchronous(void* envPtr) {
         m_PreviousSwingProgressInt = 0;
         m_PreviousPhysicalClick = false;
         ClearInUse();
+        if (localPlayerObject) {
+            env->DeleteLocalRef(localPlayerObject);
+        }
         env->DeleteLocalRef(worldObject);
         return;
     }
@@ -432,7 +526,6 @@ void Target::TickSynchronous(void* envPtr) {
     g_TargetActiveManages.store(true);
     m_WasEnabled = true;
 
-    jobject localPlayerObject = Minecraft::GetThePlayer(env);
     if (!localPlayerObject) {
         env->DeleteLocalRef(worldObject);
         return;

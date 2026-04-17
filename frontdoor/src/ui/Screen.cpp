@@ -302,6 +302,152 @@ namespace
         drawList->AddRect(min, max, IM_COL32(184, 188, 194, 255), 5.0f, 0, 1.0f);
     }
 
+    struct TargetNameAutocompleteState
+    {
+        std::string basePrefix;
+        std::vector<std::string> matches;
+        int matchIndex = -1;
+    };
+
+    TargetNameAutocompleteState g_TargetNameAutocompleteState;
+
+    void ResetTargetNameAutocomplete()
+    {
+        g_TargetNameAutocompleteState = {};
+    }
+
+    bool CaseInsensitiveEquals(const std::string& lhs, const std::string& rhs)
+    {
+        if (lhs.size() != rhs.size()) {
+            return false;
+        }
+
+        for (size_t i = 0; i < lhs.size(); ++i) {
+            if (std::tolower(static_cast<unsigned char>(lhs[i])) != std::tolower(static_cast<unsigned char>(rhs[i]))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool CaseInsensitiveLess(const std::string& lhs, const std::string& rhs)
+    {
+        return std::lexicographical_compare(
+            lhs.begin(),
+            lhs.end(),
+            rhs.begin(),
+            rhs.end(),
+            [](unsigned char left, unsigned char right) {
+                return std::tolower(left) < std::tolower(right);
+            });
+    }
+
+    bool StartsWithInsensitive(const std::string& value, const std::string& prefix)
+    {
+        if (prefix.empty() || prefix.size() > value.size()) {
+            return false;
+        }
+
+        for (size_t index = 0; index < prefix.size(); ++index) {
+            if (std::tolower(static_cast<unsigned char>(value[index])) != std::tolower(static_cast<unsigned char>(prefix[index]))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    std::vector<std::string> CollectTargetAutocompleteMatches(const ModuleConfig* config, const std::string& prefix)
+    {
+        std::vector<std::string> matches;
+        if (!config || prefix.empty()) {
+            return matches;
+        }
+
+        const int maxPlayers = static_cast<int>(sizeof(config->Target.m_OnlinePlayerNames) / sizeof(config->Target.m_OnlinePlayerNames[0]));
+        const int playerCount = (std::clamp)(config->Target.m_OnlinePlayersCount, 0, maxPlayers);
+        for (int index = 0; index < playerCount; ++index) {
+            const char* playerName = config->Target.m_OnlinePlayerNames[index];
+            if (!playerName || !playerName[0]) {
+                continue;
+            }
+
+            std::string candidate(playerName);
+            if (StartsWithInsensitive(candidate, prefix)) {
+                matches.push_back(std::move(candidate));
+            }
+        }
+
+        std::sort(matches.begin(), matches.end(), CaseInsensitiveLess);
+        matches.erase(std::unique(matches.begin(), matches.end(), [](const std::string& lhs, const std::string& rhs) {
+            return CaseInsensitiveEquals(lhs, rhs);
+        }), matches.end());
+        return matches;
+    }
+
+    int TargetNameInputCallback(ImGuiInputTextCallbackData* data)
+    {
+        if (!data || data->EventFlag != ImGuiInputTextFlags_CallbackCompletion) {
+            return 0;
+        }
+
+        const auto* config = static_cast<const ModuleConfig*>(data->UserData);
+        if (!config || !data->Buf) {
+            return 0;
+        }
+
+        const std::string currentText = data->Buf;
+        if (currentText.empty()) {
+            ResetTargetNameAutocomplete();
+            return 0;
+        }
+
+        const bool isCyclingExistingMatch =
+            g_TargetNameAutocompleteState.matchIndex >= 0 &&
+            g_TargetNameAutocompleteState.matchIndex < static_cast<int>(g_TargetNameAutocompleteState.matches.size()) &&
+            currentText == g_TargetNameAutocompleteState.matches[g_TargetNameAutocompleteState.matchIndex];
+
+        const bool reverseCycle = ImGui::GetIO().KeyShift;
+        if (!isCyclingExistingMatch) {
+            g_TargetNameAutocompleteState.basePrefix = currentText;
+            g_TargetNameAutocompleteState.matches = CollectTargetAutocompleteMatches(config, currentText);
+            if (g_TargetNameAutocompleteState.matches.empty()) {
+                ResetTargetNameAutocomplete();
+                return 0;
+            }
+
+            g_TargetNameAutocompleteState.matchIndex = reverseCycle
+                ? static_cast<int>(g_TargetNameAutocompleteState.matches.size()) - 1
+                : 0;
+        } else {
+            auto refreshedMatches = CollectTargetAutocompleteMatches(config, g_TargetNameAutocompleteState.basePrefix);
+            if (refreshedMatches.empty()) {
+                ResetTargetNameAutocomplete();
+                return 0;
+            }
+
+            if (refreshedMatches != g_TargetNameAutocompleteState.matches) {
+                auto currentIt = std::find(refreshedMatches.begin(), refreshedMatches.end(), currentText);
+                g_TargetNameAutocompleteState.matchIndex = currentIt != refreshedMatches.end()
+                    ? static_cast<int>(std::distance(refreshedMatches.begin(), currentIt))
+                    : 0;
+                g_TargetNameAutocompleteState.matches = std::move(refreshedMatches);
+            }
+
+            const int direction = reverseCycle ? -1 : 1;
+            const int matchCount = static_cast<int>(g_TargetNameAutocompleteState.matches.size());
+            g_TargetNameAutocompleteState.matchIndex =
+                (g_TargetNameAutocompleteState.matchIndex + direction + matchCount) % matchCount;
+        }
+
+        const std::string& replacement = g_TargetNameAutocompleteState.matches[g_TargetNameAutocompleteState.matchIndex];
+        data->DeleteChars(0, data->BufTextLen);
+        data->InsertChars(0, replacement.c_str());
+        data->SelectAll();
+        return 0;
+    }
+
     std::vector<size_t> GetVisibleOptionOrder(const std::shared_ptr<Module>& mod)
     {
         std::vector<size_t> order;
@@ -1974,6 +2120,7 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
 
                     std::vector<char> textBuffer((std::max)(2, opt.textMaxLength + 1), '\0');
                     strncpy_s(textBuffer.data(), textBuffer.size(), opt.textValue.c_str(), _TRUNCATE);
+                    const bool useTargetAutocomplete = mod->GetName() == "Target" && opt.name == "Player Name";
 
                     const float inputPadX = 6.0f;
                     const float inputPadY = 4.0f;
@@ -1995,8 +2142,14 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, ImVec4(0.55f, 0.67f, 0.90f, 0.35f));
                     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
                     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(inputPadX, inputPadY));
-                    if (ImGui::InputText(optId, textBuffer.data(), textBuffer.size())) {
+                    const ImGuiInputTextFlags inputFlags = useTargetAutocomplete ? ImGuiInputTextFlags_CallbackCompletion : ImGuiInputTextFlags_None;
+                    ImGuiInputTextCallback callback = useTargetAutocomplete ? TargetNameInputCallback : nullptr;
+                    void* callbackUserData = useTargetAutocomplete ? static_cast<void*>(Bridge::Get()->GetConfig()) : nullptr;
+                    if (ImGui::InputText(optId, textBuffer.data(), textBuffer.size(), inputFlags, callback, callbackUserData)) {
                         opt.textValue = textBuffer.data();
+                    }
+                    if (useTargetAutocomplete && !ImGui::IsItemActive()) {
+                        ResetTargetNameAutocomplete();
                     }
                     ImGui::PopStyleVar(2);
                     ImGui::PopStyleColor(6);

@@ -70,6 +70,8 @@ struct ModuleConfig {
     struct {
         bool m_Enabled = false;
         char m_PlayerName[128] = {};
+        char m_OnlinePlayerNames[100][17] = {};
+        int m_OnlinePlayersCount = 0;
         bool m_AutoTarget = false;
         bool m_TargetSwitch = false;
         bool m_BrowseAllPlayers = false;
