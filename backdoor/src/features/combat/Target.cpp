@@ -566,9 +566,9 @@ void Target::TickSynchronous(void* envPtr) {
 
             const std::string playerName = player->GetName(env, true);
             if (!targetName.empty() && playerName == targetName) {
-                player->Restore(env);
+                try { player->Restore(env); } catch (...) {}
             } else {
-                player->Zero(env);
+                try { player->Zero(env); } catch (...) {}
                 affectedPlayers = true;
             }
 
@@ -683,16 +683,16 @@ void Target::ManageHitboxes(JNIEnv* env, Player* localPlayer, World* world) {
 
         if (lockedTarget.empty()) {
             if (browseWaitingMode && browseActive) {
-                player->Zero(env);
+                try { player->Zero(env); } catch (...) {}
             } else {
-                player->Restore(env);
+                try { player->Restore(env); } catch (...) {}
             }
         } else {
             const std::string playerName = player->GetName(env, true);
             if (playerName == lockedTarget) {
-                player->Restore(env);
+                try { player->Restore(env); } catch (...) {}
             } else {
-                player->Zero(env);
+                try { player->Zero(env); } catch (...) {}
             }
         }
 

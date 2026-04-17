@@ -70,7 +70,7 @@ void HideClans::TickSynchronous(void* envPtr) {
                 const auto players = world->GetPlayerEntities(env);
                 for (auto* player : players) {
                     if (player) {
-                        player->Restore(env);
+                        try { player->Restore(env); } catch (...) {}
                         env->DeleteLocalRef(reinterpret_cast<jobject>(player));
                     }
                 }
@@ -92,7 +92,7 @@ void HideClans::TickSynchronous(void* envPtr) {
             const auto players = world->GetPlayerEntities(env);
             for (auto* player : players) {
                 if (player) {
-                    player->Restore(env);
+                    try { player->Restore(env); } catch (...) {}
                     env->DeleteLocalRef(reinterpret_cast<jobject>(player));
                 }
             }
@@ -195,7 +195,7 @@ void HideClans::TickSynchronous(void* envPtr) {
 
     for (auto* player : nonAllies) {
         if (player) {
-            player->Restore(env);
+            try { player->Restore(env); } catch (...) {}
             env->DeleteLocalRef(reinterpret_cast<jobject>(player));
         }
     }
@@ -208,7 +208,7 @@ void HideClans::TickSynchronous(void* envPtr) {
     if (!showAllies) {
         for (auto& ally : allies) {
             if (ally.player) {
-                ally.player->Zero(env);
+                try { ally.player->Zero(env); } catch (...) {}
                 env->DeleteLocalRef(reinterpret_cast<jobject>(ally.player));
                 affectedPlayers = true;
             }
@@ -223,12 +223,14 @@ void HideClans::TickSynchronous(void* envPtr) {
                 continue;
             }
 
-            if (index < showCount) {
-                allies[index].player->Restore(env);
-            } else {
-                allies[index].player->Zero(env);
-                affectedPlayers = true;
-            }
+            try {
+                if (index < showCount) {
+                    allies[index].player->Restore(env);
+                } else {
+                    allies[index].player->Zero(env);
+                    affectedPlayers = true;
+                }
+            } catch (...) {}
             env->DeleteLocalRef(reinterpret_cast<jobject>(allies[index].player));
         }
     } else if (showAlliesMode == 1) {
@@ -248,12 +250,14 @@ void HideClans::TickSynchronous(void* envPtr) {
                 continue;
             }
 
-            if (g_SemiAutoLockedPlayers.count(ally.name) > 0) {
-                ally.player->Restore(env);
-            } else {
-                ally.player->Zero(env);
-                affectedPlayers = true;
-            }
+            try {
+                if (g_SemiAutoLockedPlayers.count(ally.name) > 0) {
+                    ally.player->Restore(env);
+                } else {
+                    ally.player->Zero(env);
+                    affectedPlayers = true;
+                }
+            } catch (...) {}
             env->DeleteLocalRef(reinterpret_cast<jobject>(ally.player));
         }
     } else {
@@ -290,12 +294,14 @@ void HideClans::TickSynchronous(void* envPtr) {
                 }
             }
 
-            if (shouldShow) {
-                ally.player->Restore(env);
-            } else {
-                ally.player->Zero(env);
-                affectedPlayers = true;
-            }
+            try {
+                if (shouldShow) {
+                    ally.player->Restore(env);
+                } else {
+                    ally.player->Zero(env);
+                    affectedPlayers = true;
+                }
+            } catch (...) {}
             env->DeleteLocalRef(reinterpret_cast<jobject>(ally.player));
         }
     }

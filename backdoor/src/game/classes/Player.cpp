@@ -16,20 +16,19 @@
 #include <cctype>
 #include <unordered_map>
 
+struct OriginalEntityData {
+    AxisAlignedBB_t bb;
+    float width;
+    float height;
+    double savedX{0};
+    double savedY{0};
+    double savedZ{0};
+    bool hasPosition{false};
+};
+static std::unordered_map<std::string, OriginalEntityData> originalData;
+static std::mutex originalDataMutex;
+
 namespace {
-    struct HiddenPlayerState {
-        AxisAlignedBB_t bb{};
-        double x = 0.0;
-        double y = 0.0;
-        double z = 0.0;
-        float width = 0.6f;
-        float height = 1.8f;
-        bool hasBB = false;
-    };
-
-    std::unordered_map<std::string, HiddenPlayerState> g_HiddenPlayers;
-    std::mutex g_HiddenPlayersMutex;
-
     std::string StripFormatting(std::string text) {
         std::string clean;
         clean.reserve(text.size());
@@ -921,90 +920,112 @@ jobject Player::GetBoundingBox(JNIEnv* env) {
 }
 
 void Player::Zero(JNIEnv* env) {
-    if (!env || !this) {
+    if (!env || this == nullptr) return;
+
+    std::string name;
+    try {
+        name = this->GetName(env, true);
+    } catch (...) {
         return;
     }
 
-    const std::string name = GetName(env, true);
-    if (name.empty()) {
+    if (name.empty()) return;
+
+    std::lock_guard<std::mutex> lock(originalDataMutex);
+
+    if (originalData.find(name) == originalData.end()) {
+        jobject bbObj = nullptr;
+        try {
+            bbObj = this->GetBoundingBox(env);
+        } catch (...) { return; }
+        if (!bbObj) return;
+
+        try {
+            const AxisAlignedBB_t curHitbox = ((AxisAlignedBB*)bbObj)->GetNativeBoundingBox(env);
+            const float curWidth = this->GetWidth(env);
+            const float curHeight = this->GetHeight(env);
+
+            auto& data = originalData[name];
+            data.bb = curHitbox;
+            data.width = curWidth;
+            data.height = curHeight;
+
+            auto pos = this->GetPos(env);
+            data.savedX = pos.x;
+            data.savedY = pos.y;
+            data.savedZ = pos.z;
+            data.hasPosition = true;
+
+            AxisAlignedBB_t bb{};
+            bb.minX = 0.0; bb.minY = 0.0; bb.minZ = 0.0;
+            bb.maxX = 0.0; bb.maxY = 0.0; bb.maxZ = 0.0;
+            ((AxisAlignedBB*)bbObj)->SetNativeBoundingBox(bb, env);
+            this->SetWidth(0.0f, env);
+            this->SetHeight(0.0f, env);
+
+            this->SetPosition(pos.x, -60.0, pos.z, env);
+        } catch (...) {}
+
+        env->DeleteLocalRef(bbObj);
         return;
     }
 
-    const Vec3D currentPos = GetPos(env);
+    jobject bbObj2 = nullptr;
+    try {
+        bbObj2 = this->GetBoundingBox(env);
+    } catch (...) { return; }
+    if (!bbObj2) return;
 
-    {
-        std::lock_guard<std::mutex> lock(g_HiddenPlayersMutex);
-        auto& state = g_HiddenPlayers[name];
-        if (state.height <= 0.0f) {
-            state.width = GetWidth(env);
-            state.height = GetHeight(env);
-            state.x = currentPos.x;
-            state.y = currentPos.y;
-            state.z = currentPos.z;
+    try {
+        AxisAlignedBB_t bb{};
+        bb.minX = 0.0; bb.minY = 0.0; bb.minZ = 0.0;
+        bb.maxX = 0.0; bb.maxY = 0.0; bb.maxZ = 0.0;
+        ((AxisAlignedBB*)bbObj2)->SetNativeBoundingBox(bb, env);
+        this->SetWidth(0.0f, env);
+        this->SetHeight(0.0f, env);
 
-            jobject bbObj = GetBoundingBox(env);
-            if (bbObj) {
-                state.bb = reinterpret_cast<AxisAlignedBB*>(bbObj)->GetNativeBoundingBox(env);
-                state.hasBB = true;
-                env->DeleteLocalRef(bbObj);
+        auto it = originalData.find(name);
+        if (it != originalData.end() && it->second.hasPosition) {
+            Vec3D curPos = this->GetPos(env);
+            if (curPos.y > -50.0) {
+                this->SetPosition(it->second.savedX, -60.0, it->second.savedZ, env);
             }
         }
+    } catch (...) {}
 
-        if (state.width <= 0.0f) {
-            state.width = 0.6f;
-        }
-        if (state.height <= 0.0f) {
-            state.height = 1.8f;
-        }
-
-        if (currentPos.y > -50.0) {
-            state.x = currentPos.x;
-            state.y = currentPos.y;
-            state.z = currentPos.z;
-        }
-
-        jobject bbObj2 = GetBoundingBox(env);
-        if (bbObj2) {
-            AxisAlignedBB_t zeroBB{};
-            reinterpret_cast<AxisAlignedBB*>(bbObj2)->SetNativeBoundingBox(zeroBB, env);
-            env->DeleteLocalRef(bbObj2);
-        }
-
-        SetWidth(0.0f, env);
-        SetHeight(0.0f, env);
-        SetPosition(state.x, -60.0, state.z, env);
-    }
+    env->DeleteLocalRef(bbObj2);
 }
 
 void Player::Restore(JNIEnv* env) {
-    if (!env || !this) {
+    if (!env || this == nullptr) return;
+
+    std::string name;
+    try {
+        name = this->GetName(env, true);
+    } catch (...) {
         return;
     }
 
-    const std::string name = GetName(env, true);
-    if (name.empty()) {
-        return;
+    if (name.empty()) return;
+
+    std::lock_guard<std::mutex> lock(originalDataMutex);
+
+    auto it = originalData.find(name);
+    if (it != originalData.end()) {
+        try {
+            if (it->second.hasPosition) {
+                this->SetPosition(it->second.savedX, it->second.savedY, it->second.savedZ, env);
+            }
+            this->SetWidth(it->second.width, env);
+            this->SetHeight(it->second.height, env);
+            jobject bbObj = this->GetBoundingBox(env);
+            if (bbObj) {
+                ((AxisAlignedBB*)bbObj)->SetNativeBoundingBox(it->second.bb, env);
+                env->DeleteLocalRef(bbObj);
+            }
+        } catch (...) {}
+        originalData.erase(it);
     }
-
-    std::lock_guard<std::mutex> lock(g_HiddenPlayersMutex);
-    const auto it = g_HiddenPlayers.find(name);
-    if (it == g_HiddenPlayers.end()) {
-        return;
-    }
-
-    SetPosition(it->second.x, it->second.y, it->second.z, env);
-    SetWidth(it->second.width, env);
-    SetHeight(it->second.height, env);
-
-    if (it->second.hasBB) {
-        jobject bbObj = GetBoundingBox(env);
-        if (bbObj) {
-            reinterpret_cast<AxisAlignedBB*>(bbObj)->SetNativeBoundingBox(it->second.bb, env);
-            env->DeleteLocalRef(bbObj);
-        }
-    }
-
-    g_HiddenPlayers.erase(it);
 }
 
 void Player::SendPacket(jobject packet, JNIEnv* env) {
