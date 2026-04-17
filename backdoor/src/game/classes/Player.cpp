@@ -1,8 +1,10 @@
 #include "pch.h"
 #include "Player.h"
 
+#include "AxisAlignedBB.h"
 #include "Minecraft.h"
 #include "Scoreboard.h"
+#include "Team.h"
 #include "World.h"
 
 #include "../jni/Class.h"
@@ -11,7 +13,23 @@
 #include "../jni/Method.h"
 #include "../mapping/Mapper.h"
 
+#include <cctype>
+#include <unordered_map>
+
 namespace {
+    struct HiddenPlayerState {
+        AxisAlignedBB_t bb{};
+        double x = 0.0;
+        double y = 0.0;
+        double z = 0.0;
+        float width = 0.6f;
+        float height = 1.8f;
+        bool hasBB = false;
+    };
+
+    std::unordered_map<std::string, HiddenPlayerState> g_HiddenPlayers;
+    std::mutex g_HiddenPlayersMutex;
+
     std::string StripFormatting(std::string text) {
         std::string clean;
         clean.reserve(text.size());
@@ -34,6 +52,46 @@ namespace {
         return clean;
     }
 
+    std::string CleanTagDelimiters(const std::string& text) {
+        if (text.empty()) {
+            return {};
+        }
+
+        size_t start = 0;
+        while (start < text.size() && static_cast<unsigned char>(text[start]) <= 32) {
+            ++start;
+        }
+        while (start < text.size() && !std::isalnum(static_cast<unsigned char>(text[start]))) {
+            ++start;
+        }
+        if (start >= text.size()) {
+            return {};
+        }
+
+        size_t end = text.size() - 1;
+        while (end > start && static_cast<unsigned char>(text[end]) <= 32) {
+            --end;
+        }
+        while (end > start && !std::isalnum(static_cast<unsigned char>(text[end]))) {
+            --end;
+        }
+
+        return text.substr(start, end - start + 1);
+    }
+
+    std::string ReadJString(JNIEnv* env, jstring stringObject) {
+        if (!env || !stringObject) {
+            return {};
+        }
+
+        const char* chars = env->GetStringUTFChars(stringObject, nullptr);
+        std::string result = chars ? chars : "";
+        if (chars) {
+            env->ReleaseStringUTFChars(stringObject, chars);
+        }
+        return result;
+    }
+
     Class* GetPlayerClass(JNIEnv* env, jobject playerObject) {
         return env && playerObject ? reinterpret_cast<Class*>(env->GetObjectClass(playerObject)) : nullptr;
     }
@@ -49,6 +107,107 @@ namespace {
         env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
         return value;
     }
+
+    Method* FindMethod(JNIEnv* env, Class* ownerClass, const char* const* names, const char* signature) {
+        if (!env || !ownerClass || !signature) {
+            return nullptr;
+        }
+
+        for (int index = 0; names[index]; ++index) {
+            const char* name = names[index];
+            if (!name || !name[0]) {
+                continue;
+            }
+
+            Method* method = ownerClass->GetMethod(env, name, signature);
+            if (method) {
+                return method;
+            }
+        }
+
+        return nullptr;
+    }
+
+    Field* FindField(JNIEnv* env, Class* ownerClass, const char* const* names, const char* signature) {
+        if (!env || !ownerClass || !signature) {
+            return nullptr;
+        }
+
+        for (int index = 0; names[index]; ++index) {
+            const char* name = names[index];
+            if (!name || !name[0]) {
+                continue;
+            }
+
+            Field* field = ownerClass->GetField(env, name, signature);
+            if (field) {
+                return field;
+            }
+        }
+
+        return nullptr;
+    }
+
+    std::string GetDisplayNameText(JNIEnv* env, jobject playerObject) {
+        if (!env || !playerObject || !g_Game || !g_Game->IsInitialized()) {
+            return {};
+        }
+
+        Class* playerClass = GetPlayerClass(env, playerObject);
+        if (!playerClass) {
+            return {};
+        }
+
+        const std::string mappedDisplayName = Mapper::Get("getDisplayName");
+        const char* displayNames[] = {
+            mappedDisplayName.c_str(),
+            "getDisplayName",
+            "func_145748_c_",
+            "f_",
+            nullptr
+        };
+        const std::string chatSignature = Mapper::Get("net/minecraft/util/IChatComponent", 3);
+        Method* displayNameMethod = chatSignature.empty() ? nullptr : FindMethod(env, playerClass, displayNames, chatSignature.c_str());
+        if (!displayNameMethod) {
+            env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+            return {};
+        }
+
+        jobject chatComponent = displayNameMethod->CallObjectMethod(env, playerObject);
+        env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+        if (!chatComponent) {
+            return {};
+        }
+
+        const std::string chatClassName = Mapper::Get("net/minecraft/util/IChatComponent");
+        Class* chatClass = chatClassName.empty() ? nullptr : g_Game->FindClass(chatClassName);
+        if (!chatClass) {
+            env->DeleteLocalRef(chatComponent);
+            return {};
+        }
+
+        const std::string mappedUnformattedText = Mapper::Get("getUnformattedTextForChat");
+        const char* textNames[] = {
+            mappedUnformattedText.c_str(),
+            "getUnformattedTextForChat",
+            "func_150261_e",
+            "e",
+            nullptr
+        };
+        Method* textMethod = FindMethod(env, chatClass, textNames, "()Ljava/lang/String;");
+        if (!textMethod) {
+            env->DeleteLocalRef(chatComponent);
+            return {};
+        }
+
+        jstring textObject = static_cast<jstring>(textMethod->CallObjectMethod(env, chatComponent));
+        std::string text = ReadJString(env, textObject);
+        if (textObject) {
+            env->DeleteLocalRef(textObject);
+        }
+        env->DeleteLocalRef(chatComponent);
+        return text;
+    }
 }
 
 std::string Player::GetName(JNIEnv* env, bool stripFormatting) {
@@ -61,24 +220,126 @@ std::string Player::GetName(JNIEnv* env, bool stripFormatting) {
         return {};
     }
 
-    const std::string methodName = Mapper::Get("getName");
-    Method* getNameMethod = methodName.empty() ? nullptr : playerClass->GetMethod(env, methodName.c_str(), "()Ljava/lang/String;");
+    const std::string mappedGetName = Mapper::Get("getName");
+    const char* methodNames[] = {
+        mappedGetName.c_str(),
+        "getName",
+        "func_70005_c_",
+        "e_",
+        nullptr
+    };
+
+    Method* getNameMethod = FindMethod(env, playerClass, methodNames, "()Ljava/lang/String;");
     std::string result;
 
     if (getNameMethod) {
         jstring value = static_cast<jstring>(getNameMethod->CallObjectMethod(env, this));
+        result = ReadJString(env, value);
         if (value) {
-            const char* chars = env->GetStringUTFChars(value, nullptr);
-            if (chars) {
-                result = chars;
-                env->ReleaseStringUTFChars(value, chars);
-            }
             env->DeleteLocalRef(value);
         }
     }
 
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+
+    if (result.empty()) {
+        result = GetDisplayNameText(env, reinterpret_cast<jobject>(this));
+    }
+
     return stripFormatting ? StripFormatting(result) : result;
+}
+
+std::string Player::GetClanTag(JNIEnv* env, Scoreboard* scoreboard) {
+    if (!env || !this) {
+        return {};
+    }
+
+    const std::string name = GetName(env, true);
+    if (name.empty()) {
+        return {};
+    }
+
+    if (scoreboard) {
+        auto* team = reinterpret_cast<Team*>(scoreboard->GetPlayersTeam(env, name));
+        if (team) {
+            const std::string suffix = CleanTagDelimiters(StripFormatting(team->GetColorSuffix(env)));
+            if (suffix.size() >= 2) {
+                env->DeleteLocalRef(reinterpret_cast<jobject>(team));
+                return suffix;
+            }
+
+            const std::string prefix = CleanTagDelimiters(StripFormatting(team->GetColorPrefix(env)));
+            env->DeleteLocalRef(reinterpret_cast<jobject>(team));
+            if (prefix.size() >= 2) {
+                return prefix;
+            }
+        }
+    }
+
+    std::string displayName = StripFormatting(GetDisplayNameText(env, reinterpret_cast<jobject>(this)));
+    if (displayName.empty()) {
+        return {};
+    }
+
+    const size_t playerPos = displayName.find(name);
+    if (playerPos != std::string::npos) {
+        displayName.erase(playerPos, name.size());
+    }
+
+    const std::string cleaned = CleanTagDelimiters(displayName);
+    return cleaned.size() >= 2 ? cleaned : std::string{};
+}
+
+std::string Player::GetFormattedClanTag(JNIEnv* env, Scoreboard* scoreboard) {
+    if (!env || !this || !scoreboard) {
+        return {};
+    }
+
+    const std::string name = GetName(env, true);
+    if (name.empty()) {
+        return {};
+    }
+
+    auto* team = reinterpret_cast<Team*>(scoreboard->GetPlayersTeam(env, name));
+    if (!team) {
+        return {};
+    }
+
+    const std::string suffix = team->GetColorSuffix(env);
+    const std::string cleanSuffix = CleanTagDelimiters(StripFormatting(suffix));
+    if (!cleanSuffix.empty()) {
+        env->DeleteLocalRef(reinterpret_cast<jobject>(team));
+        return suffix;
+    }
+
+    const std::string prefix = team->GetColorPrefix(env);
+    const std::string cleanPrefix = CleanTagDelimiters(StripFormatting(prefix));
+    env->DeleteLocalRef(reinterpret_cast<jobject>(team));
+    return cleanPrefix.empty() ? std::string{} : prefix;
+}
+
+float Player::GetHealth(JNIEnv* env) {
+    if (!env || !this) {
+        return 0.0f;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return 0.0f;
+    }
+
+    const std::string mappedGetHealth = Mapper::Get("getHealth");
+    const char* methodNames[] = {
+        mappedGetHealth.c_str(),
+        "getHealth",
+        "func_110143_aJ",
+        "bn",
+        nullptr
+    };
+    Method* method = FindMethod(env, playerClass, methodNames, "()F");
+    const float value = method ? method->CallFloatMethod(env, this) : 0.0f;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return value;
 }
 
 float Player::GetMaxHealth(JNIEnv* env) {
@@ -91,8 +352,15 @@ float Player::GetMaxHealth(JNIEnv* env) {
         return 0.0f;
     }
 
-    const std::string methodName = Mapper::Get("getMaxHealth");
-    Method* method = methodName.empty() ? nullptr : playerClass->GetMethod(env, methodName.c_str(), "()F");
+    const std::string mappedGetMaxHealth = Mapper::Get("getMaxHealth");
+    const char* methodNames[] = {
+        mappedGetMaxHealth.c_str(),
+        "getMaxHealth",
+        "func_110138_aP",
+        "bu",
+        nullptr
+    };
+    Method* method = FindMethod(env, playerClass, methodNames, "()F");
     const float value = method ? method->CallFloatMethod(env, this) : 0.0f;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return value;
@@ -144,6 +412,150 @@ float Player::GetRealHealth(JNIEnv* env) {
     return scorePoints >= 0 ? static_cast<float>(scorePoints) : -1.0f;
 }
 
+Vec3D Player::GetPos(JNIEnv* env) {
+    if (!env || !this) {
+        return {};
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return {};
+    }
+
+    Field* posXField = playerClass->GetField(env, Mapper::Get("posX").c_str(), "D");
+    Field* posYField = playerClass->GetField(env, Mapper::Get("posY").c_str(), "D");
+    Field* posZField = playerClass->GetField(env, Mapper::Get("posZ").c_str(), "D");
+    Vec3D position;
+    if (posXField && posYField && posZField) {
+        position.x = posXField->GetDoubleField(env, this);
+        position.y = posYField->GetDoubleField(env, this);
+        position.z = posZField->GetDoubleField(env, this);
+    }
+
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return position;
+}
+
+Vec3D Player::GetLastTickPos(JNIEnv* env) {
+    if (!env || !this) {
+        return {};
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return {};
+    }
+
+    Field* posXField = playerClass->GetField(env, Mapper::Get("lastTickPosX").c_str(), "D");
+    Field* posYField = playerClass->GetField(env, Mapper::Get("lastTickPosY").c_str(), "D");
+    Field* posZField = playerClass->GetField(env, Mapper::Get("lastTickPosZ").c_str(), "D");
+    Vec3D position;
+    if (posXField && posYField && posZField) {
+        position.x = posXField->GetDoubleField(env, this);
+        position.y = posYField->GetDoubleField(env, this);
+        position.z = posZField->GetDoubleField(env, this);
+    }
+
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return position;
+}
+
+float Player::GetRotationPitch(JNIEnv* env) {
+    if (!env || !this) {
+        return 0.0f;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return 0.0f;
+    }
+
+    const std::string mappedField = Mapper::Get("rotationPitch");
+    const char* fieldNames[] = {
+        mappedField.c_str(),
+        "rotationPitch",
+        "field_70125_A",
+        "z",
+        nullptr
+    };
+    Field* field = FindField(env, playerClass, fieldNames, "F");
+    const float value = field ? field->GetFloatField(env, this) : 0.0f;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return value;
+}
+
+float Player::GetRotationYaw(JNIEnv* env) {
+    if (!env || !this) {
+        return 0.0f;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return 0.0f;
+    }
+
+    const std::string mappedField = Mapper::Get("rotationYaw");
+    const char* fieldNames[] = {
+        mappedField.c_str(),
+        "rotationYaw",
+        "field_70177_z",
+        "y",
+        nullptr
+    };
+    Field* field = FindField(env, playerClass, fieldNames, "F");
+    const float value = field ? field->GetFloatField(env, this) : 0.0f;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return value;
+}
+
+float Player::GetPrevRotationPitch(JNIEnv* env) {
+    if (!env || !this) {
+        return 0.0f;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return 0.0f;
+    }
+
+    const std::string mappedField = Mapper::Get("prevRotationPitch");
+    const char* fieldNames[] = {
+        mappedField.c_str(),
+        "prevRotationPitch",
+        "field_70127_C",
+        "B",
+        nullptr
+    };
+    Field* field = FindField(env, playerClass, fieldNames, "F");
+    const float value = field ? field->GetFloatField(env, this) : 0.0f;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return value;
+}
+
+float Player::GetPrevRotationYaw(JNIEnv* env) {
+    if (!env || !this) {
+        return 0.0f;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return 0.0f;
+    }
+
+    const std::string mappedField = Mapper::Get("prevRotationYaw");
+    const char* fieldNames[] = {
+        mappedField.c_str(),
+        "prevRotationYaw",
+        "field_70126_B",
+        "A",
+        nullptr
+    };
+    Field* field = FindField(env, playerClass, fieldNames, "F");
+    const float value = field ? field->GetFloatField(env, this) : 0.0f;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return value;
+}
+
 jobject Player::GetHeldItem(JNIEnv* env) {
     if (!env || !this) {
         return nullptr;
@@ -188,6 +600,200 @@ jobject Player::GetCurrentArmor(int slot, JNIEnv* env) {
     return value;
 }
 
+float Player::GetDistanceToEntity(jobject entity, JNIEnv* env) {
+    if (!env || !this || !entity) {
+        return 1000.0f;
+    }
+
+    Class* entityClass = g_Game ? g_Game->FindClass(Mapper::Get("net/minecraft/entity/Entity")) : nullptr;
+    if (!entityClass) {
+        return 1000.0f;
+    }
+
+    const std::string mappedDistanceMethod = Mapper::Get("getDistanceToEntity");
+    const char* methodNames[] = {
+        mappedDistanceMethod.c_str(),
+        "getDistanceToEntity",
+        "func_70032_d",
+        "g",
+        nullptr
+    };
+    const std::string entitySignature = Mapper::Get("net/minecraft/entity/Entity", 2);
+    Method* method = entitySignature.empty() ? nullptr : FindMethod(env, entityClass, methodNames, ("(" + entitySignature + ")F").c_str());
+    return method ? method->CallFloatMethod(env, this, false, entity) : 1000.0f;
+}
+
+float Player::GetWidth(JNIEnv* env) {
+    if (!env || !this) {
+        return 0.0f;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return 0.0f;
+    }
+
+    const std::string mappedWidthField = Mapper::Get("width");
+    const char* fieldNames[] = {
+        mappedWidthField.c_str(),
+        "width",
+        "field_70130_N",
+        "J",
+        nullptr
+    };
+    Field* field = FindField(env, playerClass, fieldNames, "F");
+    const float value = field ? field->GetFloatField(env, this) : 0.0f;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return value;
+}
+
+float Player::GetHeight(JNIEnv* env) {
+    if (!env || !this) {
+        return 0.0f;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return 0.0f;
+    }
+
+    const std::string mappedHeightField = Mapper::Get("height");
+    const char* fieldNames[] = {
+        mappedHeightField.c_str(),
+        "height",
+        "field_70131_O",
+        "K",
+        nullptr
+    };
+    Field* field = FindField(env, playerClass, fieldNames, "F");
+    const float value = field ? field->GetFloatField(env, this) : 0.0f;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return value;
+}
+
+void Player::SetWidth(float value, JNIEnv* env) {
+    if (!env || !this) {
+        return;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return;
+    }
+
+    const std::string mappedWidthField = Mapper::Get("width");
+    const char* fieldNames[] = {
+        mappedWidthField.c_str(),
+        "width",
+        "field_70130_N",
+        "J",
+        nullptr
+    };
+    Field* field = FindField(env, playerClass, fieldNames, "F");
+    if (field) {
+        field->SetFloatField(env, this, value);
+    }
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+}
+
+void Player::SetHeight(float value, JNIEnv* env) {
+    if (!env || !this) {
+        return;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return;
+    }
+
+    const std::string mappedHeightField = Mapper::Get("height");
+    const char* fieldNames[] = {
+        mappedHeightField.c_str(),
+        "height",
+        "field_70131_O",
+        "K",
+        nullptr
+    };
+    Field* field = FindField(env, playerClass, fieldNames, "F");
+    if (field) {
+        field->SetFloatField(env, this, value);
+    }
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+}
+
+void Player::SetPosition(double x, double y, double z, JNIEnv* env) {
+    if (!env || !this) {
+        return;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return;
+    }
+
+    const std::string mappedSetPosition = Mapper::Get("setPosition");
+    const char* methodNames[] = {
+        mappedSetPosition.c_str(),
+        "setPosition",
+        "func_70107_b",
+        "b",
+        nullptr
+    };
+    Method* method = FindMethod(env, playerClass, methodNames, "(DDD)V");
+    if (method) {
+        method->CallVoidMethod(env, this, false, x, y, z);
+    }
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+}
+
+bool Player::IsInvisible(JNIEnv* env) {
+    if (!env || !this) {
+        return true;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return true;
+    }
+
+    const std::string mappedIsInvisible = Mapper::Get("isInvisible");
+    const char* methodNames[] = {
+        mappedIsInvisible.c_str(),
+        "isInvisible",
+        "func_82150_aj",
+        "ax",
+        nullptr
+    };
+    Method* method = FindMethod(env, playerClass, methodNames, "()Z");
+    const bool invisible = method ? method->CallBooleanMethod(env, this) : true;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return invisible;
+}
+
+int Player::GetHurtTime(JNIEnv* env) {
+    if (!env || !this) {
+        return 0;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return 0;
+    }
+
+    const std::string mappedHurtTime = Mapper::Get("hurtTime");
+    const char* fieldNames[] = {
+        mappedHurtTime.c_str(),
+        "hurtTime",
+        "field_70737_aN",
+        "au",
+        nullptr
+    };
+    Field* field = FindField(env, playerClass, fieldNames, "I");
+    const int hurtTime = field ? field->GetIntField(env, this) : 0;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return hurtTime;
+}
+
 bool Player::IsUsingItem(JNIEnv* env) {
     if (!env || !this) {
         return false;
@@ -211,6 +817,30 @@ bool Player::IsUsingItem(JNIEnv* env) {
 
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return value;
+}
+
+int Player::GetSwingProgressInt(JNIEnv* env) {
+    if (!env || !this) {
+        return 0;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return 0;
+    }
+
+    const std::string mappedSwingProgress = Mapper::Get("swingProgressInt");
+    const char* fieldNames[] = {
+        mappedSwingProgress.c_str(),
+        "swingProgressInt",
+        "field_110158_av",
+        "as",
+        nullptr
+    };
+    Field* field = FindField(env, playerClass, fieldNames, "I");
+    const int swingProgress = field ? field->GetIntField(env, this) : 0;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return swingProgress;
 }
 
 jobject Player::GetActivePotionEffect(int potionId, JNIEnv* env) {
@@ -267,6 +897,116 @@ jobject Player::GetActivePotionEffect(int potionId, JNIEnv* env) {
     return effect;
 }
 
+jobject Player::GetBoundingBox(JNIEnv* env) {
+    if (!env || !this) {
+        return nullptr;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return nullptr;
+    }
+
+    const std::string fieldName = Mapper::Get("boundingBox");
+    const std::string fieldSignature = Mapper::Get("net/minecraft/util/AxisAlignedBB", 2);
+    if (fieldName.empty() || fieldSignature.empty()) {
+        env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+        return nullptr;
+    }
+
+    Field* bbField = playerClass->GetField(env, fieldName.c_str(), fieldSignature.c_str());
+    jobject result = bbField ? bbField->GetObjectField(env, this) : nullptr;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return result;
+}
+
+void Player::Zero(JNIEnv* env) {
+    if (!env || !this) {
+        return;
+    }
+
+    const std::string name = GetName(env, true);
+    if (name.empty()) {
+        return;
+    }
+
+    const Vec3D currentPos = GetPos(env);
+
+    {
+        std::lock_guard<std::mutex> lock(g_HiddenPlayersMutex);
+        auto& state = g_HiddenPlayers[name];
+        if (state.height <= 0.0f) {
+            state.width = GetWidth(env);
+            state.height = GetHeight(env);
+            state.x = currentPos.x;
+            state.y = currentPos.y;
+            state.z = currentPos.z;
+
+            jobject bbObj = GetBoundingBox(env);
+            if (bbObj) {
+                state.bb = reinterpret_cast<AxisAlignedBB*>(bbObj)->GetNativeBoundingBox(env);
+                state.hasBB = true;
+                env->DeleteLocalRef(bbObj);
+            }
+        }
+
+        if (state.width <= 0.0f) {
+            state.width = 0.6f;
+        }
+        if (state.height <= 0.0f) {
+            state.height = 1.8f;
+        }
+
+        if (currentPos.y > -50.0) {
+            state.x = currentPos.x;
+            state.y = currentPos.y;
+            state.z = currentPos.z;
+        }
+
+        jobject bbObj2 = GetBoundingBox(env);
+        if (bbObj2) {
+            AxisAlignedBB_t zeroBB{};
+            reinterpret_cast<AxisAlignedBB*>(bbObj2)->SetNativeBoundingBox(zeroBB, env);
+            env->DeleteLocalRef(bbObj2);
+        }
+
+        SetWidth(0.0f, env);
+        SetHeight(0.0f, env);
+        SetPosition(state.x, -60.0, state.z, env);
+    }
+}
+
+void Player::Restore(JNIEnv* env) {
+    if (!env || !this) {
+        return;
+    }
+
+    const std::string name = GetName(env, true);
+    if (name.empty()) {
+        return;
+    }
+
+    std::lock_guard<std::mutex> lock(g_HiddenPlayersMutex);
+    const auto it = g_HiddenPlayers.find(name);
+    if (it == g_HiddenPlayers.end()) {
+        return;
+    }
+
+    SetPosition(it->second.x, it->second.y, it->second.z, env);
+    SetWidth(it->second.width, env);
+    SetHeight(it->second.height, env);
+
+    if (it->second.hasBB) {
+        jobject bbObj = GetBoundingBox(env);
+        if (bbObj) {
+            reinterpret_cast<AxisAlignedBB*>(bbObj)->SetNativeBoundingBox(it->second.bb, env);
+            env->DeleteLocalRef(bbObj);
+        }
+    }
+
+    g_HiddenPlayers.erase(it);
+}
+
 void Player::SendPacket(jobject packet, JNIEnv* env) {
     if (!env || !this || !packet) {
         return;
@@ -318,39 +1058,29 @@ void Player::SetJumpTicks(int ticks, JNIEnv* env) {
         return;
     }
 
+    const std::string mappedJumpTicks = Mapper::Get("jumpTicks");
     const char* fieldNames[] = {
-        Mapper::Get("jumpTicks").c_str(),
+        mappedJumpTicks.c_str(),
         "bn",
-        "field_70773_bE"
+        "field_70773_bE",
+        nullptr
     };
 
-    for (const char* fieldName : fieldNames) {
-        if (!fieldName || !fieldName[0]) {
-            continue;
-        }
-
-        Field* jumpTicksField = playerClass->GetField(env, fieldName, "I");
-        if (jumpTicksField) {
-            jumpTicksField->SetIntField(env, this, ticks);
-            break;
-        }
+    Field* jumpTicksField = FindField(env, playerClass, fieldNames, "I");
+    if (jumpTicksField) {
+        jumpTicksField->SetIntField(env, this, ticks);
     }
 
+    const std::string mappedSetJumping = Mapper::Get("setJumping");
     const char* methodNames[] = {
-        Mapper::Get("setJumping").c_str(),
-        "setJumping"
+        mappedSetJumping.c_str(),
+        "setJumping",
+        nullptr
     };
 
-    for (const char* methodName : methodNames) {
-        if (!methodName || !methodName[0]) {
-            continue;
-        }
-
-        Method* setJumpingMethod = playerClass->GetMethod(env, methodName, "(Z)V");
-        if (setJumpingMethod) {
-            setJumpingMethod->CallVoidMethod(env, this, false, false);
-            break;
-        }
+    Method* setJumpingMethod = FindMethod(env, playerClass, methodNames, "(Z)V");
+    if (setJumpingMethod) {
+        setJumpingMethod->CallVoidMethod(env, this, false, false);
     }
 
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));

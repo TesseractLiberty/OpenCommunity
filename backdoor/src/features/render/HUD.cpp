@@ -54,6 +54,47 @@ namespace {
         drawList->AddText(font, fontSize, pos, color, text.c_str());
     }
 
+    ImU32 McColorToImU32(char code) {
+        switch (static_cast<char>(std::tolower(static_cast<unsigned char>(code)))) {
+        case '0': return IM_COL32(0, 0, 0, 255);
+        case '1': return IM_COL32(0, 0, 170, 255);
+        case '2': return IM_COL32(0, 170, 0, 255);
+        case '3': return IM_COL32(0, 170, 170, 255);
+        case '4': return IM_COL32(170, 0, 0, 255);
+        case '5': return IM_COL32(170, 0, 170, 255);
+        case '6': return IM_COL32(255, 170, 0, 255);
+        case '7': return IM_COL32(170, 170, 170, 255);
+        case '8': return IM_COL32(85, 85, 85, 255);
+        case '9': return IM_COL32(85, 85, 255, 255);
+        case 'a': return IM_COL32(85, 255, 85, 255);
+        case 'b': return IM_COL32(85, 255, 255, 255);
+        case 'c': return IM_COL32(255, 85, 85, 255);
+        case 'd': return IM_COL32(255, 85, 255, 255);
+        case 'e': return IM_COL32(255, 255, 85, 255);
+        case 'f': return IM_COL32(255, 255, 255, 255);
+        case 'r': return IM_COL32(255, 255, 255, 255);
+        default: return IM_COL32(255, 255, 255, 255);
+        }
+    }
+
+    bool TryConsumeMinecraftColorCode(const std::string& text, size_t index, char& outCode, size_t& consumed) {
+        if (index + 2 < text.size() &&
+            static_cast<unsigned char>(text[index]) == 0xC2 &&
+            static_cast<unsigned char>(text[index + 1]) == 0xA7) {
+            outCode = text[index + 2];
+            consumed = 3;
+            return true;
+        }
+
+        if (index + 1 < text.size() && static_cast<unsigned char>(text[index]) == 0xA7) {
+            outCode = text[index + 1];
+            consumed = 2;
+            return true;
+        }
+
+        return false;
+    }
+
     std::string FormatModuleName(const std::string& name, bool spacedModules) {
         if (!spacedModules || name.empty()) {
             return name;
@@ -249,7 +290,7 @@ std::vector<HUD::ModuleEntry> HUD::GetActiveModules(ImFont* nameFont, float name
         const std::string tag = mod->GetTag();
         float width = CalcTextSize(resolvedNameFont, resolvedNameSize, displayName).x;
         if (!tag.empty()) {
-            width += spaceWidth + CalcTextSize(resolvedTagFont, resolvedTagSize, tag).x;
+            width += spaceWidth + CalcFormattedTagWidth(resolvedTagFont, resolvedTagSize, tag);
         }
 
         modules.push_back({ displayName, tag, width, mod->IsInUse() });
@@ -260,6 +301,95 @@ std::vector<HUD::ModuleEntry> HUD::GetActiveModules(ImFont* nameFont, float name
     });
 
     return modules;
+}
+
+float HUD::CalcFormattedTagWidth(ImFont* font, float fontSize, const std::string& text) const {
+    float width = 0.0f;
+    for (size_t index = 0; index < text.size();) {
+        char colorCode = 0;
+        size_t consumed = 0;
+        if (TryConsumeMinecraftColorCode(text, index, colorCode, consumed)) {
+            index += consumed;
+            continue;
+        }
+
+        const unsigned char ch = static_cast<unsigned char>(text[index]);
+        if (ch < 0x80) {
+            const char buffer[2] = { static_cast<char>(ch), '\0' };
+            width += CalcTextSize(font, fontSize, buffer).x;
+            ++index;
+            continue;
+        }
+
+        int charLength = 1;
+        if ((ch & 0xE0) == 0xC0) {
+            charLength = 2;
+        } else if ((ch & 0xF0) == 0xE0) {
+            charLength = 3;
+        } else if ((ch & 0xF8) == 0xF0) {
+            charLength = 4;
+        }
+
+        if (index + static_cast<size_t>(charLength) > text.size()) {
+            charLength = 1;
+        }
+
+        width += CalcTextSize(font, fontSize, text.substr(index, static_cast<size_t>(charLength))).x;
+        index += static_cast<size_t>(charLength);
+    }
+
+    return width;
+}
+
+float HUD::DrawFormattedTag(ImDrawList* drawList, ImFont* font, float fontSize, const ImVec2& pos, const std::string& text, ImU32 defaultColor, ImU32 shadowColor) {
+    if (!drawList || text.empty()) {
+        return 0.0f;
+    }
+
+    ImU32 currentColor = defaultColor;
+    float currentX = pos.x;
+    for (size_t index = 0; index < text.size();) {
+        char colorCode = 0;
+        size_t consumed = 0;
+        if (TryConsumeMinecraftColorCode(text, index, colorCode, consumed)) {
+            currentColor = McColorToImU32(colorCode);
+            index += consumed;
+            continue;
+        }
+
+        const unsigned char ch = static_cast<unsigned char>(text[index]);
+        if (ch < 0x80) {
+            const char buffer[2] = { static_cast<char>(ch), '\0' };
+            const float charWidth = CalcTextSize(font, fontSize, buffer).x;
+            drawList->AddText(font, fontSize, ImVec2(currentX + 1.0f, pos.y + 1.0f), shadowColor, buffer);
+            drawList->AddText(font, fontSize, ImVec2(currentX, pos.y), currentColor, buffer);
+            currentX += charWidth;
+            ++index;
+            continue;
+        }
+
+        int charLength = 1;
+        if ((ch & 0xE0) == 0xC0) {
+            charLength = 2;
+        } else if ((ch & 0xF0) == 0xE0) {
+            charLength = 3;
+        } else if ((ch & 0xF8) == 0xF0) {
+            charLength = 4;
+        }
+
+        if (index + static_cast<size_t>(charLength) > text.size()) {
+            charLength = 1;
+        }
+
+        const std::string glyph = text.substr(index, static_cast<size_t>(charLength));
+        const float charWidth = CalcTextSize(font, fontSize, glyph).x;
+        drawList->AddText(font, fontSize, ImVec2(currentX + 1.0f, pos.y + 1.0f), shadowColor, glyph.c_str());
+        drawList->AddText(font, fontSize, ImVec2(currentX, pos.y), currentColor, glyph.c_str());
+        currentX += charWidth;
+        index += static_cast<size_t>(charLength);
+    }
+
+    return currentX - pos.x;
 }
 
 void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
@@ -421,7 +551,7 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
         if (tesseractMode) {
             layoutWidth = CalcTextSize(nameFont, nameSize, mod.name).x;
             if (!mod.tag.empty()) {
-                layoutWidth += 4.0f + CalcTextSize(tagFont, tagSize, mod.tag).x;
+                layoutWidth += 4.0f + CalcFormattedTagWidth(tagFont, tagSize, mod.tag);
             }
         }
 
@@ -459,7 +589,7 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
         if (!mod.tag.empty()) {
             const float tagX = textX + CalcTextSize(nameFont, nameSize, mod.name).x + (tesseractMode ? 4.0f : spaceWidth);
             const ImU32 tagColor = (vapeMode && mod.inUse) ? vapeTagActiveColor : secondaryColor;
-            DrawShadowedText(drawList, tagFont, tagSize, ImVec2(tagX, textY), tagColor, shadowColor, mod.tag);
+            DrawFormattedTag(drawList, tagFont, tagSize, ImVec2(tagX, textY), mod.tag, tagColor, shadowColor);
         }
 
         index++;

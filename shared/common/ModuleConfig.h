@@ -69,6 +69,37 @@ struct ModuleConfig {
 
     struct {
         bool m_Enabled = false;
+        char m_PlayerName[128] = {};
+        bool m_AutoTarget = false;
+        bool m_TargetSwitch = false;
+        bool m_BrowseAllPlayers = false;
+        bool m_BrowseClearCacheRequested = false;
+        bool m_ShowBrowsedPlayers = false;
+        bool m_BrowsedPlayersProcessed[50] = {};
+        char m_BrowsedPlayerNames[50][17] = {};
+        int m_BrowsedPlayersCount = 0;
+        int m_PriorityMode = 0;
+        float m_BothHealthWeight = 1.0f;
+        float m_BothArmorWeight = 1.0f;
+        bool m_ConsiderDurability = true;
+        float m_BrokenArmorPriority = 5.0f;
+        int m_SwitchMode = 0;
+        int m_SwitchHits = 5;
+        int m_SwitchTimeMs = 3000;
+    } Target;
+
+    struct {
+        bool m_Enabled = false;
+        bool m_ShowAllies = false;
+        int m_ShowAlliesMode = 0;
+        int m_ShowAlliesCount = 5;
+        bool m_ManualShowList[50] = {};
+        char m_ManualNames[50][16] = {};
+        int m_ManualCount = 0;
+    } HideClans;
+
+    struct {
+        bool m_Enabled = false;
     } NoHitDelay;
 
     struct {
@@ -92,6 +123,8 @@ struct ModuleConfig {
         bool m_NoHitDelay = false;
         bool m_NoJumpDelay = false;
         bool m_DamageIndicator = false;
+        bool m_Target = false;
+        bool m_HideClans = false;
         bool m_RightClicker = false;
         bool m_WTap = false;
         bool m_AimAssist = false;

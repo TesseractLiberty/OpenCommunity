@@ -95,6 +95,41 @@ jobject Minecraft::GetRenderItem(JNIEnv* env) {
     return GetMinecraftMember(env, Mapper::Get("renderItem"), Mapper::Get("net/minecraft/client/renderer/entity/RenderItem", 2));
 }
 
+jobject Minecraft::GetRenderManager(JNIEnv* env) {
+    if (!env) {
+        return nullptr;
+    }
+
+    Class* minecraftClass = GetMinecraftClass();
+    if (!minecraftClass) {
+        return nullptr;
+    }
+
+    const std::string methodName = Mapper::Get("getRenderManager");
+    const std::string methodSignature = Mapper::Get("net/minecraft/client/renderer/entity/RenderManager", 3);
+    if (methodName.empty() || methodSignature.empty()) {
+        return nullptr;
+    }
+
+    Method* method = minecraftClass->GetMethod(env, methodName.c_str(), methodSignature.c_str());
+    if (!method) {
+        return nullptr;
+    }
+
+    jobject minecraft = GetTheMinecraft(env);
+    if (!minecraft) {
+        return nullptr;
+    }
+
+    jobject value = method->CallObjectMethod(env, minecraft);
+    env->DeleteLocalRef(minecraft);
+    return value;
+}
+
+jobject Minecraft::GetTimer(JNIEnv* env) {
+    return GetMinecraftMember(env, Mapper::Get("timer"), Mapper::Get("net/minecraft/util/Timer", 2));
+}
+
 jobject Minecraft::GetKeyBindUseItem(JNIEnv* env) {
     if (!env) {
         return nullptr;

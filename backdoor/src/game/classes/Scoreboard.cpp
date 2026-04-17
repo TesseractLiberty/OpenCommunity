@@ -1,9 +1,36 @@
 #include "pch.h"
 #include "Scoreboard.h"
 
+#include "Team.h"
+
 #include "../jni/Class.h"
 #include "../jni/Method.h"
 #include "../mapping/Mapper.h"
+
+jobject Scoreboard::GetPlayersTeam(JNIEnv* env, const std::string& playerName) {
+    if (!env || !this || playerName.empty()) {
+        return nullptr;
+    }
+
+    auto* scoreboardClass = reinterpret_cast<Class*>(env->GetObjectClass(reinterpret_cast<jobject>(this)));
+    if (!scoreboardClass) {
+        return nullptr;
+    }
+
+    const std::string methodName = Mapper::Get("getPlayersTeam");
+    const std::string teamSignature = Mapper::Get("net/minecraft/scoreboard/ScorePlayerTeam", 2);
+    const std::string signature = "(Ljava/lang/String;)" + teamSignature;
+    Method* method = (methodName.empty() || teamSignature.empty()) ? nullptr : scoreboardClass->GetMethod(env, methodName.c_str(), signature.c_str());
+
+    jstring playerNameObject = env->NewStringUTF(playerName.c_str());
+    jobject team = (method && playerNameObject) ? method->CallObjectMethod(env, this, false, playerNameObject) : nullptr;
+    if (playerNameObject) {
+        env->DeleteLocalRef(playerNameObject);
+    }
+
+    env->DeleteLocalRef(reinterpret_cast<jclass>(scoreboardClass));
+    return team;
+}
 
 jobject Scoreboard::GetObjectiveInDisplaySlot(JNIEnv* env, int slot) {
     if (!env || !this) {

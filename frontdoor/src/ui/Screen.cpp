@@ -22,9 +22,25 @@
 #include <cctype>
 #include <cfloat>
 #include <cmath>
+#include <mutex>
+#include <thread>
+#include <urlmon.h>
+
+#pragma comment(lib, "urlmon.lib")
 
 namespace
 {
+    struct PlayerHeadTextureEntry
+    {
+        ID3D11ShaderResourceView* texture = nullptr;
+        std::filesystem::path cachePath;
+        bool downloadQueued = false;
+        bool downloadFailed = false;
+    };
+
+    std::mutex g_PlayerHeadCacheMutex;
+    std::unordered_map<std::string, PlayerHeadTextureEntry> g_PlayerHeadCache;
+
     float Clamp01(float value)
     {
         return (value < 0.0f) ? 0.0f : ((value > 1.0f) ? 1.0f : value);
@@ -77,6 +93,280 @@ namespace
     {
         drawList->AddText(font, fontSize, ImVec2(pos.x + 1.0f, pos.y + 1.0f), shadowColor, text.c_str());
         drawList->AddText(font, fontSize, pos, color, text.c_str());
+    }
+
+    std::string NormalizePlayerHeadKey(const std::string& name)
+    {
+        std::string key;
+        key.reserve(name.size());
+
+        for (const unsigned char ch : name) {
+            if (std::isalnum(ch) || ch == '_' || ch == '-') {
+                key.push_back(static_cast<char>(std::tolower(ch)));
+            }
+        }
+
+        return key;
+    }
+
+    std::filesystem::path GetPlayerHeadCacheDirectory()
+    {
+        wchar_t tempPath[MAX_PATH] = {};
+        const DWORD tempLength = GetTempPathW(MAX_PATH, tempPath);
+        if (tempLength == 0 || tempLength >= MAX_PATH) {
+            return {};
+        }
+
+        return std::filesystem::path(tempPath) / "OpenCommunity" / "player_heads";
+    }
+
+    ID3D11ShaderResourceView* CreateTextureFromPixels(ID3D11Device* device, const unsigned char* pixels, int width, int height)
+    {
+        if (!device || !pixels || width <= 0 || height <= 0) {
+            return nullptr;
+        }
+
+        D3D11_TEXTURE2D_DESC desc = {};
+        desc.Width = width;
+        desc.Height = height;
+        desc.MipLevels = 1;
+        desc.ArraySize = 1;
+        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.Usage = D3D11_USAGE_DEFAULT;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+        D3D11_SUBRESOURCE_DATA subresource = {};
+        subresource.pSysMem = pixels;
+        subresource.SysMemPitch = width * 4;
+
+        ID3D11Texture2D* texture = nullptr;
+        if (FAILED(device->CreateTexture2D(&desc, &subresource, &texture)) || !texture) {
+            return nullptr;
+        }
+
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels = 1;
+
+        ID3D11ShaderResourceView* shaderResourceView = nullptr;
+        const HRESULT result = device->CreateShaderResourceView(texture, &srvDesc, &shaderResourceView);
+        texture->Release();
+        return SUCCEEDED(result) ? shaderResourceView : nullptr;
+    }
+
+    ID3D11ShaderResourceView* CreateTextureFromFile(ID3D11Device* device, const std::filesystem::path& imagePath)
+    {
+        if (!device || imagePath.empty() || !std::filesystem::exists(imagePath)) {
+            return nullptr;
+        }
+
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        unsigned char* pixels = stbi_load(imagePath.string().c_str(), &width, &height, &channels, 4);
+        if (!pixels) {
+            return nullptr;
+        }
+
+        ID3D11ShaderResourceView* texture = CreateTextureFromPixels(device, pixels, width, height);
+        stbi_image_free(pixels);
+        return texture;
+    }
+
+    void QueuePlayerHeadDownload(const std::string& playerName)
+    {
+        if (playerName.empty()) {
+            return;
+        }
+
+        const std::string cacheKey = NormalizePlayerHeadKey(playerName);
+        if (cacheKey.empty()) {
+            return;
+        }
+
+        const std::filesystem::path cacheDirectory = GetPlayerHeadCacheDirectory();
+        const std::filesystem::path cachePath = cacheDirectory / (cacheKey + ".png");
+
+        {
+            std::lock_guard<std::mutex> lock(g_PlayerHeadCacheMutex);
+            auto& entry = g_PlayerHeadCache[cacheKey];
+            entry.cachePath = cachePath;
+            if (entry.downloadQueued || entry.downloadFailed || entry.texture || std::filesystem::exists(cachePath)) {
+                return;
+            }
+
+            entry.downloadQueued = true;
+            entry.downloadFailed = false;
+        }
+
+        std::thread([playerName, cacheKey, cacheDirectory, cachePath]() {
+            std::error_code errorCode;
+            std::filesystem::create_directories(cacheDirectory, errorCode);
+
+            const HRESULT initResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+            const std::string downloadUrl = "https://minotar.net/helm/" + playerName + "/32.png";
+            const HRESULT downloadResult = URLDownloadToFileA(nullptr, downloadUrl.c_str(), cachePath.string().c_str(), 0, nullptr);
+            if (SUCCEEDED(initResult)) {
+                CoUninitialize();
+            }
+
+            std::lock_guard<std::mutex> lock(g_PlayerHeadCacheMutex);
+            auto& entry = g_PlayerHeadCache[cacheKey];
+            entry.downloadQueued = false;
+            entry.downloadFailed = FAILED(downloadResult) || !std::filesystem::exists(cachePath);
+        }).detach();
+    }
+
+    ID3D11ShaderResourceView* GetPlayerHeadTexture(ID3D11Device* device, const std::string& playerName)
+    {
+        if (!device || playerName.empty()) {
+            return nullptr;
+        }
+
+        const std::string cacheKey = NormalizePlayerHeadKey(playerName);
+        if (cacheKey.empty()) {
+            return nullptr;
+        }
+
+        std::filesystem::path cachePath;
+        {
+            std::lock_guard<std::mutex> lock(g_PlayerHeadCacheMutex);
+            auto& entry = g_PlayerHeadCache[cacheKey];
+            if (entry.cachePath.empty()) {
+                entry.cachePath = GetPlayerHeadCacheDirectory() / (cacheKey + ".png");
+            }
+
+            if (entry.texture) {
+                return entry.texture;
+            }
+
+            if (entry.downloadFailed) {
+                return nullptr;
+            }
+
+            cachePath = entry.cachePath;
+        }
+
+        if (std::filesystem::exists(cachePath)) {
+            ID3D11ShaderResourceView* texture = CreateTextureFromFile(device, cachePath);
+            if (texture) {
+                std::lock_guard<std::mutex> lock(g_PlayerHeadCacheMutex);
+                g_PlayerHeadCache[cacheKey].texture = texture;
+                return texture;
+            }
+        }
+
+        QueuePlayerHeadDownload(playerName);
+        return nullptr;
+    }
+
+    void DrawFallbackPlayerHead(ImDrawList* drawList, ImFont* font, float fontSize, const ImVec2& min, const ImVec2& max, const std::string& playerName)
+    {
+        if (!drawList) {
+            return;
+        }
+
+        drawList->AddRectFilled(min, max, IM_COL32(215, 217, 221, 255), 5.0f);
+        drawList->AddRect(min, max, IM_COL32(184, 188, 194, 255), 5.0f, 0, 1.0f);
+
+        if (playerName.empty()) {
+            return;
+        }
+
+        const char initial[2] = { static_cast<char>(std::toupper(static_cast<unsigned char>(playerName[0]))), '\0' };
+        const ImVec2 textSize = font ? font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, initial) : ImGui::CalcTextSize(initial);
+        drawList->AddText(
+            font,
+            fontSize,
+            ImVec2(min.x + ((max.x - min.x) - textSize.x) * 0.5f, min.y + ((max.y - min.y) - textSize.y) * 0.5f),
+            IM_COL32(72, 76, 84, 255),
+            initial);
+    }
+
+    void DrawPlayerHeadPreview(ImDrawList* drawList, ID3D11Device* device, ImFont* font, float fontSize, const std::string& playerName, const ImVec2& min, const ImVec2& max)
+    {
+        if (!drawList) {
+            return;
+        }
+
+        ID3D11ShaderResourceView* texture = GetPlayerHeadTexture(device, playerName);
+        if (!texture) {
+            DrawFallbackPlayerHead(drawList, font, fontSize, min, max, playerName);
+            return;
+        }
+
+        drawList->AddRectFilled(min, max, IM_COL32(225, 227, 231, 255), 5.0f);
+        drawList->AddImageRounded(reinterpret_cast<ImTextureID>(texture), min, max, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32_WHITE, 5.0f, ImDrawFlags_RoundCornersAll);
+        drawList->AddRect(min, max, IM_COL32(184, 188, 194, 255), 5.0f, 0, 1.0f);
+    }
+
+    std::vector<size_t> GetVisibleOptionOrder(const std::shared_ptr<Module>& mod)
+    {
+        std::vector<size_t> order;
+        if (!mod) {
+            return order;
+        }
+
+        const auto& options = mod->GetOptions();
+        for (size_t optionIndex = 0; optionIndex < options.size(); ++optionIndex) {
+            if (mod->ShouldRenderOption(optionIndex)) {
+                order.push_back(optionIndex);
+            }
+        }
+
+        std::stable_sort(order.begin(), order.end(), [&](size_t lhs, size_t rhs) {
+            const auto& left = options[lhs];
+            const auto& right = options[rhs];
+            const int leftOrder = left.displayOrder >= 0 ? left.displayOrder : static_cast<int>(lhs * 100);
+            const int rightOrder = right.displayOrder >= 0 ? right.displayOrder : static_cast<int>(rhs * 100);
+            if (leftOrder != rightOrder) {
+                return leftOrder < rightOrder;
+            }
+            return lhs < rhs;
+        });
+
+        return order;
+    }
+
+    float GetModuleBodyFooterSpacing(const std::shared_ptr<Module>& mod, const std::vector<size_t>& visibleOrder)
+    {
+        (void)mod;
+        return visibleOrder.empty() ? 0.0f : 14.0f;
+    }
+
+    std::filesystem::path ResolveModuleImagePath(const std::string& relativePath)
+    {
+        if (relativePath.empty()) {
+            return {};
+        }
+
+        const std::filesystem::path direct(relativePath);
+        if (direct.is_absolute() && std::filesystem::exists(direct)) {
+            return direct;
+        }
+
+        wchar_t modulePath[MAX_PATH] = {};
+        if (GetModuleFileNameW(nullptr, modulePath, MAX_PATH) == 0) {
+            return {};
+        }
+
+        auto current = std::filesystem::path(modulePath).parent_path();
+        while (!current.empty()) {
+            const auto candidate = current / relativePath;
+            if (std::filesystem::exists(candidate)) {
+                return candidate;
+            }
+
+            const auto parent = current.parent_path();
+            if (parent == current) {
+                break;
+            }
+            current = parent;
+        }
+
+        return {};
     }
 
     std::string FormatModuleName(const std::string& name, bool spacedModules)
@@ -643,6 +933,7 @@ bool Screen::Initialize() {
     LoadIconTextures();
     
     RegisterAllModules();
+    FeatureManager::Get()->SyncAllFromConfig(Bridge::Get()->GetConfig());
     
     m_Initialized = true;
     return true;
@@ -1193,12 +1484,31 @@ void Screen::RenderHUDPreview() {
 static void RenderModulesForCategory(ModuleCategory category, float areaWidth, float areaHeight, ImFont* fontBold, ImFont* fontBody, ID3D11Device* device) {
     // Cache for module prefix icon textures (keyed by image data pointer)
     static std::unordered_map<const unsigned char*, ID3D11ShaderResourceView*> s_ModuleIconCache;
+    static std::unordered_map<std::string, ID3D11ShaderResourceView*> s_ModulePathIconCache;
     static float s_CategoryScroll[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     auto& modules = FeatureManager::Get()->GetModules(category);
     if (modules.empty()) return;
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 origin = ImGui::GetCursorScreenPos();
+    auto flushPendingBindKeys = []() {
+        for (int vk = 1; vk < 256; ++vk) {
+            GetAsyncKeyState(vk);
+        }
+    };
+    auto hasHeldKeyboardKey = []() {
+        for (int vk = 1; vk < 256; ++vk) {
+            if (vk == VK_LBUTTON || vk == VK_RBUTTON || vk == VK_MBUTTON ||
+                vk == VK_XBUTTON1 || vk == VK_XBUTTON2) {
+                continue;
+            }
+
+            if (GetAsyncKeyState(vk) & 0x8000) {
+                return true;
+            }
+        }
+        return false;
+    };
 
     const float colGap = 12.0f;
     const float cardPadX = 14.0f;
@@ -1214,22 +1524,17 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
     const float visibleHeight = (areaHeight > contentBottomPad) ? (areaHeight - contentBottomPad) : areaHeight;
 
     auto getCardHeight = [&](const std::shared_ptr<Module>& mod) -> float {
-        int optCount = 0;
-        for (size_t optionIndex = 0; optionIndex < mod->GetOptions().size(); ++optionIndex) {
-            if (mod->ShouldRenderOption(optionIndex)) {
-                ++optCount;
-            }
-        }
-
+        const auto visibleOrder = GetVisibleOptionOrder(mod);
         float cardHeight = headerH + cardPadY;
-        if (optCount > 0) {
-            cardHeight += optCount * optLineH + 6.0f;
+        if (!visibleOrder.empty()) {
+            cardHeight += static_cast<float>(visibleOrder.size()) * optLineH + GetModuleBodyFooterSpacing(mod, visibleOrder);
         }
         return cardHeight;
     };
 
     static int waitingBindModuleIdx = -1;
     static ModuleCategory waitingBindCat = ModuleCategory::Combat;
+    static bool waitingBindNeedsRelease = false;
 
     float layoutColY[2] = { 0.0f, 0.0f };
     for (const auto& mod : modules) {
@@ -1255,12 +1560,8 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
 
     for (int mi = 0; mi < (int)modules.size(); mi++) {
         auto& mod = modules[mi];
-        int optCount = 0;
-        for (size_t optionIndex = 0; optionIndex < mod->GetOptions().size(); ++optionIndex) {
-            if (mod->ShouldRenderOption(optionIndex)) {
-                ++optCount;
-            }
-        }
+        const auto visibleOptionOrder = GetVisibleOptionOrder(mod);
+        const int optCount = static_cast<int>(visibleOptionOrder.size());
         const float cardH = getCardHeight(mod);
 
         int col = (colY[0] <= colY[1]) ? 0 : 1;
@@ -1276,41 +1577,86 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
         // Render module prefix icon if available
         const float prefixIconSize = 20.0f;
         float nameOffsetX = 0.0f;
-        if (mod->GetImageData() && mod->GetImageSize() > 0 && device) {
-            auto it = s_ModuleIconCache.find(mod->GetImageData());
-            if (it == s_ModuleIconCache.end()) {
-                // Load texture from module image data
-                int tw = 0, th = 0, tc = 0;
-                unsigned char* pixels = stbi_load_from_memory(mod->GetImageData(), mod->GetImageSize(), &tw, &th, &tc, 4);
-                ID3D11ShaderResourceView* srv = nullptr;
-                if (pixels && tw > 0 && th > 0) {
-                    D3D11_TEXTURE2D_DESC desc = {};
-                    desc.Width = tw; desc.Height = th;
-                    desc.MipLevels = 1; desc.ArraySize = 1;
-                    desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                    desc.SampleDesc.Count = 1;
-                    desc.Usage = D3D11_USAGE_DEFAULT;
-                    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-                    D3D11_SUBRESOURCE_DATA sub = {};
-                    sub.pSysMem = pixels; sub.SysMemPitch = tw * 4;
-                    ID3D11Texture2D* tex = nullptr;
-                    if (SUCCEEDED(device->CreateTexture2D(&desc, &sub, &tex))) {
-                        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                        srvDesc.Texture2D.MipLevels = 1;
-                        device->CreateShaderResourceView(tex, &srvDesc, &srv);
-                        tex->Release();
+        if (device) {
+            ID3D11ShaderResourceView* moduleIcon = nullptr;
+
+            if (mod->GetImageData() && mod->GetImageSize() > 0) {
+                auto it = s_ModuleIconCache.find(mod->GetImageData());
+                if (it == s_ModuleIconCache.end()) {
+                    int tw = 0, th = 0, tc = 0;
+                    unsigned char* pixels = stbi_load_from_memory(mod->GetImageData(), mod->GetImageSize(), &tw, &th, &tc, 4);
+                    ID3D11ShaderResourceView* srv = nullptr;
+                    if (pixels && tw > 0 && th > 0) {
+                        D3D11_TEXTURE2D_DESC desc = {};
+                        desc.Width = tw; desc.Height = th;
+                        desc.MipLevels = 1; desc.ArraySize = 1;
+                        desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        desc.SampleDesc.Count = 1;
+                        desc.Usage = D3D11_USAGE_DEFAULT;
+                        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                        D3D11_SUBRESOURCE_DATA sub = {};
+                        sub.pSysMem = pixels; sub.SysMemPitch = tw * 4;
+                        ID3D11Texture2D* tex = nullptr;
+                        if (SUCCEEDED(device->CreateTexture2D(&desc, &sub, &tex))) {
+                            D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                            srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+                            srvDesc.Texture2D.MipLevels = 1;
+                            device->CreateShaderResourceView(tex, &srvDesc, &srv);
+                            tex->Release();
+                        }
+                        stbi_image_free(pixels);
                     }
-                    stbi_image_free(pixels);
+                    s_ModuleIconCache[mod->GetImageData()] = srv;
+                    it = s_ModuleIconCache.find(mod->GetImageData());
                 }
-                s_ModuleIconCache[mod->GetImageData()] = srv;
-                it = s_ModuleIconCache.find(mod->GetImageData());
+
+                if (it != s_ModuleIconCache.end()) {
+                    moduleIcon = it->second;
+                }
+            } else if (!mod->GetImagePath().empty()) {
+                auto it = s_ModulePathIconCache.find(mod->GetImagePath());
+                if (it == s_ModulePathIconCache.end()) {
+                    ID3D11ShaderResourceView* srv = nullptr;
+                    const auto resolvedPath = ResolveModuleImagePath(mod->GetImagePath());
+                    if (!resolvedPath.empty()) {
+                        int tw = 0, th = 0, tc = 0;
+                        unsigned char* pixels = stbi_load(resolvedPath.string().c_str(), &tw, &th, &tc, 4);
+                        if (pixels && tw > 0 && th > 0) {
+                            D3D11_TEXTURE2D_DESC desc = {};
+                            desc.Width = tw; desc.Height = th;
+                            desc.MipLevels = 1; desc.ArraySize = 1;
+                            desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                            desc.SampleDesc.Count = 1;
+                            desc.Usage = D3D11_USAGE_DEFAULT;
+                            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+                            D3D11_SUBRESOURCE_DATA sub = {};
+                            sub.pSysMem = pixels; sub.SysMemPitch = tw * 4;
+                            ID3D11Texture2D* tex = nullptr;
+                            if (SUCCEEDED(device->CreateTexture2D(&desc, &sub, &tex))) {
+                                D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                                srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                                srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+                                srvDesc.Texture2D.MipLevels = 1;
+                                device->CreateShaderResourceView(tex, &srvDesc, &srv);
+                                tex->Release();
+                            }
+                            stbi_image_free(pixels);
+                        }
+                    }
+                    s_ModulePathIconCache[mod->GetImagePath()] = srv;
+                    it = s_ModulePathIconCache.find(mod->GetImagePath());
+                }
+
+                if (it != s_ModulePathIconCache.end()) {
+                    moduleIcon = it->second;
+                }
             }
-            if (it != s_ModuleIconCache.end() && it->second) {
+
+            if (moduleIcon) {
                 float iconY = cy + (headerH - prefixIconSize) * 0.5f;
                 float iconX = cx + cardPadX;
-                dl->AddImage((ImTextureID)it->second, ImVec2(iconX, iconY), ImVec2(iconX + prefixIconSize, iconY + prefixIconSize));
+                dl->AddImage((ImTextureID)moduleIcon, ImVec2(iconX, iconY), ImVec2(iconX + prefixIconSize, iconY + prefixIconSize));
                 nameOffsetX = prefixIconSize + 6.0f;
             }
         }
@@ -1352,23 +1698,39 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
             if (ImGui::InvisibleButton(bindBtnId, ImVec2(bindBtnW, 18.0f))) {
                 if (isWaiting) {
                     waitingBindModuleIdx = -1;
+                    waitingBindNeedsRelease = false;
                 } else {
                     waitingBindModuleIdx = mi;
                     waitingBindCat = category;
+                    waitingBindNeedsRelease = true;
+                    flushPendingBindKeys();
                 }
             }
 
             if (isWaiting) {
-                for (int vk = 1; vk < 256; vk++) {
-                    if (vk == VK_LBUTTON || vk == VK_RBUTTON) continue;
-                    if (GetAsyncKeyState(vk) & 1) {
-                        if (vk == VK_ESCAPE) {
-                            mod->SetKeybind(0);
-                        } else {
-                            mod->SetKeybind(vk);
+                if (waitingBindNeedsRelease) {
+                    const bool mouseHeld = ImGui::IsMouseDown(ImGuiMouseButton_Left) || ImGui::IsMouseDown(ImGuiMouseButton_Right);
+                    if (!mouseHeld && !hasHeldKeyboardKey()) {
+                        waitingBindNeedsRelease = false;
+                        flushPendingBindKeys();
+                    }
+                } else {
+                    for (int vk = 1; vk < 256; vk++) {
+                        if (vk == VK_LBUTTON || vk == VK_RBUTTON || vk == VK_MBUTTON ||
+                            vk == VK_XBUTTON1 || vk == VK_XBUTTON2) {
+                            continue;
                         }
-                        waitingBindModuleIdx = -1;
-                        break;
+
+                        if (GetAsyncKeyState(vk) & 1) {
+                            if (vk == VK_ESCAPE) {
+                                mod->SetKeybind(0);
+                            } else {
+                                mod->SetKeybind(vk);
+                            }
+                            waitingBindModuleIdx = -1;
+                            waitingBindNeedsRelease = false;
+                            break;
+                        }
                     }
                 }
             }
@@ -1429,11 +1791,7 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
 
             float sliderW = optW * 0.40f;
 
-            for (size_t optionIndex = 0; optionIndex < mod->GetOptions().size(); ++optionIndex) {
-                if (!mod->ShouldRenderOption(optionIndex)) {
-                    continue;
-                }
-
+            for (const size_t optionIndex : visibleOptionOrder) {
                 auto& opt = mod->GetOptions()[optionIndex];
                 ImGui::SetCursorScreenPos(ImVec2(optX, optY));
 
@@ -1445,9 +1803,23 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
 
                 switch (opt.type) {
                 case OptionType::Toggle: {
-                    // Custom drawn checkbox to match card style
                     const float cbSize = 14.0f;
                     float cbX = optX;
+                    if (opt.showPlayerHead && !opt.playerHeadName.empty()) {
+                        const float headSize = 18.0f;
+                        const ImVec2 headMin(optX, optY + (optLineH - headSize) * 0.5f);
+                        const ImVec2 headMax(headMin.x + headSize, headMin.y + headSize);
+                        DrawPlayerHeadPreview(dl, device, labelFont, labelFS, opt.playerHeadName, headMin, headMax);
+                        cbX += headSize + 8.0f;
+                    }
+
+                    if (opt.statusOnly) {
+                        const ImU32 statusColor = opt.boolValue ? IM_COL32(85, 170, 85, 255) : IM_COL32(200, 70, 70, 255);
+                        dl->AddText(labelFont, labelFS, ImVec2(cbX, optY + (optLineH - labelFS) * 0.5f), statusColor, opt.name.c_str());
+                        break;
+                    }
+
+                    // Custom drawn checkbox to match card style
                     float cbY = optY + (optLineH - cbSize) * 0.5f;
                     ImVec2 cbMin(cbX, cbY);
                     ImVec2 cbMax(cbX + cbSize, cbY + cbSize);
@@ -1462,13 +1834,16 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                         dl->AddLine(ImVec2(cx2 - 1, cy2 + 3), ImVec2(cx2 + 4, cy2 - 3), IM_COL32(255, 255, 255, 255), 1.8f);
                     }
 
-                    ImGui::SetCursorScreenPos(cbMin);
-                    ImGui::InvisibleButton(optId, ImVec2(cbSize, cbSize));
-                    if (ImGui::IsItemClicked()) {
-                        opt.boolValue = !opt.boolValue;
+                    if (opt.interactive) {
+                        ImGui::SetCursorScreenPos(cbMin);
+                        ImGui::InvisibleButton(optId, ImVec2(cbSize, cbSize));
+                        if (ImGui::IsItemClicked()) {
+                            opt.boolValue = !opt.boolValue;
+                        }
                     }
 
-                    dl->AddText(labelFont, labelFS, ImVec2(cbX + cbSize + 6.0f, optY + (optLineH - labelFS) * 0.5f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+                    dl->AddText(labelFont, labelFS, ImVec2(cbX + cbSize + 6.0f, optY + (optLineH - labelFS) * 0.5f),
+                        opt.interactive ? IM_COL32(40, 40, 40, 255) : IM_COL32(90, 90, 90, 255), opt.name.c_str());
                     break;
                 }
                 case OptionType::SliderInt: {
@@ -1594,6 +1969,48 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     ImGui::PopItemWidth();
                     break;
                 }
+                case OptionType::Text: {
+                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+
+                    std::vector<char> textBuffer((std::max)(2, opt.textMaxLength + 1), '\0');
+                    strncpy_s(textBuffer.data(), textBuffer.size(), opt.textValue.c_str(), _TRUNCATE);
+
+                    const float inputPadX = 6.0f;
+                    const float inputPadY = 4.0f;
+                    const float inputHeight = ImGui::GetTextLineHeight() + inputPadY * 2.0f;
+                    const ImVec2 inputPos(optX + optW - sliderW, optY + (optLineH - inputHeight) * 0.5f);
+                    const ImVec2 inputMin = inputPos;
+                    const ImVec2 inputMax(inputPos.x + sliderW, inputPos.y + inputHeight);
+                    dl->AddRectFilled(inputMin, inputMax, IM_COL32(214, 219, 228, 255), 4.0f);
+                    dl->AddRectFilled(ImVec2(inputMin.x + 1.0f, inputMin.y + 1.0f), ImVec2(inputMax.x - 1.0f, inputMax.y - 1.0f), IM_COL32(236, 240, 246, 255), 4.0f);
+                    dl->AddRect(inputMin, inputMax, IM_COL32(145, 152, 164, 255), 4.0f, 0, 1.0f);
+
+                    ImGui::SetCursorScreenPos(inputPos);
+                    ImGui::PushItemWidth(sliderW);
+                    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.08f, 0.09f, 0.10f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, ImVec4(0.55f, 0.67f, 0.90f, 0.35f));
+                    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+                    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(inputPadX, inputPadY));
+                    if (ImGui::InputText(optId, textBuffer.data(), textBuffer.size())) {
+                        opt.textValue = textBuffer.data();
+                    }
+                    ImGui::PopStyleVar(2);
+                    ImGui::PopStyleColor(6);
+                    ImGui::PopItemWidth();
+                    break;
+                }
+                case OptionType::Button: {
+                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+                    ImGui::SetCursorScreenPos(ImVec2(optX + optW - sliderW, optY));
+                    if (ImGui::Button(opt.buttonLabel.c_str(), ImVec2(sliderW, optLineH - 6.0f))) {
+                        opt.buttonPressed = true;
+                    }
+                    break;
+                }
                 }
 
                 optY += optLineH;
@@ -1691,6 +2108,8 @@ void Screen::RenderClosing() {
 }
 
 void Screen::RenderMainInterface() {
+    FeatureManager::Get()->SyncAllFromConfig(Bridge::Get()->GetConfig());
+
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(m_Width, m_Height));
     

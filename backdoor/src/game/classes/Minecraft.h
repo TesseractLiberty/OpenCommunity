@@ -11,6 +11,8 @@ public:
     static jobject GetPlayerController(JNIEnv* env);
     static jobject GetObjectMouseOver(JNIEnv* env);
     static jobject GetRenderItem(JNIEnv* env);
+    static jobject GetRenderManager(JNIEnv* env);
+    static jobject GetTimer(JNIEnv* env);
     static jobject GetKeyBindUseItem(JNIEnv* env);
     static void DisplayGuiScreen(jobject guiScreen, JNIEnv* env);
     static jobject CreateGuiInventory(jobject player, JNIEnv* env);

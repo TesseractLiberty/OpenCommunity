@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "features/render/HUD.h"
 #include "core/Bridge.h"
+#include "core/GL11Hook.h"
 #include "core/RenderHook.h"
 #include "core/GameThreadHook.h"
 #include "game/jni/GameInstance.h"
@@ -57,6 +58,7 @@ static DWORD MainThreadImpl() {
     
     MH_Initialize();
     GameThreadHook::Initialize();
+    GL11Hook::Initialize();
     RenderHook::Get()->Initialize();
     
     auto* config = Bridge::Get()->GetConfig();

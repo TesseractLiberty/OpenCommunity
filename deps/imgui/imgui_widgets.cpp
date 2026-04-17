@@ -3929,16 +3929,7 @@ bool ImGui::InputText(const char* label, char* buf, size_t buf_size,
     void* user_data)
 {
     IM_ASSERT(!(flags & ImGuiInputTextFlags_Multiline)); // call InputTextMultiline()
-
-    // Cor do background desejada: ImVec4(22/255, 20/255, 22/255, 1)
-    ImVec4 bg = ImVec4(22.f / 255.f, 20.f / 255.f, 22.f / 255.f, 1.f);
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, bg);
-
-    bool result = InputTextEx(label, NULL, buf, (int)buf_size, ImVec2(0, 0), flags, callback, user_data);
-
-    ImGui::PopStyleColor();
-
-    return result;
+    return InputTextEx(label, NULL, buf, (int)buf_size, ImVec2(0, 0), flags, callback, user_data);
 }
 
 bool ImGui::InputTextMultiline(const char* label, char* buf, size_t buf_size, const ImVec2& size, ImGuiInputTextFlags flags, ImGuiInputTextCallback callback, void* user_data)

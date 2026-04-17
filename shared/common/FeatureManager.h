@@ -26,7 +26,9 @@ enum class OptionType {
     SliderInt,
     SliderFloat,
     Combo,
-    Color
+    Color,
+    Text,
+    Button
 };
 
 struct ModuleOption {
@@ -43,12 +45,27 @@ struct ModuleOption {
 
     std::vector<std::string> comboItems;
     int comboIndex = 0;
+    std::string textValue;
+    int textMaxLength = 127;
+    bool interactive = true;
+    bool buttonPressed = false;
+    std::string buttonLabel;
+    int displayOrder = -1;
+    bool showPlayerHead = false;
+    std::string playerHeadName;
+    bool statusOnly = false;
 
     static ModuleOption Toggle(const std::string& name, bool defaultValue = false) {
         ModuleOption o;
         o.name = name;
         o.type = OptionType::Toggle;
         o.boolValue = defaultValue;
+        return o;
+    }
+
+    static ModuleOption ToggleReadOnly(const std::string& name, bool value = false) {
+        ModuleOption o = Toggle(name, value);
+        o.interactive = false;
         return o;
     }
 
@@ -89,6 +106,23 @@ struct ModuleOption {
         o.colorValue[1] = g;
         o.colorValue[2] = b;
         o.colorValue[3] = a;
+        return o;
+    }
+
+    static ModuleOption Text(const std::string& name, const std::string& defaultValue = {}, int maxLength = 127) {
+        ModuleOption o;
+        o.name = name;
+        o.type = OptionType::Text;
+        o.textValue = defaultValue;
+        o.textMaxLength = (maxLength < 1) ? 1 : maxLength;
+        return o;
+    }
+
+    static ModuleOption Button(const std::string& name, const std::string& label = {}) {
+        ModuleOption o;
+        o.name = name;
+        o.type = OptionType::Button;
+        o.buttonLabel = label.empty() ? name : label;
         return o;
     }
 };
@@ -149,6 +183,7 @@ public:
 
     const unsigned char* GetImageData() const { return m_ImageData; }
     unsigned int GetImageSize() const { return m_ImageSize; }
+    const std::string& GetImagePath() const { return m_ImagePath; }
 
 protected:
     void AddOption(const ModuleOption& option) {
@@ -158,6 +193,10 @@ protected:
     void SetImagePrefix(const unsigned char* data, unsigned int size) {
         m_ImageData = data;
         m_ImageSize = size;
+    }
+
+    void SetImagePath(const std::string& path) {
+        m_ImagePath = path;
     }
 
     void MarkInUse(int holdMs = 150) {
@@ -182,6 +221,7 @@ protected:
     std::vector<ModuleOption> m_Options;
     const unsigned char* m_ImageData = nullptr;
     unsigned int m_ImageSize = 0;
+    std::string m_ImagePath;
 
 private:
     static long long GetUsageNowMs() {

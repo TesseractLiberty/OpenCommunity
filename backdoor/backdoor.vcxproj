@@ -105,6 +105,7 @@
     </ClCompile>
     <ClCompile Include="src\Main.cpp" />
     <ClCompile Include="src\core\Bridge.cpp" />
+    <ClCompile Include="src\core\GL11Hook.cpp" />
     <ClCompile Include="src\core\RenderHook.cpp" />
     <ClCompile Include="src\core\GameThreadHook.cpp" />
     <ClCompile Include="src\features\render\HUD.cpp" />
@@ -113,8 +114,11 @@
     <ClCompile Include="src\features\combat\ArmorSwap.cpp" />
     <ClCompile Include="src\features\combat\AutoGapple.cpp" />
     <ClCompile Include="src\features\combat\NoHitDelay.cpp" />
+    <ClCompile Include="src\features\combat\Target.cpp" />
+    <ClCompile Include="src\features\combat\HideClans.cpp" />
     <ClCompile Include="src\features\movement\NoJumpDelay.cpp" />
     <ClCompile Include="src\features\visuals\DamageIndicator.cpp" />
+    <ClCompile Include="src\game\classes\ActiveRenderInfo.cpp" />
     <ClCompile Include="src\game\classes\Container.cpp" />
     <ClCompile Include="src\game\classes\GuiScreen.cpp" />
     <ClCompile Include="src\game\classes\InventoryPlayer.cpp" />
@@ -124,13 +128,17 @@
     <ClCompile Include="src\game\classes\Minecraft.cpp" />
     <ClCompile Include="src\game\classes\PacketClientStatus.cpp" />
     <ClCompile Include="src\game\classes\MovingObjectPosition.cpp" />
+    <ClCompile Include="src\game\classes\AxisAlignedBB.cpp" />
     <ClCompile Include="src\game\classes\Player.cpp" />
     <ClCompile Include="src\game\classes\PlayerController.cpp" />
     <ClCompile Include="src\game\classes\PotionEffect.cpp" />
+    <ClCompile Include="src\game\classes\RenderManager.cpp" />
     <ClCompile Include="src\game\classes\RenderHelper.cpp" />
     <ClCompile Include="src\game\classes\RenderItem.cpp" />
     <ClCompile Include="src\game\classes\Scoreboard.cpp" />
     <ClCompile Include="src\game\classes\Slot.cpp" />
+    <ClCompile Include="src\game\classes\Team.cpp" />
+    <ClCompile Include="src\game\classes\Timer.cpp" />
     <ClCompile Include="src\game\classes\World.cpp" />
     <ClCompile Include="src\game\jni\GameInstance.cpp" />
     <ClCompile Include="src\game\mapping\Mapper.cpp" />
@@ -141,6 +149,7 @@
   <ItemGroup>
     <ClInclude Include="pch.h" />
     <ClInclude Include="src\core\Bridge.h" />
+    <ClInclude Include="src\core\GL11Hook.h" />
     <ClInclude Include="src\core\RenderHook.h" />
     <ClInclude Include="src\core\GameThreadHook.h" />
     <ClInclude Include="src\features\render\HUD.h" />
@@ -149,8 +158,11 @@
     <ClInclude Include="src\features\combat\ArmorSwap.h" />
     <ClInclude Include="src\features\combat\AutoGapple.h" />
     <ClInclude Include="src\features\combat\NoHitDelay.h" />
+    <ClInclude Include="src\features\combat\Target.h" />
+    <ClInclude Include="src\features\combat\HideClans.h" />
     <ClInclude Include="src\features\movement\NoJumpDelay.h" />
     <ClInclude Include="src\features\visuals\DamageIndicator.h" />
+    <ClInclude Include="src\game\classes\ActiveRenderInfo.h" />
     <ClInclude Include="src\game\classes\Container.h" />
     <ClInclude Include="src\game\classes\GuiScreen.h" />
     <ClInclude Include="src\game\classes\InventoryPlayer.h" />
@@ -160,13 +172,17 @@
     <ClInclude Include="src\game\classes\Minecraft.h" />
     <ClInclude Include="src\game\classes\PacketClientStatus.h" />
     <ClInclude Include="src\game\classes\MovingObjectPosition.h" />
+    <ClInclude Include="src\game\classes\AxisAlignedBB.h" />
     <ClInclude Include="src\game\classes\Player.h" />
     <ClInclude Include="src\game\classes\PlayerController.h" />
     <ClInclude Include="src\game\classes\PotionEffect.h" />
+    <ClInclude Include="src\game\classes\RenderManager.h" />
     <ClInclude Include="src\game\classes\RenderHelper.h" />
     <ClInclude Include="src\game\classes\RenderItem.h" />
     <ClInclude Include="src\game\classes\Scoreboard.h" />
     <ClInclude Include="src\game\classes\Slot.h" />
+    <ClInclude Include="src\game\classes\Team.h" />
+    <ClInclude Include="src\game\classes\Timer.h" />
     <ClInclude Include="src\game\classes\World.h" />
     <ClInclude Include="src\game\jni\GameInstance.h" />
     <ClInclude Include="src\game\mapping\Mapper.h" />
