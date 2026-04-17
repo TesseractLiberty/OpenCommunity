@@ -2098,11 +2098,43 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                 }
                 case OptionType::Combo: {
                     dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
-                    ImGui::SetCursorScreenPos(ImVec2(optX + optW - sliderW, optY));
+
+                    const float comboPadX = 8.0f;
+                    const float comboPadY = 4.0f;
+                    const float comboRounding = 6.0f;
+                    const float comboHeight = ImGui::GetTextLineHeight() + comboPadY * 2.0f;
+                    const ImVec2 comboPos(optX + optW - sliderW, optY + (optLineH - comboHeight) * 0.5f);
+                    const ImVec2 comboMin = comboPos;
+                    const ImVec2 comboMax(comboPos.x + sliderW, comboPos.y + comboHeight);
+
+                    dl->AddRectFilled(comboMin, comboMax, IM_COL32(214, 219, 228, 255), comboRounding);
+                    dl->AddRectFilled(
+                        ImVec2(comboMin.x + 1.0f, comboMin.y + 1.0f),
+                        ImVec2(comboMax.x - 1.0f, comboMax.y - 1.0f),
+                        IM_COL32(236, 240, 246, 255),
+                        comboRounding);
+                    dl->AddRect(comboMin, comboMax, IM_COL32(145, 152, 164, 255), comboRounding, 0, 1.0f);
+
+                    ImGui::SetCursorScreenPos(comboPos);
                     ImGui::PushItemWidth(sliderW);
+                    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.08f, 0.09f, 0.10f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.94f, 0.95f, 0.97f, 1.0f));
+                    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+                    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(comboPadX, comboPadY));
+                    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, comboRounding);
+                    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, comboRounding);
                     std::vector<const char*> items;
                     for (auto& s : opt.comboItems) items.push_back(s.c_str());
                     ImGui::Combo(optId, &opt.comboIndex, items.data(), (int)items.size());
+                    ImGui::PopStyleVar(4);
+                    ImGui::PopStyleColor(9);
                     ImGui::PopItemWidth();
                     break;
                 }
