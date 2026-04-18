@@ -15,12 +15,12 @@
 #include "../../../deps/minhook/MinHook.h"
 #include "../../../deps/imgui/imgui.h"
 #include "../../../deps/imgui/imgui_impl_opengl2.hpp"
-#include "../../../deps/imgui/fonts.hpp"
-#include "../../../deps/imgui/open_sans_bold_font.h"
-#include "../../../deps/imgui/open_sans_regular_font.h"
-#include "../../../deps/imgui/play_bold_font.h"
-#include "../../../deps/imgui/play_regular_font.h"
-#include "../../../deps/imgui/sf_ui_display_bold_font.h"
+#include "../../../deps/imgui/fonts/fonts.hpp"
+#include "../../../deps/imgui/fonts/open_sans_bold_font.h"
+#include "../../../deps/imgui/fonts/open_sans_regular_font.h"
+#include "../../../deps/imgui/fonts/play_bold_font.h"
+#include "../../../deps/imgui/fonts/play_regular_font.h"
+#include "../../../deps/imgui/fonts/sf_ui_display_bold_font.h"
 
 #include <filesystem>
 #include <gl/GL.h>

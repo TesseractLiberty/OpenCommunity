@@ -2,6 +2,7 @@
 
 #include "../../../../shared/common/FeatureManager.h"
 #include "../../../../shared/common/ModuleConfig.h"
+#include "../../../../deps/imgui/images/modules/target_icon.h"
 #include <cctype>
 
 #ifdef _BACKDOOR
@@ -18,7 +19,7 @@
 class Target : public Module {
 public:
     MODULE_INFO(Target, "Target", "Focuses and filters combat targets using the original loader logic.", ModuleCategory::Visuals) {
-        SetImagePath("Darts-256.png");
+        SetImagePrefix(module_icons::target_icon_data, module_icons::target_icon_data_size);
 
         AddOption(ModuleOption::Text("Player Name", "", 127));
         AddOption(ModuleOption::Toggle("Auto Target", false));

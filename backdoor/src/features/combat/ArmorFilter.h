@@ -2,7 +2,7 @@
 
 #include "../../../../shared/common/FeatureManager.h"
 #include "../../../../shared/common/ModuleConfig.h"
-#include "../../../../deps/imgui/armor_filter_icon.h"
+#include "../../../../deps/imgui/images/modules/armor_filter_icon.h"
 
 #ifdef _BACKDOOR
 #include "../../game/classes/Container.h"

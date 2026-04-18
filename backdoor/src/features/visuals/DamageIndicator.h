@@ -2,7 +2,7 @@
 
 #include "../../../../shared/common/FeatureManager.h"
 #include "../../../../shared/common/ModuleConfig.h"
-#include "../../../../deps/imgui/heart_icon.h"
+#include "../../../../deps/imgui/images/modules/heart_icon.h"
 
 #ifdef _BACKDOOR
 #include "../../game/classes/GuiScreen.h"
@@ -12,7 +12,7 @@
 #include "../../game/classes/Player.h"
 #include "../../game/classes/RenderHelper.h"
 #include "../../game/classes/RenderItem.h"
-#include "../../../../deps/imgui/fonts.hpp"
+#include "../../../../deps/imgui/fonts/fonts.hpp"
 #include "../../../../deps/imgui/imgui.h"
 #endif
 

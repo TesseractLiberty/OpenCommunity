@@ -4,7 +4,7 @@
 
 #include "../../../../shared/common/FeatureManager.h"
 #include "../../../../shared/common/ModuleConfig.h"
-#include "../../../../deps/imgui/view_details_icon.h"
+#include "../../../../deps/imgui/images/modules/view_details_icon.h"
 
 class ArrayList : public Module {
 public:

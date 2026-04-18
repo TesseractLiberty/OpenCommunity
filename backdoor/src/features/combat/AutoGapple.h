@@ -2,7 +2,7 @@
 
 #include "../../../../shared/common/FeatureManager.h"
 #include "../../../../shared/common/ModuleConfig.h"
-#include "../../../../deps/imgui/apple_icon.h"
+#include "../../../../deps/imgui/images/modules/apple_icon.h"
 
 #ifdef _BACKDOOR
 #include "../../game/classes/InventoryPlayer.h"

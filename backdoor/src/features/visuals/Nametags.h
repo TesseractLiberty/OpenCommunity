@@ -2,11 +2,11 @@
 
 #include "../../../../shared/common/FeatureManager.h"
 #include "../../../../shared/common/ModuleConfig.h"
-#include "../../../../deps/imgui/tag_icon.h"
+#include "../../../../deps/imgui/images/modules/tag_icon.h"
 
 #ifdef _BACKDOOR
 #include "../../game/classes/Player.h"
-#include "../../../../deps/imgui/fonts.hpp"
+#include "../../../../deps/imgui/fonts/fonts.hpp"
 #include "../../../../deps/imgui/imgui.h"
 #endif
 

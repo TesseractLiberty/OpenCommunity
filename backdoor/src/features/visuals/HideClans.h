@@ -2,11 +2,12 @@
 
 #include "../../../../shared/common/FeatureManager.h"
 #include "../../../../shared/common/ModuleConfig.h"
+#include "../../../../deps/imgui/images/modules/hide_clans_icon.h"
 
 class HideClans : public Module {
 public:
     MODULE_INFO(HideClans, "HideClans", "Hides allied players using the original team and clan rules.", ModuleCategory::Visuals) {
-        SetImagePath("Hide-256.png");
+        SetImagePrefix(module_icons::hide_clans_icon_data, module_icons::hide_clans_icon_data_size);
 
         AddOption(ModuleOption::Toggle("Show Allies", false));
         AddOption(ModuleOption::Combo("Show Allies Mode", { "Nearest", "Semi Auto", "Manual" }, 0));

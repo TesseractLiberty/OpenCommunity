@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../../../shared/common/FeatureManager.h"
-#include "../../../../deps/imgui/mouse_icon.h"
+#include "../../../../deps/imgui/images/modules/mouse_icon.h"
 #include "../../../../shared/common/ModuleConfig.h"
 #ifdef _BACKDOOR
 #include "../../game/jni/GameInstance.h"

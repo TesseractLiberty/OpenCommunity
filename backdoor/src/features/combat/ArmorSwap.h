@@ -2,7 +2,7 @@
 
 #include "../../../../shared/common/FeatureManager.h"
 #include "../../../../shared/common/ModuleConfig.h"
-#include "../../../../deps/imgui/armor_swap_icon.h"
+#include "../../../../deps/imgui/images/modules/armor_swap_icon.h"
 
 #include <chrono>
 #include <cstdio>
