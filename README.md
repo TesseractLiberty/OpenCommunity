@@ -1,3 +1,14 @@
+<div align="center">
+<p>
+    <img width="160" src="https://img.shields.io/badge/OpenCommunity-Tesseract-blueviolet?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0id2hpdGUiPjxwYXRoIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsMTAgNSAxMC01TTIgMTJsMTAgNSAxMC01Ii8+PC9zdmc+">
+</p>
+
+[![C++17](https://img.shields.io/badge/C%2B%2B-17-00599C?style=flat-square&logo=cplusplus&logoColor=white)](https://isocpp.org/)
+[![Windows x64](https://img.shields.io/badge/Windows-x64-0078D6?style=flat-square&logo=windows&logoColor=white)](https://www.microsoft.com/windows)
+[![JNI/JVMTI](https://img.shields.io/badge/JNI%20%2F%20JVMTI-F80000?style=flat-square&logo=openjdk&logoColor=white)](https://docs.oracle.com/javase/8/docs/technotes/guides/jni/)
+
+</div>
+
 # OpenCommunity
 
 OpenCommunity is a JNI/JVMTI-based injection framework for Minecraft: Java Edition. It injects a native DLL into the game process, resolves obfuscated mappings at runtime, and runs modules from the live game thread while the frontdoor handles configuration and injection.
