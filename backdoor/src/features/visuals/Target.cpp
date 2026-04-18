@@ -1041,6 +1041,7 @@ void Target::TickSynchronous(void* envPtr) {
         m_PreviousPhysicalClick = false;
         ClearInUse();
         ClearTargetHealthCache();
+        SyncOnlinePlayersToConfigSafe(env, world, localPlayerObject, config);
         if (localPlayerObject) {
             env->DeleteLocalRef(localPlayerObject);
         }

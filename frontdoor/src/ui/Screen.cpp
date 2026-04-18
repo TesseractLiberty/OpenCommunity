@@ -940,7 +940,7 @@ namespace
     std::vector<std::string> CollectTargetAutocompleteMatches(const ModuleConfig* config, const std::string& prefix)
     {
         std::vector<std::string> matches;
-        if (!config || prefix.empty()) {
+        if (!config) {
             return matches;
         }
 
@@ -953,7 +953,7 @@ namespace
             }
 
             std::string candidate(playerName);
-            if (StartsWithInsensitive(candidate, prefix)) {
+            if (prefix.empty() || StartsWithInsensitive(candidate, prefix)) {
                 matches.push_back(std::move(candidate));
             }
         }
