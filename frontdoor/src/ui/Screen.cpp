@@ -14,6 +14,9 @@
 #include "../../../deps/imgui/running_icon.h"
 #include "../../../deps/imgui/eye_icon.h"
 #include "../../../deps/imgui/settings_icon.h"
+#include "../../../deps/imgui/message_information_icon.h"
+#include "../../../deps/imgui/command_refresh_icon.h"
+#include "../../../deps/imgui/color_theme_icon.h"
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_STATIC
 #include "../../../deps/imgui/stb_image.h"
@@ -23,18 +26,21 @@
 #include <cctype>
 #include <cfloat>
 #include <cmath>
+#include <fstream>
 #include <mutex>
 #include <thread>
+#include <commdlg.h>
 #include <urlmon.h>
 #include <winhttp.h>
 
+#pragma comment(lib, "Comdlg32.lib")
 #pragma comment(lib, "urlmon.lib")
 #pragma comment(lib, "winhttp.lib")
 
 namespace
 {
     constexpr const char* kCreatorProfileUrl = "https://github.com/Lopesnextgen";
-    constexpr const char* kDiscordProfileUrl = "https://discord.com/fuckscriptkiddies";
+    constexpr const char* kDiscordProfileUrl = "https://discord.com/jvmexploit";
     constexpr const char* kProjectRepositoryUrl = "https://github.com/TesseractLiberty/OpenCommunity";
     constexpr const char* kProjectReleasesUrl = "https://github.com/TesseractLiberty/OpenCommunity/releases";
     constexpr wchar_t kGitHubApiHost[] = L"api.github.com";
@@ -81,10 +87,134 @@ namespace
         bool downloadFailed = false;
     };
 
+    struct AutomaticThemePreset
+    {
+        const char* label;
+        ImVec4 palette[4];
+    };
+
+    struct CustomThemePreset
+    {
+        const char* label;
+        ImVec4 textColor;
+        ImVec4 backgroundColor;
+        int iconColorBytes[3];
+    };
+
+    struct ThemeSettingsState
+    {
+        int themeMode = 0;
+        ImVec4 automaticPalette[4] = {};
+        ImVec4 customTextColor = ImVec4(0.08f, 0.09f, 0.10f, 1.0f);
+        ImVec4 customBackgroundColor = ImVec4(0.98f, 0.98f, 0.99f, 1.0f);
+        int customIconColorBytes[3] = { 0, 0, 0 };
+        std::filesystem::path importedPaletteSource;
+    };
+
     constexpr float kInjectionTypewriterCharsPerSecond = 30.0f;
     constexpr float kInjectionCursorBlinkSpeed = 6.0f;
     constexpr char kInjectingHeadline[] = "Injecting";
     constexpr char kInjectedHeadline[] = "Successful, Injected!";
+
+    const ImVec4 kDefaultAutomaticPalette[4] = {
+        ImVec4(0.92f, 0.84f, 0.71f, 1.0f),
+        ImVec4(0.57f, 0.72f, 0.86f, 1.0f),
+        ImVec4(0.34f, 0.48f, 0.63f, 1.0f),
+        ImVec4(0.18f, 0.23f, 0.29f, 1.0f)
+    };
+    constexpr ImVec4 kDefaultCustomTextColor = ImVec4(0.08f, 0.09f, 0.10f, 1.0f);
+    constexpr ImVec4 kDefaultCustomBackgroundColor = ImVec4(0.98f, 0.98f, 0.99f, 1.0f);
+    constexpr int kDefaultCustomIconColorBytes[3] = { 0, 0, 0 };
+
+    const AutomaticThemePreset kAutomaticThemePresets[] = {
+        { "Sand", {
+            ImVec4(0.92f, 0.84f, 0.71f, 1.0f),
+            ImVec4(0.57f, 0.72f, 0.86f, 1.0f),
+            ImVec4(0.34f, 0.48f, 0.63f, 1.0f),
+            ImVec4(0.18f, 0.23f, 0.29f, 1.0f)
+        }},
+        { "Mono", {
+            ImVec4(0.94f, 0.95f, 0.96f, 1.0f),
+            ImVec4(0.73f, 0.77f, 0.82f, 1.0f),
+            ImVec4(0.38f, 0.43f, 0.50f, 1.0f),
+            ImVec4(0.12f, 0.14f, 0.17f, 1.0f)
+        }},
+        { "Forest", {
+            ImVec4(0.85f, 0.90f, 0.79f, 1.0f),
+            ImVec4(0.49f, 0.68f, 0.55f, 1.0f),
+            ImVec4(0.24f, 0.42f, 0.31f, 1.0f),
+            ImVec4(0.11f, 0.18f, 0.14f, 1.0f)
+        }},
+        { "Sunset", {
+            ImVec4(0.98f, 0.85f, 0.74f, 1.0f),
+            ImVec4(0.91f, 0.56f, 0.47f, 1.0f),
+            ImVec4(0.55f, 0.37f, 0.62f, 1.0f),
+            ImVec4(0.17f, 0.12f, 0.20f, 1.0f)
+        }},
+        { "Arctic", {
+            ImVec4(0.89f, 0.95f, 0.99f, 1.0f),
+            ImVec4(0.60f, 0.77f, 0.92f, 1.0f),
+            ImVec4(0.34f, 0.58f, 0.78f, 1.0f),
+            ImVec4(0.13f, 0.22f, 0.31f, 1.0f)
+        }},
+        { "Rose", {
+            ImVec4(0.97f, 0.88f, 0.91f, 1.0f),
+            ImVec4(0.86f, 0.59f, 0.69f, 1.0f),
+            ImVec4(0.56f, 0.31f, 0.43f, 1.0f),
+            ImVec4(0.22f, 0.11f, 0.18f, 1.0f)
+        }},
+        { "Aurora", {
+            ImVec4(0.86f, 0.97f, 0.90f, 1.0f),
+            ImVec4(0.42f, 0.84f, 0.76f, 1.0f),
+            ImVec4(0.24f, 0.46f, 0.58f, 1.0f),
+            ImVec4(0.08f, 0.16f, 0.22f, 1.0f)
+        }},
+        { "Cinder", {
+            ImVec4(0.83f, 0.79f, 0.76f, 1.0f),
+            ImVec4(0.58f, 0.46f, 0.42f, 1.0f),
+            ImVec4(0.31f, 0.23f, 0.25f, 1.0f),
+            ImVec4(0.11f, 0.09f, 0.11f, 1.0f)
+        }},
+        { "Graphite", {
+            ImVec4(0.88f, 0.90f, 0.94f, 1.0f),
+            ImVec4(0.56f, 0.61f, 0.70f, 1.0f),
+            ImVec4(0.26f, 0.30f, 0.37f, 1.0f),
+            ImVec4(0.08f, 0.10f, 0.13f, 1.0f)
+        }},
+        { "Cherry", {
+            ImVec4(0.98f, 0.88f, 0.91f, 1.0f),
+            ImVec4(0.86f, 0.36f, 0.47f, 1.0f),
+            ImVec4(0.48f, 0.17f, 0.26f, 1.0f),
+            ImVec4(0.16f, 0.07f, 0.12f, 1.0f)
+        }},
+        { "Gold", {
+            ImVec4(0.98f, 0.94f, 0.81f, 1.0f),
+            ImVec4(0.89f, 0.72f, 0.38f, 1.0f),
+            ImVec4(0.54f, 0.39f, 0.12f, 1.0f),
+            ImVec4(0.17f, 0.12f, 0.05f, 1.0f)
+        }},
+        { "Terminal", {
+            ImVec4(0.78f, 0.96f, 0.78f, 1.0f),
+            ImVec4(0.34f, 0.82f, 0.46f, 1.0f),
+            ImVec4(0.13f, 0.41f, 0.21f, 1.0f),
+            ImVec4(0.03f, 0.08f, 0.05f, 1.0f)
+        }}
+    };
+
+    const CustomThemePreset kCustomThemePresets[] = {
+        { "Classic", ImVec4(0.08f, 0.09f, 0.10f, 1.0f), ImVec4(0.98f, 0.98f, 0.99f, 1.0f), { 0, 0, 0 } },
+        { "Night",   ImVec4(0.93f, 0.95f, 0.98f, 1.0f), ImVec4(0.09f, 0.11f, 0.14f, 1.0f), { 198, 218, 255 } },
+        { "Paper",   ImVec4(0.14f, 0.11f, 0.09f, 1.0f), ImVec4(0.95f, 0.91f, 0.84f, 1.0f), { 110, 76, 46 } },
+        { "Signal",  ImVec4(0.96f, 0.97f, 0.99f, 1.0f), ImVec4(0.16f, 0.19f, 0.26f, 1.0f), { 75, 162, 255 } },
+        { "Ivory",   ImVec4(0.20f, 0.17f, 0.13f, 1.0f), ImVec4(0.98f, 0.95f, 0.89f, 1.0f), { 142, 115, 74 } },
+        { "Frost",   ImVec4(0.12f, 0.18f, 0.26f, 1.0f), ImVec4(0.93f, 0.97f, 1.00f, 1.0f), { 56, 132, 214 } },
+        { "Noir",    ImVec4(0.94f, 0.95f, 0.96f, 1.0f), ImVec4(0.07f, 0.08f, 0.10f, 1.0f), { 255, 255, 255 } },
+        { "Mint",    ImVec4(0.11f, 0.22f, 0.19f, 1.0f), ImVec4(0.92f, 0.99f, 0.96f, 1.0f), { 34, 155, 114 } },
+        { "Cherry",  ImVec4(0.99f, 0.96f, 0.97f, 1.0f), ImVec4(0.27f, 0.10f, 0.15f, 1.0f), { 255, 118, 149 } },
+        { "Graphite",ImVec4(0.87f, 0.89f, 0.92f, 1.0f), ImVec4(0.15f, 0.17f, 0.20f, 1.0f), { 182, 193, 208 } },
+        { "Gold",    ImVec4(0.23f, 0.18f, 0.08f, 1.0f), ImVec4(0.98f, 0.94f, 0.80f, 1.0f), { 209, 156, 54 } },
+        { "Terminal",ImVec4(0.64f, 0.95f, 0.67f, 1.0f), ImVec4(0.05f, 0.08f, 0.06f, 1.0f), { 120, 255, 145 } }
+    };
 
     std::mutex g_PlayerHeadCacheMutex;
     std::unordered_map<std::string, PlayerHeadTextureEntry> g_PlayerHeadCache;
@@ -112,6 +242,203 @@ namespace
             value.pop_back();
         }
         return value;
+    }
+
+    std::filesystem::path GetInterfaceThemeSettingsDirectory()
+    {
+        wchar_t tempPath[MAX_PATH] = {};
+        if (GetTempPathW(MAX_PATH, tempPath) == 0) {
+            return {};
+        }
+
+        return std::filesystem::path(tempPath) / "OpenCommunity";
+    }
+
+    std::filesystem::path GetInterfaceThemeSettingsPath()
+    {
+        return GetInterfaceThemeSettingsDirectory() / "interface_theme.ini";
+    }
+
+    std::string FormatHexColorString(const ImVec4& colorValue)
+    {
+        const int r = (std::clamp)(static_cast<int>(colorValue.x * 255.0f + 0.5f), 0, 255);
+        const int g = (std::clamp)(static_cast<int>(colorValue.y * 255.0f + 0.5f), 0, 255);
+        const int b = (std::clamp)(static_cast<int>(colorValue.z * 255.0f + 0.5f), 0, 255);
+
+        char buffer[16];
+        snprintf(buffer, sizeof(buffer), "#%02X%02X%02X", r, g, b);
+        return buffer;
+    }
+
+    bool TryParseHexColorString(const std::string& value, ImVec4& outColor)
+    {
+        const std::string trimmed = TrimCopy(value);
+        const char* raw = trimmed.c_str();
+        if (trimmed.empty()) {
+            return false;
+        }
+
+        if (trimmed.size() != 7 || raw[0] != '#') {
+            return false;
+        }
+
+        unsigned int parsed = 0;
+        if (sscanf_s(raw + 1, "%06x", &parsed) != 1) {
+            return false;
+        }
+
+        outColor.x = ((parsed >> 16) & 0xFF) / 255.0f;
+        outColor.y = ((parsed >> 8) & 0xFF) / 255.0f;
+        outColor.z = (parsed & 0xFF) / 255.0f;
+        outColor.w = 1.0f;
+        return true;
+    }
+
+    std::string FormatRgbByteString(const int* rgbBytes)
+    {
+        if (!rgbBytes) {
+            return "0,0,0";
+        }
+
+        char buffer[32];
+        snprintf(buffer, sizeof(buffer), "%d,%d,%d", rgbBytes[0], rgbBytes[1], rgbBytes[2]);
+        return buffer;
+    }
+
+    bool TryParseRgbByteString(const std::string& value, int outRgbBytes[3])
+    {
+        if (!outRgbBytes) {
+            return false;
+        }
+
+        int r = 0;
+        int g = 0;
+        int b = 0;
+        if (sscanf_s(value.c_str(), "%d,%d,%d", &r, &g, &b) != 3) {
+            return false;
+        }
+
+        outRgbBytes[0] = (std::clamp)(r, 0, 255);
+        outRgbBytes[1] = (std::clamp)(g, 0, 255);
+        outRgbBytes[2] = (std::clamp)(b, 0, 255);
+        return true;
+    }
+
+    bool LoadThemeSettingsState(ThemeSettingsState& outState)
+    {
+        const auto settingsPath = GetInterfaceThemeSettingsPath();
+        std::ifstream file(settingsPath);
+        if (!file) {
+            return false;
+        }
+
+        ThemeSettingsState loadedState = {};
+        for (int index = 0; index < 4; ++index) {
+            loadedState.automaticPalette[index] = kDefaultAutomaticPalette[index];
+        }
+        loadedState.customTextColor = kDefaultCustomTextColor;
+        loadedState.customBackgroundColor = kDefaultCustomBackgroundColor;
+        for (int index = 0; index < 3; ++index) {
+            loadedState.customIconColorBytes[index] = kDefaultCustomIconColorBytes[index];
+        }
+
+        std::string line;
+        while (std::getline(file, line)) {
+            const size_t separator = line.find('=');
+            if (separator == std::string::npos) {
+                continue;
+            }
+
+            const std::string key = TrimCopy(line.substr(0, separator));
+            const std::string value = TrimCopy(line.substr(separator + 1));
+
+            if (key == "theme_mode") {
+                loadedState.themeMode = (std::clamp)(atoi(value.c_str()), 0, 3);
+                continue;
+            }
+
+            if (key == "custom_text") {
+                ImVec4 parsedColor = loadedState.customTextColor;
+                if (TryParseHexColorString(value, parsedColor)) {
+                    loadedState.customTextColor = parsedColor;
+                }
+                continue;
+            }
+
+            if (key == "custom_background") {
+                ImVec4 parsedColor = loadedState.customBackgroundColor;
+                if (TryParseHexColorString(value, parsedColor)) {
+                    loadedState.customBackgroundColor = parsedColor;
+                }
+                continue;
+            }
+
+            if (key == "custom_icon") {
+                TryParseRgbByteString(value, loadedState.customIconColorBytes);
+                continue;
+            }
+
+            if (key == "palette_source") {
+                loadedState.importedPaletteSource = std::filesystem::path(value);
+                continue;
+            }
+
+            constexpr const char* palettePrefix = "automatic_palette_";
+            if (key.rfind(palettePrefix, 0) == 0) {
+                const int paletteIndex = atoi(key.substr(sizeof("automatic_palette_") - 1).c_str()) - 1;
+                if (paletteIndex >= 0 && paletteIndex < 4) {
+                    ImVec4 parsedColor = loadedState.automaticPalette[paletteIndex];
+                    if (TryParseHexColorString(value, parsedColor)) {
+                        loadedState.automaticPalette[paletteIndex] = parsedColor;
+                    }
+                }
+            }
+        }
+
+        outState = loadedState;
+        return true;
+    }
+
+    bool SaveThemeSettingsState(const ThemeSettingsState& state)
+    {
+        const auto directory = GetInterfaceThemeSettingsDirectory();
+        std::error_code errorCode;
+        std::filesystem::create_directories(directory, errorCode);
+
+        std::ofstream file(GetInterfaceThemeSettingsPath(), std::ios::trunc);
+        if (!file) {
+            return false;
+        }
+
+        file << "theme_mode=" << state.themeMode << "\n";
+        for (int index = 0; index < 4; ++index) {
+            file << "automatic_palette_" << (index + 1) << "=" << FormatHexColorString(state.automaticPalette[index]) << "\n";
+        }
+        file << "custom_text=" << FormatHexColorString(state.customTextColor) << "\n";
+        file << "custom_background=" << FormatHexColorString(state.customBackgroundColor) << "\n";
+        file << "custom_icon=" << FormatRgbByteString(state.customIconColorBytes) << "\n";
+        file << "palette_source=" << state.importedPaletteSource.string() << "\n";
+        return true;
+    }
+
+    bool ChooseImageFilePath(std::filesystem::path& outPath)
+    {
+        wchar_t fileBuffer[MAX_PATH] = {};
+        OPENFILENAMEW dialog = {};
+        dialog.lStructSize = sizeof(dialog);
+        dialog.hwndOwner = nullptr;
+        dialog.lpstrFilter = L"Image Files\0*.png;*.jpg;*.jpeg;*.bmp\0All Files\0*.*\0";
+        dialog.lpstrFile = fileBuffer;
+        dialog.nMaxFile = MAX_PATH;
+        dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_HIDEREADONLY;
+        dialog.lpstrDefExt = L"png";
+
+        if (!GetOpenFileNameW(&dialog)) {
+            return false;
+        }
+
+        outPath = std::filesystem::path(fileBuffer);
+        return !outPath.empty();
     }
 
     std::filesystem::path ResolveRepositoryRoot()
@@ -735,7 +1062,26 @@ namespace
         return SUCCEEDED(result) ? shaderResourceView : nullptr;
     }
 
-    ID3D11ShaderResourceView* CreateTextureFromFile(ID3D11Device* device, const std::filesystem::path& imagePath)
+    void NormalizePixelsToWhite(unsigned char* pixels, int width, int height)
+    {
+        if (!pixels || width <= 0 || height <= 0) {
+            return;
+        }
+
+        const int totalPixels = width * height;
+        for (int index = 0; index < totalPixels; ++index) {
+            const int base = index * 4;
+            if (pixels[base + 3] == 0) {
+                continue;
+            }
+
+            pixels[base + 0] = 255;
+            pixels[base + 1] = 255;
+            pixels[base + 2] = 255;
+        }
+    }
+
+    ID3D11ShaderResourceView* CreateTextureFromFile(ID3D11Device* device, const std::filesystem::path& imagePath, bool normalizeToWhite = false)
     {
         if (!device || imagePath.empty() || !std::filesystem::exists(imagePath)) {
             return nullptr;
@@ -749,9 +1095,140 @@ namespace
             return nullptr;
         }
 
+        if (normalizeToWhite) {
+            NormalizePixelsToWhite(pixels, width, height);
+        }
+
         ID3D11ShaderResourceView* texture = CreateTextureFromPixels(device, pixels, width, height);
         stbi_image_free(pixels);
         return texture;
+    }
+
+    bool ExtractPaletteFromImageFile(const std::filesystem::path& imagePath, ImVec4 outPalette[4])
+    {
+        if (imagePath.empty() || !std::filesystem::exists(imagePath) || !outPalette) {
+            return false;
+        }
+
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        unsigned char* pixels = stbi_load(imagePath.string().c_str(), &width, &height, &channels, 4);
+        if (!pixels || width <= 0 || height <= 0) {
+            if (pixels) {
+                stbi_image_free(pixels);
+            }
+            return false;
+        }
+
+        struct Bucket
+        {
+            int count = 0;
+            double red = 0.0;
+            double green = 0.0;
+            double blue = 0.0;
+        };
+
+        std::unordered_map<int, Bucket> buckets;
+        const int totalPixels = width * height;
+        const int step = (std::max)(1, static_cast<int>(sqrt((std::max)(1, totalPixels / 6000))));
+
+        for (int y = 0; y < height; y += step) {
+            for (int x = 0; x < width; x += step) {
+                const int pixelIndex = (y * width + x) * 4;
+                if (pixels[pixelIndex + 3] < 32) {
+                    continue;
+                }
+
+                const int red = pixels[pixelIndex + 0];
+                const int green = pixels[pixelIndex + 1];
+                const int blue = pixels[pixelIndex + 2];
+                const int key = ((red >> 4) << 8) | ((green >> 4) << 4) | (blue >> 4);
+                auto& bucket = buckets[key];
+                bucket.count += 1;
+                bucket.red += red;
+                bucket.green += green;
+                bucket.blue += blue;
+            }
+        }
+
+        stbi_image_free(pixels);
+        if (buckets.empty()) {
+            return false;
+        }
+
+        struct Candidate
+        {
+            ImVec4 color;
+            int count = 0;
+        };
+
+        std::vector<Candidate> candidates;
+        candidates.reserve(buckets.size());
+        for (const auto& [_, bucket] : buckets) {
+            if (bucket.count <= 0) {
+                continue;
+            }
+
+            candidates.push_back({
+                ImVec4(
+                    static_cast<float>(bucket.red / bucket.count / 255.0),
+                    static_cast<float>(bucket.green / bucket.count / 255.0),
+                    static_cast<float>(bucket.blue / bucket.count / 255.0),
+                    1.0f),
+                bucket.count
+            });
+        }
+
+        std::sort(candidates.begin(), candidates.end(), [](const Candidate& lhs, const Candidate& rhs) {
+            return lhs.count > rhs.count;
+        });
+
+        auto colorDistanceSq = [](const ImVec4& lhs, const ImVec4& rhs) -> float {
+            const float dx = lhs.x - rhs.x;
+            const float dy = lhs.y - rhs.y;
+            const float dz = lhs.z - rhs.z;
+            return dx * dx + dy * dy + dz * dz;
+        };
+
+        std::vector<ImVec4> selected;
+        selected.reserve(4);
+        for (const Candidate& candidate : candidates) {
+            bool distinctEnough = true;
+            for (const ImVec4& chosen : selected) {
+                if (colorDistanceSq(candidate.color, chosen) < 0.020f) {
+                    distinctEnough = false;
+                    break;
+                }
+            }
+
+            if (distinctEnough) {
+                selected.push_back(candidate.color);
+                if (selected.size() == 4) {
+                    break;
+                }
+            }
+        }
+
+        while (selected.size() < 4) {
+            const ImVec4 seed = selected.empty() ? ImVec4(0.45f, 0.45f, 0.45f, 1.0f) : selected.back();
+            const ImVec4 target = selected.size() % 2 == 0 ? ImVec4(1.0f, 1.0f, 1.0f, 1.0f) : ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+            const float amount = selected.size() % 2 == 0 ? 0.22f : 0.12f;
+            selected.push_back(color::Mix(seed, target, amount, 1.0f));
+        }
+
+        auto luminance = [](const ImVec4& value) -> float {
+            return 0.2126f * value.x + 0.7152f * value.y + 0.0722f * value.z;
+        };
+        std::sort(selected.begin(), selected.end(), [&](const ImVec4& lhs, const ImVec4& rhs) {
+            return luminance(lhs) > luminance(rhs);
+        });
+
+        for (int index = 0; index < 4; ++index) {
+            outPalette[index] = selected[index];
+        }
+
+        return true;
     }
 
     void QueuePlayerHeadDownload(const std::string& playerName)
@@ -847,8 +1324,8 @@ namespace
             return;
         }
 
-        drawList->AddRectFilled(min, max, IM_COL32(215, 217, 221, 255), 5.0f);
-        drawList->AddRect(min, max, IM_COL32(184, 188, 194, 255), 5.0f, 0, 1.0f);
+        drawList->AddRectFilled(min, max, color::GetPanelActiveU32(0.92f), 5.0f);
+        drawList->AddRect(min, max, color::GetBorderU32(0.82f), 5.0f, 0, 1.0f);
 
         if (playerName.empty()) {
             return;
@@ -860,7 +1337,7 @@ namespace
             font,
             fontSize,
             ImVec2(min.x + ((max.x - min.x) - textSize.x) * 0.5f, min.y + ((max.y - min.y) - textSize.y) * 0.5f),
-            IM_COL32(72, 76, 84, 255),
+            color::GetSecondaryTextU32(),
             initial);
     }
 
@@ -876,9 +1353,9 @@ namespace
             return;
         }
 
-        drawList->AddRectFilled(min, max, IM_COL32(225, 227, 231, 255), 5.0f);
+        drawList->AddRectFilled(min, max, color::GetPanelU32(0.88f), 5.0f);
         drawList->AddImageRounded(reinterpret_cast<ImTextureID>(texture), min, max, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32_WHITE, 5.0f, ImDrawFlags_RoundCornersAll);
-        drawList->AddRect(min, max, IM_COL32(184, 188, 194, 255), 5.0f, 0, 1.0f);
+        drawList->AddRect(min, max, color::GetBorderU32(0.82f), 5.0f, 0, 1.0f);
     }
 
     struct TargetNameAutocompleteState
@@ -1218,7 +1695,7 @@ namespace
         const float scale = 0.04f;
         const int numLevels = 14;
         const int lineAlpha = static_cast<int>(80.0f * (std::clamp)(alphaMultiplier, 0.0f, 1.0f));
-        const ImU32 lineColor = IM_COL32(200, 200, 200, lineAlpha);
+        const ImU32 lineColor = color::GetTopographicLineU32(lineAlpha / 255.0f);
 
         // sample noise grid
         static float grid[121][91];
@@ -1328,7 +1805,7 @@ namespace
         const float pulse = 0.5f + 0.5f * std::sinf(time * 3.2f);
 
         drawList->PushClipRect(origin, max, true);
-        drawList->AddRectFilled(origin, max, IM_COL32(255, 255, 255, static_cast<int>(255.0f * easedAlpha)), 0.0f);
+        drawList->AddRectFilled(origin, max, color::GetBackgroundU32(easedAlpha), 0.0f);
         DrawTopographicBackground(drawList, origin, width, height, 0.0f, easedAlpha);
 
         ImFont* font = headlineFont ? headlineFont : ImGui::GetFont();
@@ -1340,13 +1817,13 @@ namespace
             font,
             fontSize,
             ImVec2(textPos.x, textPos.y + 2.0f),
-            IM_COL32(255, 255, 255, static_cast<int>(120.0f * easedAlpha)),
+            color::GetGlassShadowU32(0.32f * easedAlpha),
             draggingLabel);
         drawList->AddText(
             font,
             fontSize,
             textPos,
-            IM_COL32(20, 22, 28, static_cast<int>(255.0f * easedAlpha)),
+            color::GetStrongTextU32(easedAlpha),
             draggingLabel);
 
         if (pulse > 0.22f) {
@@ -1354,7 +1831,7 @@ namespace
             drawList->AddRectFilled(
                 ImVec2(cursorX, textPos.y + 2.0f),
                 ImVec2(cursorX + 2.5f, textPos.y + 2.0f + fontSize * 0.92f),
-                IM_COL32(20, 22, 28, static_cast<int>(235.0f * easedAlpha)),
+                color::GetStrongTextU32(0.92f * easedAlpha),
                 1.0f);
         }
 
@@ -1391,9 +1868,9 @@ namespace
 
         ImU32 fillColor = baseColor;
         if (!enabled) {
-            fillColor = IM_COL32(150, 156, 167, 190);
-            borderColor = IM_COL32(130, 136, 146, 120);
-            textColor = IM_COL32(245, 246, 250, 215);
+            fillColor = color::GetPanelActiveU32(0.72f);
+            borderColor = color::GetBorderU32(0.52f);
+            textColor = color::GetMutedTextU32(0.90f);
         } else if (held) {
             fillColor = activeColor;
         } else if (hovered) {
@@ -1406,7 +1883,7 @@ namespace
         drawList->AddRectFilled(
             ImVec2(min.x + 1.0f, min.y + 1.0f),
             ImVec2(max.x - 1.0f, max.y - 1.0f),
-            IM_COL32(255, 255, 255, enabled ? (hovered ? 18 : 10) : 6),
+            color::GetGlassHighlightU32(enabled ? (hovered ? 0.18f : 0.10f) : 0.06f),
             rounding - 1.0f);
         drawList->AddRect(min, max, borderColor, rounding, 0, 1.0f);
 
@@ -1418,6 +1895,480 @@ namespace
             min.y + (size.y - textSize.y) * 0.5f - 1.0f);
         drawList->AddText(textFont, textFontSize, textPos, textColor, label);
         return pressed;
+    }
+
+    bool DrawThemeOptionCard(
+        ImDrawList* drawList,
+        const char* id,
+        const ImVec2& pos,
+        const ImVec2& size,
+        const char* title,
+        const char* description,
+        bool selected,
+        ImFont* titleFont,
+        float titleFontSize,
+        ImFont* bodyFont,
+        float bodyFontSize)
+    {
+        if (!drawList || !id || !title || !description || size.x <= 0.0f || size.y <= 0.0f) {
+            return false;
+        }
+
+        ImGui::SetCursorScreenPos(pos);
+        const bool pressed = ImGui::InvisibleButton(id, size);
+        const bool hovered = ImGui::IsItemHovered();
+        const bool held = ImGui::IsItemActive();
+        if (hovered) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        }
+
+        const ImVec2 min = pos;
+        const ImVec2 max(pos.x + size.x, pos.y + size.y);
+        ImU32 fillColor = selected ? color::GetPanelHoverU32(0.96f) : color::GetPanelU32(0.82f);
+        if (held) {
+            fillColor = selected ? color::GetPanelActiveU32(0.98f) : color::GetPanelHoverU32(0.94f);
+        } else if (hovered) {
+            fillColor = selected ? color::GetPanelActiveU32(0.94f) : color::GetPanelHoverU32(0.88f);
+        }
+
+        const ImU32 borderColor = selected ? color::GetLinkU32() : color::GetBorderU32(0.90f);
+        const ImU32 innerGlowColor = selected ? color::GetLinkU32(0.08f) : color::GetGlassHighlightU32(0.12f);
+        drawList->AddRectFilled(ImVec2(min.x, min.y + 4.0f), ImVec2(max.x, max.y + 4.0f), color::GetGlassShadowU32(0.18f), 15.0f);
+        drawList->AddRectFilled(min, max, fillColor, 15.0f);
+        drawList->AddRectFilled(ImVec2(min.x + 1.0f, min.y + 1.0f), ImVec2(max.x - 1.0f, max.y - 1.0f), innerGlowColor, 14.0f);
+        drawList->AddRect(min, max, borderColor, 15.0f, 0, selected ? 1.6f : 1.0f);
+
+        ImFont* resolvedTitleFont = titleFont ? titleFont : ImGui::GetFont();
+        ImFont* resolvedBodyFont = bodyFont ? bodyFont : ImGui::GetFont();
+        const float resolvedTitleFontSize = titleFontSize > 0.0f ? titleFontSize : ImGui::GetFontSize();
+        const float resolvedBodyFontSize = bodyFontSize > 0.0f ? bodyFontSize : ImGui::GetFontSize();
+
+        const char* badgeText = selected ? "Active" : "Available";
+        const ImVec2 badgeSize = CalcTextSizeWithFont(resolvedBodyFont, badgeText, resolvedBodyFontSize - 1.0f);
+        const float badgeWidth = badgeSize.x + 18.0f;
+        const ImVec2 badgeMin(max.x - badgeWidth - 14.0f, min.y + 12.0f);
+        const ImVec2 badgeMax(max.x - 14.0f, badgeMin.y + 22.0f);
+
+        const ImVec2 titlePos(min.x + 16.0f, min.y + 12.0f);
+        drawList->AddText(
+            resolvedTitleFont,
+            resolvedTitleFontSize,
+            titlePos,
+            color::GetStrongTextU32(),
+            title,
+            nullptr,
+            (std::max)(80.0f, badgeMin.x - titlePos.x - 10.0f));
+        drawList->AddText(
+            resolvedBodyFont,
+            resolvedBodyFontSize - 1.0f,
+            ImVec2(min.x + 16.0f, min.y + 38.0f),
+            color::GetSecondaryTextU32(),
+            description,
+            nullptr,
+            size.x - 32.0f);
+
+        drawList->AddRectFilled(
+            badgeMin,
+            badgeMax,
+            selected ? color::GetLinkU32(0.18f) : color::GetPanelActiveU32(0.90f),
+            11.0f);
+        drawList->AddRect(
+            badgeMin,
+            badgeMax,
+            selected ? color::GetLinkU32(0.42f) : color::GetBorderU32(0.80f),
+            11.0f,
+            0,
+            1.0f);
+        drawList->AddText(
+            resolvedBodyFont,
+            resolvedBodyFontSize - 1.0f,
+            ImVec2(badgeMin.x + (badgeWidth - badgeSize.x) * 0.5f, badgeMin.y + 3.0f),
+            selected ? color::GetLinkU32() : color::GetMutedTextU32(),
+            badgeText);
+
+        if (selected) {
+            const ImVec2 markCenter(max.x - 22.0f, max.y - 18.0f);
+            drawList->AddCircleFilled(markCenter, 8.0f, color::GetStrongTextU32());
+            drawList->AddLine(ImVec2(markCenter.x - 3.0f, markCenter.y + 0.5f), ImVec2(markCenter.x - 0.5f, markCenter.y + 3.0f), color::GetBackgroundU32(), 1.8f);
+            drawList->AddLine(ImVec2(markCenter.x - 0.5f, markCenter.y + 3.0f), ImVec2(markCenter.x + 4.0f, markCenter.y - 3.5f), color::GetBackgroundU32(), 1.8f);
+        }
+
+        return pressed;
+    }
+
+    ImVec4 ClampColorVec4(ImVec4 value);
+
+    bool DrawCompactThemeColorField(
+        ImDrawList* drawList,
+        const char* id,
+        const ImVec2& pos,
+        const ImVec2& size,
+        ImVec4& colorValue,
+        ImFont* font,
+        float fontSize)
+    {
+        if (!drawList) {
+            return false;
+        }
+
+        colorValue = ClampColorVec4(colorValue);
+        int rgb[3] = {
+            static_cast<int>(colorValue.x * 255.0f + 0.5f),
+            static_cast<int>(colorValue.y * 255.0f + 0.5f),
+            static_cast<int>(colorValue.z * 255.0f + 0.5f)
+        };
+
+        char compactLabel[24];
+        snprintf(compactLabel, sizeof(compactLabel), "#%02X%02X%02X", rgb[0], rgb[1], rgb[2]);
+        char popupId[128];
+        snprintf(popupId, sizeof(popupId), "%s_picker", id ? id : "theme_color");
+        static ImVec4 s_ThemePickerOriginalColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+
+        ImGui::PushID(id);
+        ImGui::SetCursorScreenPos(pos);
+        ImGui::InvisibleButton("##compact_theme_color_field", size);
+
+        const bool hovered = ImGui::IsItemHovered();
+        const bool active = ImGui::IsItemActive();
+        const bool popupOpen = ImGui::IsPopupOpen(popupId);
+        if (ImGui::IsItemClicked()) {
+            s_ThemePickerOriginalColor = colorValue;
+            ImGui::OpenPopup(popupId);
+        }
+
+        const ImVec2 min = pos;
+        const ImVec2 max(pos.x + size.x, pos.y + size.y);
+        const ImU32 fieldColor = popupOpen || active
+            ? color::GetFieldActiveU32(0.98f)
+            : (hovered ? color::GetFieldHoverU32(0.96f) : color::GetFieldBgU32(0.94f));
+        drawList->AddRectFilled(min, max, fieldColor, 10.0f);
+        drawList->AddRect(min, max, color::GetBorderU32(popupOpen ? 0.98f : 0.86f), 10.0f, 0, popupOpen ? 1.4f : 1.0f);
+
+        const float swatchSize = size.y - 8.0f;
+        const ImVec2 swatchMin(min.x + 4.0f, min.y + 4.0f);
+        const ImVec2 swatchMax(swatchMin.x + swatchSize, swatchMin.y + swatchSize);
+        drawList->AddRectFilled(swatchMin, swatchMax, ImGui::ColorConvertFloat4ToU32(colorValue), 7.0f);
+        drawList->AddRect(swatchMin, swatchMax, color::GetBorderU32(0.94f), 7.0f, 0, 1.0f);
+
+        const ImVec2 labelSize = CalcTextSizeWithFont(font, compactLabel, fontSize - 1.0f);
+        const float labelX = swatchMax.x + 10.0f;
+        drawList->AddText(
+            font,
+            fontSize - 1.0f,
+            ImVec2(labelX, min.y + (size.y - labelSize.y) * 0.5f - 1.0f),
+            color::GetStrongTextU32(),
+            compactLabel);
+
+        bool changed = false;
+        ImGui::SetNextWindowPos(ImVec2(min.x, max.y + 8.0f), ImGuiCond_Appearing);
+        ImGui::SetNextWindowSize(ImVec2(402.0f, 0.0f), ImGuiCond_Appearing);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 14.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 12.0f));
+        ImGui::PushStyleColor(ImGuiCol_PopupBg, color::GetPanelVec4(0.99f));
+        ImGui::PushStyleColor(ImGuiCol_Border, color::GetBorderVec4(0.92f));
+        if (ImGui::BeginPopup(popupId)) {
+            float pickerColor[4] = { colorValue.x, colorValue.y, colorValue.z, 1.0f };
+            const float referenceColor[4] = { s_ThemePickerOriginalColor.x, s_ThemePickerOriginalColor.y, s_ThemePickerOriginalColor.z, 1.0f };
+
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, color::GetFieldBgVec4(0.96f));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, color::GetFieldHoverVec4(0.98f));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgActive, color::GetFieldActiveVec4(0.99f));
+            ImGui::PushStyleColor(ImGuiCol_Header, color::GetPanelHoverVec4(0.82f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, color::GetPanelActiveVec4(0.92f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, color::GetPanelActiveVec4(0.98f));
+            ImGui::PushStyleColor(ImGuiCol_Text, color::GetStrongTextVec4());
+
+            const ImGuiColorEditFlags pickerFlags =
+                ImGuiColorEditFlags_NoAlpha |
+                ImGuiColorEditFlags_PickerHueBar |
+                ImGuiColorEditFlags_DisplayRGB |
+                ImGuiColorEditFlags_DisplayHSV |
+                ImGuiColorEditFlags_InputRGB;
+
+            if (ImGui::ColorPicker4("##astralis_theme_picker", pickerColor, pickerFlags, referenceColor)) {
+                changed = true;
+                colorValue = ClampColorVec4(ImVec4(pickerColor[0], pickerColor[1], pickerColor[2], 1.0f));
+            }
+
+            ImGui::PopStyleColor(7);
+            ImGui::EndPopup();
+        }
+        ImGui::PopStyleColor(2);
+        ImGui::PopStyleVar(3);
+        ImGui::PopID();
+
+        return changed;
+    }
+
+    bool NearlyEqualFloat(float lhs, float rhs, float epsilon = 0.0025f)
+    {
+        return fabsf(lhs - rhs) <= epsilon;
+    }
+
+    bool NearlyEqualColor(const ImVec4& lhs, const ImVec4& rhs, float epsilon = 0.0025f)
+    {
+        return NearlyEqualFloat(lhs.x, rhs.x, epsilon) &&
+            NearlyEqualFloat(lhs.y, rhs.y, epsilon) &&
+            NearlyEqualFloat(lhs.z, rhs.z, epsilon);
+    }
+
+    bool MatchesAutomaticPreset(const ImVec4* palette, const AutomaticThemePreset& preset)
+    {
+        if (!palette) {
+            return false;
+        }
+
+        for (int index = 0; index < 4; ++index) {
+            if (!NearlyEqualColor(palette[index], preset.palette[index])) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    bool MatchesCustomPreset(const ImVec4& textColor, const ImVec4& backgroundColor, const int* iconColorBytes, const CustomThemePreset& preset)
+    {
+        if (!NearlyEqualColor(textColor, preset.textColor) || !NearlyEqualColor(backgroundColor, preset.backgroundColor) || !iconColorBytes) {
+            return false;
+        }
+
+        return iconColorBytes[0] == preset.iconColorBytes[0] &&
+            iconColorBytes[1] == preset.iconColorBytes[1] &&
+            iconColorBytes[2] == preset.iconColorBytes[2];
+    }
+
+    bool DrawThemeActionChip(
+        ImDrawList* drawList,
+        const char* id,
+        const ImVec2& pos,
+        const ImVec2& size,
+        const char* label,
+        bool active,
+        ImFont* font,
+        float fontSize)
+    {
+        if (!drawList) {
+            return false;
+        }
+
+        ImGui::SetCursorScreenPos(pos);
+        ImGui::InvisibleButton(id, size);
+        const bool hovered = ImGui::IsItemHovered();
+        const bool held = ImGui::IsItemActive();
+        const bool pressed = ImGui::IsItemClicked();
+
+        const ImVec2 min = pos;
+        const ImVec2 max(pos.x + size.x, pos.y + size.y);
+        const ImU32 fillColor = active
+            ? color::GetPanelActiveU32(0.98f)
+            : (hovered ? color::GetPanelHoverU32(0.97f) : color::GetPanelU32(0.94f));
+        const ImU32 borderColor = active
+            ? color::GetLinkU32()
+            : color::GetBorderU32(hovered ? 0.98f : 0.88f);
+
+        drawList->AddRectFilled(min, max, fillColor, 11.0f);
+        drawList->AddRect(min, max, borderColor, 11.0f, 0, active ? 1.5f : 1.0f);
+
+        const ImU32 textColor = active ? color::GetStrongTextU32() : (held ? color::GetStrongTextU32() : color::GetSecondaryTextU32());
+        const ImVec2 textSize = CalcTextSizeWithFont(font, label, fontSize - 1.0f);
+        drawList->AddText(
+            font,
+            fontSize - 1.0f,
+            ImVec2(min.x + (size.x - textSize.x) * 0.5f, min.y + (size.y - textSize.y) * 0.5f - 1.0f),
+            textColor,
+            label);
+
+        return pressed;
+    }
+
+    void DrawThemePreviewPanel(
+        ImDrawList* drawList,
+        const ImVec2& pos,
+        const ImVec2& size,
+        ImFont* titleFont,
+        ImFont* bodyFont,
+        float titleFontSize,
+        float bodyFontSize)
+    {
+        if (!drawList) {
+            return;
+        }
+
+        const ImVec2 max(pos.x + size.x, pos.y + size.y);
+        drawList->AddRectFilled(pos, max, color::GetBackgroundU32(0.99f), 16.0f);
+        drawList->PushClipRect(pos, max, true);
+        DrawTopographicBackground(drawList, pos, size.x, size.y, 0.0f, 0.28f);
+        drawList->PopClipRect();
+        drawList->AddRect(pos, max, color::GetBorderU32(0.92f), 16.0f, 0, 1.0f);
+
+        const float sidebarWidth = 24.0f;
+        drawList->AddRectFilled(pos, ImVec2(pos.x + sidebarWidth, max.y), color::ToU32(color::GetSidebarVec4(0.98f)), 16.0f, ImDrawFlags_RoundCornersLeft);
+
+        for (int index = 0; index < 3; ++index) {
+            const float iconY = pos.y + 20.0f + index * 20.0f;
+            drawList->AddCircleFilled(ImVec2(pos.x + sidebarWidth * 0.5f, iconY), 4.0f, index == 0 ? color::GetLinkU32() : color::GetIconTintU32());
+        }
+
+        const ImVec2 headerMin(pos.x + sidebarWidth + 10.0f, pos.y + 10.0f);
+        drawList->AddText(titleFont, titleFontSize - 1.0f, headerMin, color::GetStrongTextU32(), "OpenCommunity");
+        drawList->AddText(bodyFont, bodyFontSize - 2.0f, ImVec2(headerMin.x, headerMin.y + 16.0f), color::GetMutedTextU32(), "Theme Preview");
+
+        const ImVec2 badgeMin(max.x - 48.0f, pos.y + 12.0f);
+        const ImVec2 badgeMax(max.x - 12.0f, pos.y + 28.0f);
+        drawList->AddRectFilled(badgeMin, badgeMax, color::GetPanelActiveU32(0.98f), 8.0f);
+        drawList->AddRect(badgeMin, badgeMax, color::GetBorderU32(0.9f), 8.0f, 0, 1.0f);
+        drawList->AddText(bodyFont, bodyFontSize - 3.0f, ImVec2(badgeMin.x + 8.0f, badgeMin.y + 2.0f), color::GetStrongTextU32(), "Live");
+
+        const ImVec2 cardOneMin(pos.x + sidebarWidth + 10.0f, pos.y + 42.0f);
+        const ImVec2 cardOneMax(max.x - 10.0f, cardOneMin.y + 28.0f);
+        const ImVec2 cardTwoMin(cardOneMin.x, cardOneMax.y + 8.0f);
+        const ImVec2 cardTwoMax(cardOneMax.x, cardTwoMin.y + 28.0f);
+
+        auto drawMiniModuleCard = [&](const ImVec2& min, const ImVec2& maxCard, const char* title, bool active) {
+            drawList->AddRectFilled(min, maxCard, active ? color::GetPanelActiveU32(0.96f) : color::GetPanelU32(0.94f), 10.0f);
+            drawList->AddRect(min, maxCard, color::GetBorderU32(active ? 0.98f : 0.88f), 10.0f, 0, 1.0f);
+            drawList->AddCircleFilled(ImVec2(min.x + 11.0f, min.y + 14.0f), 4.0f, active ? color::GetLinkU32() : color::GetIconTintU32());
+            drawList->AddText(bodyFont, bodyFontSize - 2.0f, ImVec2(min.x + 22.0f, min.y + 6.0f), color::GetStrongTextU32(), title);
+            drawList->AddRectFilled(ImVec2(maxCard.x - 24.0f, min.y + 7.0f), ImVec2(maxCard.x - 8.0f, min.y + 21.0f), active ? color::GetLinkU32() : color::GetFieldBgU32(0.92f), 7.0f);
+        };
+
+        drawMiniModuleCard(cardOneMin, cardOneMax, "ArrayList", true);
+        drawMiniModuleCard(cardTwoMin, cardTwoMax, "Target", false);
+    }
+
+    float ColorLuminance(const ImVec4& colorValue)
+    {
+        return (0.2126f * colorValue.x) + (0.7152f * colorValue.y) + (0.0722f * colorValue.z);
+    }
+
+    float ColorSaturation(const ImVec4& colorValue)
+    {
+        const float minChannel = (std::min)(colorValue.x, (std::min)(colorValue.y, colorValue.z));
+        const float maxChannel = (std::max)(colorValue.x, (std::max)(colorValue.y, colorValue.z));
+        return maxChannel - minChannel;
+    }
+
+    ImU32 SolidTextColorForBackground(const ImVec4& backgroundColor)
+    {
+        return ColorLuminance(backgroundColor) > 0.60f ? IM_COL32(20, 24, 32, 255) : IM_COL32(247, 249, 252, 255);
+    }
+
+    ImVec4 ClampColorVec4(ImVec4 value)
+    {
+        value.x = (std::clamp)(value.x, 0.0f, 1.0f);
+        value.y = (std::clamp)(value.y, 0.0f, 1.0f);
+        value.z = (std::clamp)(value.z, 0.0f, 1.0f);
+        value.w = (std::clamp)(value.w, 0.0f, 1.0f);
+        return value;
+    }
+
+    color::ThemePalette BuildThemePaletteFromBase(const ImVec4& backgroundColor, const ImVec4& textColor, const ImVec4& accentColor, const ImVec4& iconTintColor)
+    {
+        const ImVec4 background = ClampColorVec4(ImVec4(backgroundColor.x, backgroundColor.y, backgroundColor.z, 1.0f));
+        const ImVec4 text = ClampColorVec4(ImVec4(textColor.x, textColor.y, textColor.z, 1.0f));
+        const ImVec4 accent = ClampColorVec4(ImVec4(accentColor.x, accentColor.y, accentColor.z, 1.0f));
+        const ImVec4 iconTint = ClampColorVec4(ImVec4(iconTintColor.x, iconTintColor.y, iconTintColor.z, 1.0f));
+        const bool darkTheme = ColorLuminance(background) < 0.5f;
+
+        color::ThemePalette palette = {};
+        palette.background = background;
+        palette.strongText = text;
+        palette.moduleText = color::Mix(text, accent, darkTheme ? 0.08f : 0.05f, 1.0f);
+        palette.moduleAltText = color::Mix(text, background, darkTheme ? 0.18f : 0.26f, 1.0f);
+        palette.secondaryText = color::Mix(text, background, darkTheme ? 0.32f : 0.42f, 1.0f);
+        palette.mutedText = color::Mix(text, background, darkTheme ? 0.52f : 0.62f, 1.0f);
+        palette.panel = color::Mix(background, text, darkTheme ? 0.08f : 0.06f, 1.0f);
+        palette.panelHover = color::Mix(palette.panel, accent, darkTheme ? 0.18f : 0.08f, 1.0f);
+        palette.panelActive = color::Mix(palette.panel, accent, darkTheme ? 0.26f : 0.14f, 1.0f);
+        palette.sidebar = color::Mix(background, text, darkTheme ? 0.04f : 0.03f, 1.0f);
+        palette.fieldBg = color::Mix(palette.panel, background, darkTheme ? 0.35f : 0.50f, 1.0f);
+        palette.fieldHover = color::Mix(palette.fieldBg, accent, darkTheme ? 0.16f : 0.08f, 1.0f);
+        palette.fieldActive = color::Mix(palette.fieldBg, accent, darkTheme ? 0.24f : 0.13f, 1.0f);
+        palette.border = color::Mix(text, background, darkTheme ? 0.70f : 0.78f, 1.0f);
+        palette.glassSoft = color::Mix(palette.panel, background, darkTheme ? 0.28f : 0.42f, 1.0f);
+        palette.glassStrong = color::Mix(palette.panelHover, background, darkTheme ? 0.12f : 0.18f, 1.0f);
+        palette.glassHighlight = color::Mix(darkTheme ? text : background, accent, darkTheme ? 0.18f : 0.06f, 1.0f);
+        palette.glassShadow = color::Mix(background, darkTheme ? ImVec4(0.0f, 0.0f, 0.0f, 1.0f) : text, darkTheme ? 0.38f : 0.18f, 1.0f);
+        palette.link = accent;
+        palette.linkHover = color::Mix(accent, darkTheme ? ImVec4(1.0f, 1.0f, 1.0f, 1.0f) : ImVec4(0.0f, 0.0f, 0.0f, 1.0f), darkTheme ? 0.14f : 0.10f, 1.0f);
+        palette.success = darkTheme ? ImVec4(0.48f, 0.83f, 0.60f, 1.0f) : ImVec4(0.26f, 0.62f, 0.36f, 1.0f);
+        palette.warning = darkTheme ? ImVec4(0.94f, 0.76f, 0.42f, 1.0f) : ImVec4(0.83f, 0.53f, 0.18f, 1.0f);
+        palette.danger = darkTheme ? ImVec4(0.93f, 0.57f, 0.57f, 1.0f) : ImVec4(0.77f, 0.31f, 0.31f, 1.0f);
+        palette.topographicLine = color::Mix(palette.border, palette.secondaryText, darkTheme ? 0.35f : 0.20f, 1.0f);
+        palette.iconTint = iconTint;
+        return palette;
+    }
+
+    color::ThemePalette BuildAutomaticThemePalette(const ImVec4* paletteInputs, size_t paletteCount)
+    {
+        if (!paletteInputs || paletteCount == 0) {
+            return BuildThemePaletteFromBase(
+                ImVec4(0.98f, 0.98f, 0.99f, 1.0f),
+                ImVec4(0.08f, 0.09f, 0.10f, 1.0f),
+                ImVec4(0.34f, 0.48f, 0.63f, 1.0f),
+                ImVec4(0.12f, 0.15f, 0.18f, 1.0f));
+        }
+
+        ImVec4 average = {};
+        ImVec4 darkest = paletteInputs[0];
+        ImVec4 lightest = paletteInputs[0];
+        ImVec4 accent = paletteInputs[0];
+        float darkestLuminance = ColorLuminance(darkest);
+        float lightestLuminance = darkestLuminance;
+        float highestSaturation = ColorSaturation(accent);
+
+        for (size_t index = 0; index < paletteCount; ++index) {
+            const ImVec4 candidate = ClampColorVec4(ImVec4(paletteInputs[index].x, paletteInputs[index].y, paletteInputs[index].z, 1.0f));
+            average.x += candidate.x;
+            average.y += candidate.y;
+            average.z += candidate.z;
+
+            const float luminance = ColorLuminance(candidate);
+            if (luminance < darkestLuminance) {
+                darkestLuminance = luminance;
+                darkest = candidate;
+            }
+            if (luminance > lightestLuminance) {
+                lightestLuminance = luminance;
+                lightest = candidate;
+            }
+
+            const float saturation = ColorSaturation(candidate);
+            if (saturation >= highestSaturation) {
+                highestSaturation = saturation;
+                accent = candidate;
+            }
+        }
+
+        average.x /= static_cast<float>(paletteCount);
+        average.y /= static_cast<float>(paletteCount);
+        average.z /= static_cast<float>(paletteCount);
+        average.w = 1.0f;
+
+        const bool darkTheme = ColorLuminance(average) < 0.5f;
+        const ImVec4 background = darkTheme
+            ? color::Mix(darkest, average, 0.24f, 1.0f)
+            : color::Mix(lightest, average, 0.28f, 1.0f);
+        const ImVec4 text = darkTheme
+            ? color::Mix(lightest, ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 0.22f, 1.0f)
+            : color::Mix(darkest, ImVec4(0.0f, 0.0f, 0.0f, 1.0f), 0.20f, 1.0f);
+        const ImVec4 iconTint = color::Mix(text, accent, darkTheme ? 0.18f : 0.10f, 1.0f);
+        return BuildThemePaletteFromBase(background, text, accent, iconTint);
+    }
+
+    color::ThemePalette BuildCustomThemePalette(const ImVec4& textColor, const ImVec4& backgroundColor, const int* iconColorBytes)
+    {
+        const ImVec4 text = ClampColorVec4(ImVec4(textColor.x, textColor.y, textColor.z, 1.0f));
+        const ImVec4 background = ClampColorVec4(ImVec4(backgroundColor.x, backgroundColor.y, backgroundColor.z, 1.0f));
+        const ImVec4 iconTint(
+            iconColorBytes ? (std::clamp)(iconColorBytes[0], 0, 255) / 255.0f : text.x,
+            iconColorBytes ? (std::clamp)(iconColorBytes[1], 0, 255) / 255.0f : text.y,
+            iconColorBytes ? (std::clamp)(iconColorBytes[2], 0, 255) / 255.0f : text.z,
+            1.0f);
+        const ImVec4 accent = color::Mix(iconTint, text, 0.22f, 1.0f);
+        return BuildThemePaletteFromBase(background, text, accent, iconTint);
     }
 
     void DrawCloseButton(float width, bool& running)
@@ -1746,10 +2697,9 @@ void Screen::LoadIconTextures() {
     LoadTextureFromMemory(icons::running_icon_data, icons::running_icon_data_size, &m_IconMovement, &w, &h, true);
     LoadTextureFromMemory(icons::eye_icon_data, icons::eye_icon_data_size, &m_IconVisuals, &w, &h, true);
     LoadTextureFromMemory(icons::settings_icon_data, icons::settings_icon_data_size, &m_IconSettings, &w, &h, true);
-    const auto infoLampPath = ResolveModuleImagePath("Light-Bulb-256.png");
-    if (!infoLampPath.empty()) {
-        m_InfoLampTexture = CreateTextureFromFile(m_Device, infoLampPath);
-    }
+    LoadTextureFromMemory(icons::message_information_icon_data, icons::message_information_icon_data_size, &m_InfoLampTexture, nullptr, nullptr, true);
+    LoadTextureFromMemory(icons::command_refresh_icon_data, icons::command_refresh_icon_data_size, &m_UpdatesTexture, nullptr, nullptr, true);
+    LoadTextureFromMemory(icons::color_theme_icon_data, icons::color_theme_icon_data_size, &m_InterfaceThemeTexture, nullptr, nullptr, true);
     m_IconW = w;
     m_IconH = h;
 }
@@ -1760,6 +2710,87 @@ void Screen::ReleaseIconTextures() {
     if (m_IconVisuals) { m_IconVisuals->Release(); m_IconVisuals = nullptr; }
     if (m_IconSettings) { m_IconSettings->Release(); m_IconSettings = nullptr; }
     if (m_InfoLampTexture) { m_InfoLampTexture->Release(); m_InfoLampTexture = nullptr; }
+    if (m_UpdatesTexture) { m_UpdatesTexture->Release(); m_UpdatesTexture = nullptr; }
+    if (m_InterfaceThemeTexture) { m_InterfaceThemeTexture->Release(); m_InterfaceThemeTexture = nullptr; }
+}
+
+void Screen::ApplyInterfaceTheme() {
+    color::ClearThemePalette();
+    color::SetContrastThemeEnabled(m_InterfaceTheme == InterfaceTheme::CheckmarkContrast);
+
+    if (m_InterfaceTheme == InterfaceTheme::Automatic) {
+        color::SetThemePalette(BuildAutomaticThemePalette(m_AutomaticPalette, sizeof(m_AutomaticPalette) / sizeof(m_AutomaticPalette[0])));
+    } else if (m_InterfaceTheme == InterfaceTheme::Custom) {
+        color::SetThemePalette(BuildCustomThemePalette(m_CustomTextColor, m_CustomBackgroundColor, m_CustomIconColorBytes));
+    }
+
+    SetupImGuiStyle();
+    SaveInterfaceThemeSettings();
+}
+
+void Screen::LoadInterfaceThemeSettings()
+{
+    ThemeSettingsState loadedState = {};
+    if (!LoadThemeSettingsState(loadedState)) {
+        return;
+    }
+
+    m_InterfaceTheme = static_cast<InterfaceTheme>((std::clamp)(loadedState.themeMode, 0, 3));
+    for (int index = 0; index < 4; ++index) {
+        m_AutomaticPalette[index] = loadedState.automaticPalette[index];
+    }
+
+    m_CustomTextColor = loadedState.customTextColor;
+    m_CustomBackgroundColor = loadedState.customBackgroundColor;
+    for (int index = 0; index < 3; ++index) {
+        m_CustomIconColorBytes[index] = loadedState.customIconColorBytes[index];
+    }
+
+    m_ImportedPaletteSource = loadedState.importedPaletteSource;
+}
+
+void Screen::SaveInterfaceThemeSettings() const
+{
+    ThemeSettingsState state = {};
+    state.themeMode = static_cast<int>(m_InterfaceTheme);
+    for (int index = 0; index < 4; ++index) {
+        state.automaticPalette[index] = m_AutomaticPalette[index];
+    }
+
+    state.customTextColor = m_CustomTextColor;
+    state.customBackgroundColor = m_CustomBackgroundColor;
+    for (int index = 0; index < 3; ++index) {
+        state.customIconColorBytes[index] = m_CustomIconColorBytes[index];
+    }
+
+    state.importedPaletteSource = m_ImportedPaletteSource;
+    SaveThemeSettingsState(state);
+}
+
+bool Screen::ImportAutomaticPaletteFromImage()
+{
+    std::filesystem::path imagePath;
+    if (!ChooseImageFilePath(imagePath)) {
+        return false;
+    }
+
+    ImVec4 extractedPalette[4] = {};
+    if (!ExtractPaletteFromImageFile(imagePath, extractedPalette)) {
+        return false;
+    }
+
+    for (int index = 0; index < 4; ++index) {
+        m_AutomaticPalette[index] = extractedPalette[index];
+    }
+
+    m_ImportedPaletteSource = imagePath;
+    if (m_InterfaceTheme != InterfaceTheme::Automatic) {
+        m_InterfaceTheme = InterfaceTheme::Automatic;
+    }
+
+    ApplyInterfaceTheme();
+    SaveInterfaceThemeSettings();
+    return true;
 }
 
 bool Screen::Initialize() {
@@ -1842,8 +2873,9 @@ bool Screen::Initialize() {
     if (!m_FontOverlayBold) {
         m_FontOverlayBold = m_FontBold;
     }
-    
-    SetupImGuiStyle();
+
+    LoadInterfaceThemeSettings();
+    ApplyInterfaceTheme();
     
     ImGui_ImplWin32_Init(m_Hwnd);
     ImGui_ImplDX11_Init(m_Device, m_Context);
@@ -2186,7 +3218,7 @@ void Screen::DrawInjectionStatusText(
     const float totalBlockHeight = headlineFontSize + verticalGap + detailBlockHeight;
     const float baseY = windowPos.y + ((m_Height - totalBlockHeight) * 0.5f) + offsetY;
     const float headlineX = windowPos.x + ((m_Width - headlineSize.x) * 0.5f);
-    const ImU32 headlineColor = IM_COL32(12, 12, 12, static_cast<int>(255.0f * clampedAlpha));
+    const ImU32 headlineColor = color::GetStrongTextU32(clampedAlpha);
     drawList->AddText(headlineFont, headlineFontSize, ImVec2(headlineX, baseY), headlineColor, visibleHeadline.c_str());
 
     if (showCursor) {
@@ -2200,7 +3232,7 @@ void Screen::DrawInjectionStatusText(
             drawList->AddLine(
                 ImVec2(cursorX, cursorTop),
                 ImVec2(cursorX, cursorBottom),
-                IM_COL32(12, 12, 12, static_cast<int>(255.0f * cursorAlpha)),
+                color::GetStrongTextU32(cursorAlpha),
                 2.0f * clampedScale);
         }
     }
@@ -2213,7 +3245,7 @@ void Screen::DrawInjectionStatusText(
             detailFont,
             detailFontSize,
             ImVec2(detailX, detailY),
-            IM_COL32(110, 110, 110, static_cast<int>(255.0f * clampedAlpha)),
+            color::GetMutedTextU32(clampedAlpha),
             detailText);
     }
 }
@@ -2332,11 +3364,11 @@ void Screen::RenderHUDPreview() {
     const float itemSpacing = riseMode ? 0.0f : 2.0f;
     const float spaceWidth = CalcTextSizeWithFont(regularFont, " ", detailFontSize).x;
     const float screenW = ImGui::GetIO().DisplaySize.x;
-    const ImU32 shadowColor = IM_COL32(0, 0, 0, 120);
-    const ImU32 secondaryColor = riseMode ? IM_COL32(154, 154, 154, 255) : IM_COL32(200, 200, 200, 255);
-    const ImU32 riseBackgroundColor = IM_COL32(0, 0, 0, 88);
-    const ImU32 riseWatermarkTextColor = IM_COL32(232, 232, 232, 255);
-    const ImU32 tesseractBackgroundColor = IM_COL32(25, 25, 30, 240);
+    const ImU32 shadowColor = color::GetGlassShadowU32(0.46f);
+    const ImU32 secondaryColor = riseMode ? color::GetMutedTextU32() : color::GetSecondaryTextU32();
+    const ImU32 riseBackgroundColor = color::GetPanelU32(0.92f);
+    const ImU32 riseWatermarkTextColor = color::GetStrongTextU32();
+    const ImU32 tesseractBackgroundColor = color::GetPanelU32(0.96f);
     const float tesseractPadding = 6.0f;
     const float tesseractGapAfterText = 4.0f;
     const float tesseractRectWidth = 3.0f;
@@ -2591,8 +3623,8 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
         ImVec2 cardMin(cx, cy);
         ImVec2 cardMax(cx + colW, cy + cardH);
 
-        dl->AddRectFilled(cardMin, cardMax, IM_COL32(230, 230, 230, 180), cardRounding);
-        dl->AddRect(cardMin, cardMax, IM_COL32(200, 200, 200, 120), cardRounding, 0, 1.0f);
+        dl->AddRectFilled(cardMin, cardMax, color::GetPanelU32(0.82f), cardRounding);
+        dl->AddRect(cardMin, cardMax, color::GetBorderU32(0.66f), cardRounding, 0, 1.0f);
 
         // Render module prefix icon if available
         const float prefixIconSize = 20.0f;
@@ -2607,6 +3639,7 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     unsigned char* pixels = stbi_load_from_memory(mod->GetImageData(), mod->GetImageSize(), &tw, &th, &tc, 4);
                     ID3D11ShaderResourceView* srv = nullptr;
                     if (pixels && tw > 0 && th > 0) {
+                        NormalizePixelsToWhite(pixels, tw, th);
                         D3D11_TEXTURE2D_DESC desc = {};
                         desc.Width = tw; desc.Height = th;
                         desc.MipLevels = 1; desc.ArraySize = 1;
@@ -2640,29 +3673,7 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     ID3D11ShaderResourceView* srv = nullptr;
                     const auto resolvedPath = ResolveModuleImagePath(mod->GetImagePath());
                     if (!resolvedPath.empty()) {
-                        int tw = 0, th = 0, tc = 0;
-                        unsigned char* pixels = stbi_load(resolvedPath.string().c_str(), &tw, &th, &tc, 4);
-                        if (pixels && tw > 0 && th > 0) {
-                            D3D11_TEXTURE2D_DESC desc = {};
-                            desc.Width = tw; desc.Height = th;
-                            desc.MipLevels = 1; desc.ArraySize = 1;
-                            desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                            desc.SampleDesc.Count = 1;
-                            desc.Usage = D3D11_USAGE_DEFAULT;
-                            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-                            D3D11_SUBRESOURCE_DATA sub = {};
-                            sub.pSysMem = pixels; sub.SysMemPitch = tw * 4;
-                            ID3D11Texture2D* tex = nullptr;
-                            if (SUCCEEDED(device->CreateTexture2D(&desc, &sub, &tex))) {
-                                D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                                srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                                srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                                srvDesc.Texture2D.MipLevels = 1;
-                                device->CreateShaderResourceView(tex, &srvDesc, &srv);
-                                tex->Release();
-                            }
-                            stbi_image_free(pixels);
-                        }
+                        srv = CreateTextureFromFile(device, resolvedPath, true);
                     }
                     s_ModulePathIconCache[mod->GetImagePath()] = srv;
                     it = s_ModulePathIconCache.find(mod->GetImagePath());
@@ -2676,14 +3687,14 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
             if (moduleIcon) {
                 float iconY = cy + (headerH - prefixIconSize) * 0.5f;
                 float iconX = cx + cardPadX;
-                dl->AddImage((ImTextureID)moduleIcon, ImVec2(iconX, iconY), ImVec2(iconX + prefixIconSize, iconY + prefixIconSize));
+                dl->AddImage((ImTextureID)moduleIcon, ImVec2(iconX, iconY), ImVec2(iconX + prefixIconSize, iconY + prefixIconSize), ImVec2(0, 0), ImVec2(1, 1), color::GetIconTintU32());
                 nameOffsetX = prefixIconSize + 6.0f;
             }
         }
 
         ImFont* nf = fontBold ? fontBold : ImGui::GetFont();
         float nameFS = nf->FontSize;
-        dl->AddText(nf, nameFS, ImVec2(cx + cardPadX + nameOffsetX, cy + (headerH - nameFS) * 0.5f), IM_COL32(0, 0, 0, 255), mod->GetName().c_str());
+        dl->AddText(nf, nameFS, ImVec2(cx + cardPadX + nameOffsetX, cy + (headerH - nameFS) * 0.5f), color::GetStrongTextU32(), mod->GetName().c_str());
 
         float rightX = cx + colW - cardPadX;
         ImFont* bf = fontBody ? fontBody : ImGui::GetFont();
@@ -2704,13 +3715,13 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
 
             bool isWaiting = (waitingBindModuleIdx == mi && waitingBindCat == category);
 
-            dl->AddRectFilled(bindMin, bindMax, isWaiting ? IM_COL32(180, 180, 180, 200) : IM_COL32(210, 210, 210, 180), 4.0f);
-            dl->AddRect(bindMin, bindMax, IM_COL32(170, 170, 170, 150), 4.0f, 0, 1.0f);
+            dl->AddRectFilled(bindMin, bindMax, isWaiting ? color::GetPanelActiveU32(0.94f) : color::GetPanelU32(0.86f), 4.0f);
+            dl->AddRect(bindMin, bindMax, color::GetBorderU32(0.60f), 4.0f, 0, 1.0f);
 
             const char* displayText = isWaiting ? "..." : bindLabel.c_str();
             ImVec2 dts = bf->CalcTextSizeA(bfs, FLT_MAX, 0.0f, displayText);
             dl->AddText(bf, bfs, ImVec2(bindMin.x + (bindBtnW - dts.x) * 0.5f, bindMin.y + (18.0f - dts.y) * 0.5f),
-                        IM_COL32(60, 60, 60, 255), displayText);
+                        color::GetSecondaryTextU32(), displayText);
 
             ImGui::SetCursorScreenPos(bindMin);
             char bindBtnId[64];
@@ -2762,13 +3773,13 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
         ImVec2 toggleMax(toggleX + toggleSize, toggleY + toggleSize);
 
         bool enabled = mod->IsEnabled();
-        ImU32 toggleBg = enabled ? IM_COL32(60, 60, 60, 255) : IM_COL32(190, 190, 190, 200);
+        ImU32 toggleBg = enabled ? color::GetStrongTextU32() : color::GetPanelActiveU32(0.88f);
         dl->AddRectFilled(toggleMin, toggleMax, toggleBg, 4.0f);
         if (enabled) {
             float cx2 = toggleX + toggleSize * 0.5f;
             float cy2 = toggleY + toggleSize * 0.5f;
-            dl->AddLine(ImVec2(cx2 - 4, cy2), ImVec2(cx2 - 1, cy2 + 3), IM_COL32(255, 255, 255, 255), 2.0f);
-            dl->AddLine(ImVec2(cx2 - 1, cy2 + 3), ImVec2(cx2 + 4, cy2 - 3), IM_COL32(255, 255, 255, 255), 2.0f);
+            dl->AddLine(ImVec2(cx2 - 4, cy2), ImVec2(cx2 - 1, cy2 + 3), color::GetBackgroundU32(), 2.0f);
+            dl->AddLine(ImVec2(cx2 - 1, cy2 + 3), ImVec2(cx2 + 4, cy2 - 3), color::GetBackgroundU32(), 2.0f);
         }
 
         ImGui::SetCursorScreenPos(toggleMin);
@@ -2790,20 +3801,20 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
             if (fontBody) ImGui::PushFont(fontBody);
 
             // Push light style for ImGui widgets on white/light cards
-            ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.93f, 0.93f, 0.93f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.88f, 0.88f, 0.88f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.83f, 0.83f, 0.83f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_SliderGrab, ImVec4(0.50f, 0.50f, 0.50f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, ImVec4(0.35f, 0.35f, 0.35f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(0.20f, 0.20f, 0.20f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.15f, 0.15f, 0.15f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.90f, 0.90f, 0.90f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.84f, 0.84f, 0.84f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.78f, 0.78f, 0.78f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.88f, 0.88f, 0.88f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.82f, 0.82f, 0.82f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.76f, 0.76f, 0.76f, 1.0f));
-            ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.82f, 0.82f, 0.82f, 0.6f));
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, color::GetFieldBgVec4());
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, color::GetFieldHoverVec4());
+            ImGui::PushStyleColor(ImGuiCol_FrameBgActive, color::GetFieldActiveVec4());
+            ImGui::PushStyleColor(ImGuiCol_SliderGrab, color::GetStrongTextVec4());
+            ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, color::GetModuleAltTextVec4());
+            ImGui::PushStyleColor(ImGuiCol_CheckMark, color::GetStrongTextVec4());
+            ImGui::PushStyleColor(ImGuiCol_Text, color::GetStrongTextVec4());
+            ImGui::PushStyleColor(ImGuiCol_Button, color::GetPanelVec4());
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, color::GetPanelHoverVec4());
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, color::GetPanelActiveVec4());
+            ImGui::PushStyleColor(ImGuiCol_Header, color::GetPanelHoverVec4());
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, color::GetPanelActiveVec4());
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, color::GetPanelActiveVec4(0.96f));
+            ImGui::PushStyleColor(ImGuiCol_Border, color::GetBorderVec4(0.60f));
             ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 2.0f));
             ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
@@ -2834,7 +3845,7 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     }
 
                     if (opt.statusOnly) {
-                        const ImU32 statusColor = opt.boolValue ? IM_COL32(85, 170, 85, 255) : IM_COL32(200, 70, 70, 255);
+                        const ImU32 statusColor = opt.boolValue ? color::GetSuccessU32() : color::GetDangerU32();
                         dl->AddText(labelFont, labelFS, ImVec2(cbX, optY + (optLineH - labelFS) * 0.5f), statusColor, opt.name.c_str());
                         break;
                     }
@@ -2844,14 +3855,14 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     ImVec2 cbMin(cbX, cbY);
                     ImVec2 cbMax(cbX + cbSize, cbY + cbSize);
 
-                    ImU32 cbBg = opt.boolValue ? IM_COL32(60, 60, 60, 255) : IM_COL32(200, 200, 200, 220);
+                    ImU32 cbBg = opt.boolValue ? color::GetStrongTextU32() : color::GetPanelActiveU32(0.90f);
                     dl->AddRectFilled(cbMin, cbMax, cbBg, 3.0f);
-                    dl->AddRect(cbMin, cbMax, IM_COL32(160, 160, 160, 180), 3.0f, 0, 1.0f);
+                    dl->AddRect(cbMin, cbMax, color::GetBorderU32(0.70f), 3.0f, 0, 1.0f);
                     if (opt.boolValue) {
                         float cx2 = cbX + cbSize * 0.5f;
                         float cy2 = cbY + cbSize * 0.5f;
-                        dl->AddLine(ImVec2(cx2 - 3, cy2), ImVec2(cx2 - 1, cy2 + 3), IM_COL32(255, 255, 255, 255), 1.8f);
-                        dl->AddLine(ImVec2(cx2 - 1, cy2 + 3), ImVec2(cx2 + 4, cy2 - 3), IM_COL32(255, 255, 255, 255), 1.8f);
+                        dl->AddLine(ImVec2(cx2 - 3, cy2), ImVec2(cx2 - 1, cy2 + 3), color::GetBackgroundU32(), 1.8f);
+                        dl->AddLine(ImVec2(cx2 - 1, cy2 + 3), ImVec2(cx2 + 4, cy2 - 3), color::GetBackgroundU32(), 1.8f);
                     }
 
                     if (opt.interactive) {
@@ -2863,11 +3874,11 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     }
 
                     dl->AddText(labelFont, labelFS, ImVec2(cbX + cbSize + 6.0f, optY + (optLineH - labelFS) * 0.5f),
-                        opt.interactive ? IM_COL32(40, 40, 40, 255) : IM_COL32(90, 90, 90, 255), opt.name.c_str());
+                        opt.interactive ? color::GetStrongTextU32() : color::GetMutedTextU32(), opt.name.c_str());
                     break;
                 }
                 case OptionType::SliderInt: {
-                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + (optLineH - labelFS) * 0.5f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + (optLineH - labelFS) * 0.5f), color::GetStrongTextU32(), opt.name.c_str());
 
                     // Custom thin rounded slider — positioned right after label text
                     const float sliderH = 6.0f;
@@ -2882,22 +3893,22 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     float trackRounding = sliderH * 0.5f;
 
                     // Track background
-                    dl->AddRectFilled(trackMin, trackMax, IM_COL32(210, 210, 210, 255), trackRounding);
-                    dl->AddRect(trackMin, trackMax, IM_COL32(185, 185, 185, 200), trackRounding, 0, 1.0f);
+                    dl->AddRectFilled(trackMin, trackMax, color::GetPanelActiveU32(0.92f), trackRounding);
+                    dl->AddRect(trackMin, trackMax, color::GetBorderU32(0.72f), trackRounding, 0, 1.0f);
 
                     // Filled portion
                     float tNorm = (opt.intMax > opt.intMin) ? (float)(opt.intValue - opt.intMin) / (float)(opt.intMax - opt.intMin) : 0.0f;
                     if (tNorm < 0.0f) tNorm = 0.0f; if (tNorm > 1.0f) tNorm = 1.0f;
                     float fillX = sliderX + tNorm * actualSliderW;
                     if (fillX > sliderX + 2.0f) {
-                        dl->AddRectFilled(trackMin, ImVec2(fillX, trackMax.y), IM_COL32(80, 80, 80, 255), trackRounding);
+                        dl->AddRectFilled(trackMin, ImVec2(fillX, trackMax.y), color::GetStrongTextU32(), trackRounding);
                     }
 
                     // Grab circle
                     float grabCX = sliderX + tNorm * actualSliderW;
                     float grabCY = sliderY + sliderH * 0.5f;
-                    dl->AddCircleFilled(ImVec2(grabCX, grabCY), grabRadius, IM_COL32(60, 60, 60, 255));
-                    dl->AddCircle(ImVec2(grabCX, grabCY), grabRadius, IM_COL32(40, 40, 40, 255), 0, 1.2f);
+                    dl->AddCircleFilled(ImVec2(grabCX, grabCY), grabRadius, color::GetStrongTextU32());
+                    dl->AddCircle(ImVec2(grabCX, grabCY), grabRadius, color::GetModuleAltTextU32(), 0, 1.2f);
 
                     // Invisible button for interaction
                     ImVec2 interactMin(sliderX - grabRadius, sliderY - grabRadius);
@@ -2914,12 +3925,12 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     // Value text
                     char valBuf[32];
                     snprintf(valBuf, sizeof(valBuf), "%d", opt.intValue);
-                    dl->AddText(labelFont, labelFS, ImVec2(sliderX + actualSliderW + 6.0f, optY + (optLineH - labelFS) * 0.5f), IM_COL32(60, 60, 60, 255), valBuf);
+                    dl->AddText(labelFont, labelFS, ImVec2(sliderX + actualSliderW + 6.0f, optY + (optLineH - labelFS) * 0.5f), color::GetSecondaryTextU32(), valBuf);
 
                     break;
                 }
                 case OptionType::SliderFloat: {
-                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + (optLineH - labelFS) * 0.5f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + (optLineH - labelFS) * 0.5f), color::GetStrongTextU32(), opt.name.c_str());
 
                     // Custom thin rounded slider — positioned right after label text
                     const float sliderH = 6.0f;
@@ -2934,22 +3945,22 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     float trackRounding = sliderH * 0.5f;
 
                     // Track background
-                    dl->AddRectFilled(trackMin, trackMax, IM_COL32(210, 210, 210, 255), trackRounding);
-                    dl->AddRect(trackMin, trackMax, IM_COL32(185, 185, 185, 200), trackRounding, 0, 1.0f);
+                    dl->AddRectFilled(trackMin, trackMax, color::GetPanelActiveU32(0.92f), trackRounding);
+                    dl->AddRect(trackMin, trackMax, color::GetBorderU32(0.72f), trackRounding, 0, 1.0f);
 
                     // Filled portion
                     float tNorm = (opt.floatMax > opt.floatMin) ? (opt.floatValue - opt.floatMin) / (opt.floatMax - opt.floatMin) : 0.0f;
                     if (tNorm < 0.0f) tNorm = 0.0f; if (tNorm > 1.0f) tNorm = 1.0f;
                     float fillX = sliderX + tNorm * actualSliderWF;
                     if (fillX > sliderX + 2.0f) {
-                        dl->AddRectFilled(trackMin, ImVec2(fillX, trackMax.y), IM_COL32(80, 80, 80, 255), trackRounding);
+                        dl->AddRectFilled(trackMin, ImVec2(fillX, trackMax.y), color::GetStrongTextU32(), trackRounding);
                     }
 
                     // Grab circle
                     float grabCX = sliderX + tNorm * actualSliderWF;
                     float grabCY = sliderY + sliderH * 0.5f;
-                    dl->AddCircleFilled(ImVec2(grabCX, grabCY), grabRadius, IM_COL32(60, 60, 60, 255));
-                    dl->AddCircle(ImVec2(grabCX, grabCY), grabRadius, IM_COL32(40, 40, 40, 255), 0, 1.2f);
+                    dl->AddCircleFilled(ImVec2(grabCX, grabCY), grabRadius, color::GetStrongTextU32());
+                    dl->AddCircle(ImVec2(grabCX, grabCY), grabRadius, color::GetModuleAltTextU32(), 0, 1.2f);
 
                     // Invisible button for interaction
                     ImVec2 interactMin(sliderX - grabRadius, sliderY - grabRadius);
@@ -2966,12 +3977,12 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     // Value text
                     char valBuf[32];
                     snprintf(valBuf, sizeof(valBuf), "%.2f", opt.floatValue);
-                    dl->AddText(labelFont, labelFS, ImVec2(sliderX + actualSliderWF + 6.0f, optY + (optLineH - labelFS) * 0.5f), IM_COL32(60, 60, 60, 255), valBuf);
+                    dl->AddText(labelFont, labelFS, ImVec2(sliderX + actualSliderWF + 6.0f, optY + (optLineH - labelFS) * 0.5f), color::GetSecondaryTextU32(), valBuf);
 
                     break;
                 }
                 case OptionType::Combo: {
-                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), color::GetStrongTextU32(), opt.name.c_str());
 
                     const float comboPadX = 8.0f;
                     const float comboPadY = 4.0f;
@@ -2981,13 +3992,13 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     const ImVec2 comboMin = comboPos;
                     const ImVec2 comboMax(comboPos.x + sliderW, comboPos.y + comboHeight);
 
-                    dl->AddRectFilled(comboMin, comboMax, IM_COL32(214, 219, 228, 255), comboRounding);
+                    dl->AddRectFilled(comboMin, comboMax, color::GetFieldBgU32(), comboRounding);
                     dl->AddRectFilled(
                         ImVec2(comboMin.x + 1.0f, comboMin.y + 1.0f),
                         ImVec2(comboMax.x - 1.0f, comboMax.y - 1.0f),
-                        IM_COL32(236, 240, 246, 255),
+                        color::GetGlassHighlightU32(0.28f),
                         comboRounding);
-                    dl->AddRect(comboMin, comboMax, IM_COL32(145, 152, 164, 255), comboRounding, 0, 1.0f);
+                    dl->AddRect(comboMin, comboMax, color::GetBorderU32(), comboRounding, 0, 1.0f);
 
                     ImGui::SetCursorScreenPos(comboPos);
                     ImGui::PushItemWidth(sliderW);
@@ -2998,8 +4009,8 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
                     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
                     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.08f, 0.09f, 0.10f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.94f, 0.95f, 0.97f, 1.0f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, color::GetStrongTextVec4());
+                    ImGui::PushStyleColor(ImGuiCol_PopupBg, color::GetPanelVec4(0.98f));
                     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
                     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(comboPadX, comboPadY));
                     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, comboRounding);
@@ -3013,7 +4024,7 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     break;
                 }
                 case OptionType::Color: {
-                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), color::GetStrongTextU32(), opt.name.c_str());
                     ImGui::SetCursorScreenPos(ImVec2(optX + optW - sliderW, optY));
                     ImGui::PushItemWidth(sliderW);
                     ImGui::ColorEdit3(optId, opt.colorValue, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
@@ -3022,7 +4033,7 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     break;
                 }
                 case OptionType::Text: {
-                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), color::GetStrongTextU32(), opt.name.c_str());
 
                     std::vector<char> textBuffer((std::max)(2, opt.textMaxLength + 1), '\0');
                     strncpy_s(textBuffer.data(), textBuffer.size(), opt.textValue.c_str(), _TRUNCATE);
@@ -3034,9 +4045,9 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     const ImVec2 inputPos(optX + optW - sliderW, optY + (optLineH - inputHeight) * 0.5f);
                     const ImVec2 inputMin = inputPos;
                     const ImVec2 inputMax(inputPos.x + sliderW, inputPos.y + inputHeight);
-                    dl->AddRectFilled(inputMin, inputMax, IM_COL32(214, 219, 228, 255), 4.0f);
-                    dl->AddRectFilled(ImVec2(inputMin.x + 1.0f, inputMin.y + 1.0f), ImVec2(inputMax.x - 1.0f, inputMax.y - 1.0f), IM_COL32(236, 240, 246, 255), 4.0f);
-                    dl->AddRect(inputMin, inputMax, IM_COL32(145, 152, 164, 255), 4.0f, 0, 1.0f);
+                    dl->AddRectFilled(inputMin, inputMax, color::GetFieldBgU32(), 4.0f);
+                    dl->AddRectFilled(ImVec2(inputMin.x + 1.0f, inputMin.y + 1.0f), ImVec2(inputMax.x - 1.0f, inputMax.y - 1.0f), color::GetGlassHighlightU32(0.28f), 4.0f);
+                    dl->AddRect(inputMin, inputMax, color::GetBorderU32(), 4.0f, 0, 1.0f);
 
                     ImGui::SetCursorScreenPos(inputPos);
                     ImGui::PushItemWidth(sliderW);
@@ -3044,8 +4055,8 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
                     ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
                     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
-                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.08f, 0.09f, 0.10f, 1.0f));
-                    ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, ImVec4(0.55f, 0.67f, 0.90f, 0.35f));
+                    ImGui::PushStyleColor(ImGuiCol_Text, color::GetStrongTextVec4());
+                    ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, color::GetLinkVec4(0.35f));
                     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
                     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(inputPadX, inputPadY));
                     const ImGuiInputTextFlags inputFlags = useTargetAutocomplete ? ImGuiInputTextFlags_CallbackCompletion : ImGuiInputTextFlags_None;
@@ -3063,7 +4074,7 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     break;
                 }
                 case OptionType::Button: {
-                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), IM_COL32(40, 40, 40, 255), opt.name.c_str());
+                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), color::GetStrongTextU32(), opt.name.c_str());
                     ImGui::SetCursorScreenPos(ImVec2(optX + optW - sliderW, optY));
                     if (ImGui::Button(opt.buttonLabel.c_str(), ImVec2(sliderW, optLineH - 6.0f))) {
                         opt.buttonPressed = true;
@@ -3113,30 +4124,92 @@ void Screen::RenderSettingsTab() {
     const float pageX = origin.x + 4.0f;
     const float basePageY = origin.y + 4.0f;
     const float pageWidth = contentW - 12.0f;
+    const bool contrastTheme = m_InterfaceTheme == InterfaceTheme::CheckmarkContrast;
+    const bool automaticTheme = m_InterfaceTheme == InterfaceTheme::Automatic;
+    const bool customTheme = m_InterfaceTheme == InterfaceTheme::Custom;
+    const float themeOptionHeight = 78.0f;
+    const float themeOptionRowGap = 12.0f;
+    const float themeOptionsBlockHeight = themeOptionHeight * 2.0f + themeOptionRowGap;
+    const float compactColorFieldHeight = 28.0f;
+    const float compactColorFieldGap = 10.0f;
     const float updatesHeight = 104.0f;
     const float buttonHeight = 52.0f;
     const float cardGap = 14.0f;
     const float cardRounding = 18.0f;
     const float cardPadding = 20.0f;
 
-    const ImU32 panelColor = IM_COL32(244, 247, 252, 232);
-    const ImU32 panelInnerColor = IM_COL32(250, 252, 255, 214);
-    const ImU32 panelBorderColor = IM_COL32(194, 202, 214, 255);
-    const ImU32 panelShadowColor = IM_COL32(160, 172, 189, 40);
-    const ImU32 titleColor = IM_COL32(26, 31, 41, 255);
-    const ImU32 bodyColor = IM_COL32(78, 86, 97, 255);
-    const ImU32 linkColor = IM_COL32(58, 123, 255, 255);
-    const ImU32 linkHoverColor = IM_COL32(35, 98, 228, 255);
-    const ImU32 dividerColor = IM_COL32(202, 210, 221, 255);
+    const ImU32 panelColor = color::GetPanelU32(0.94f);
+    const ImU32 panelInnerColor = color::GetGlassHighlightU32(0.16f);
+    const ImU32 panelBorderColor = color::GetBorderU32(0.92f);
+    const ImU32 panelShadowColor = color::GetGlassShadowU32(0.18f);
+    const ImU32 titleColor = color::GetStrongTextU32();
+    const ImU32 bodyColor = color::GetSecondaryTextU32();
+    const ImU32 linkColor = color::GetLinkU32();
+    const ImU32 linkHoverColor = color::GetLinkHoverU32();
+    const ImU32 dividerColor = color::GetBorderU32(0.78f);
+    const bool darkBackgroundTheme = ColorLuminance(color::GetBackgroundVec4()) < 0.5f;
 
     ImFont* titleFont = m_FontBoldMed ? m_FontBoldMed : (m_FontBold ? m_FontBold : ImGui::GetFont());
     const float titleFontSize = titleFont ? titleFont->FontSize : ImGui::GetFontSize();
     ImFont* bodyFont = m_FontBody ? m_FontBody : ImGui::GetFont();
     ImFont* accentFont = m_FontBold ? m_FontBold : bodyFont;
     const float bodyFontSize = bodyFont ? bodyFont->FontSize : ImGui::GetFontSize();
+    const float themeChipHeight = 26.0f;
+    const float themeChipGap = 8.0f;
+    const ImVec2 themePreviewSize(214.0f, 122.0f);
+    const float themePreviewGap = 16.0f;
     const float textWidth = pageWidth - cardPadding * 2.0f;
     const float infoHeaderHeight = 66.0f;
     const float infoBottomPadding = 24.0f;
+    const float themeLeftColumnWidth = (std::max)(160.0f, pageWidth - cardPadding * 2.0f - themePreviewSize.x - themePreviewGap);
+
+    auto measureChipBlockHeight = [&](const std::vector<const char*>& labels) -> float {
+        if (labels.empty()) {
+            return 0.0f;
+        }
+
+        float cursorX = 0.0f;
+        float usedHeight = themeChipHeight;
+        for (const char* label : labels) {
+            if (!label) {
+                continue;
+            }
+
+            const float chipWidth = (std::max)(62.0f, CalcTextSizeWithFont(bodyFont, label, bodyFontSize).x + 22.0f);
+            if (cursorX > 0.0f && cursorX + chipWidth > themeLeftColumnWidth) {
+                cursorX = 0.0f;
+                usedHeight += themeChipHeight + themeChipGap;
+            }
+
+            cursorX += chipWidth + themeChipGap;
+        }
+
+        return usedHeight;
+    };
+
+    std::vector<const char*> automaticPresetLabels;
+    automaticPresetLabels.reserve((sizeof(kAutomaticThemePresets) / sizeof(kAutomaticThemePresets[0])) + 1);
+    for (const auto& preset : kAutomaticThemePresets) {
+        automaticPresetLabels.push_back(preset.label);
+    }
+    automaticPresetLabels.push_back("Import Palette");
+    automaticPresetLabels.push_back("Reset");
+
+    std::vector<const char*> customPresetLabels;
+    customPresetLabels.reserve((sizeof(kCustomThemePresets) / sizeof(kCustomThemePresets[0])) + 1);
+    for (const auto& preset : kCustomThemePresets) {
+        customPresetLabels.push_back(preset.label);
+    }
+    customPresetLabels.push_back("Reset");
+
+    const float automaticChipBlockHeight = measureChipBlockHeight(automaticPresetLabels);
+    const float customChipBlockHeight = measureChipBlockHeight(customPresetLabels);
+    const float automaticFieldsHeight = compactColorFieldHeight * 4.0f + compactColorFieldGap * 3.0f;
+    const float customFieldsHeight = compactColorFieldHeight * 3.0f + compactColorFieldGap * 2.0f;
+    const float automaticThemeControlsHeight = 16.0f + (std::max)(themePreviewSize.y, 108.0f + automaticChipBlockHeight + 12.0f + automaticFieldsHeight);
+    const float customThemeControlsHeight = 16.0f + (std::max)(themePreviewSize.y, 108.0f + customChipBlockHeight + 12.0f + customFieldsHeight);
+    const float themeControlsHeight = automaticTheme ? automaticThemeControlsHeight : (customTheme ? customThemeControlsHeight : 0.0f);
+    const float themeCardHeight = 92.0f + themeOptionsBlockHeight + (themeControlsHeight > 0.0f ? (22.0f + themeControlsHeight) : 18.0f);
 
     const std::vector<std::vector<SettingsTextSegment>> infoLines = {
         {
@@ -3181,7 +4254,8 @@ void Screen::RenderSettingsTab() {
         }
     }
 
-    const float totalContentHeight = infoHeaderHeight + measuredInfoTextHeight + infoBottomPadding + cardGap + updatesHeight + cardGap + buttonHeight + 8.0f;
+    const float infoHeight = infoHeaderHeight + measuredInfoTextHeight + infoBottomPadding;
+    const float totalContentHeight = infoHeight + cardGap + themeCardHeight + cardGap + updatesHeight + cardGap + buttonHeight + 8.0f;
     const float visibleHeight = (std::max)(120.0f, (m_Height - 40.0f));
     const float maxScroll = (std::max)(0.0f, totalContentHeight - visibleHeight);
     static float s_SettingsScrollOffset = 0.0f;
@@ -3197,10 +4271,11 @@ void Screen::RenderSettingsTab() {
     drawList->PushClipRect(scrollViewMin, scrollViewMax, true);
     const float pageY = basePageY - s_SettingsScrollOffset;
 
-    const float infoHeight = infoHeaderHeight + measuredInfoTextHeight + infoBottomPadding;
     const ImVec2 infoMin(pageX, pageY);
     const ImVec2 infoMax(pageX + pageWidth, pageY + infoHeight);
-    const ImVec2 updatesMin(pageX, infoMax.y + cardGap);
+    const ImVec2 themeMin(pageX, infoMax.y + cardGap);
+    const ImVec2 themeMax(pageX + pageWidth, themeMin.y + themeCardHeight);
+    const ImVec2 updatesMin(pageX, themeMax.y + cardGap);
     const ImVec2 updatesMax(pageX + pageWidth, updatesMin.y + updatesHeight);
     const ImVec2 closeMin(pageX, updatesMax.y + cardGap);
     const ImVec2 closeMax(pageX + pageWidth, closeMin.y + buttonHeight);
@@ -3215,13 +4290,18 @@ void Screen::RenderSettingsTab() {
     drawList->AddRectFilled(ImVec2(updatesMin.x + 1.0f, updatesMin.y + 1.0f), ImVec2(updatesMax.x - 1.0f, updatesMax.y - 1.0f), panelInnerColor, cardRounding - 1.0f);
     drawList->AddRect(updatesMin, updatesMax, panelBorderColor, cardRounding, 0, 1.0f);
 
+    drawList->AddRectFilled(ImVec2(themeMin.x, themeMin.y + 6.0f), ImVec2(themeMax.x, themeMax.y + 6.0f), panelShadowColor, cardRounding);
+    drawList->AddRectFilled(themeMin, themeMax, panelColor, cardRounding);
+    drawList->AddRectFilled(ImVec2(themeMin.x + 1.0f, themeMin.y + 1.0f), ImVec2(themeMax.x - 1.0f, themeMax.y - 1.0f), panelInnerColor, cardRounding - 1.0f);
+    drawList->AddRect(themeMin, themeMax, panelBorderColor, cardRounding, 0, 1.0f);
+
     const float titleY = infoMin.y + 18.0f;
     float titleX = infoMin.x + cardPadding;
     const float lampSize = 24.0f;
     if (m_InfoLampTexture) {
         const ImVec2 lampMin(titleX, titleY - 1.0f);
         const ImVec2 lampMax(lampMin.x + lampSize, lampMin.y + lampSize);
-        drawList->AddImageRounded(reinterpret_cast<ImTextureID>(m_InfoLampTexture), lampMin, lampMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), IM_COL32_WHITE, 7.0f, ImDrawFlags_RoundCornersAll);
+        drawList->AddImageRounded(reinterpret_cast<ImTextureID>(m_InfoLampTexture), lampMin, lampMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), color::GetIconTintU32(), 7.0f, ImDrawFlags_RoundCornersAll);
         titleX += lampSize + 10.0f;
     }
 
@@ -3248,6 +4328,378 @@ void Screen::RenderSettingsTab() {
         }
     }
 
+    const float themeTitleY = themeMin.y + 18.0f;
+    float themeTitleX = themeMin.x + cardPadding;
+    if (m_InterfaceThemeTexture) {
+        const float themeIconSize = 24.0f;
+        const ImVec2 iconMin(themeTitleX, themeTitleY - 1.0f);
+        const ImVec2 iconMax(iconMin.x + themeIconSize, iconMin.y + themeIconSize);
+        drawList->AddImageRounded(reinterpret_cast<ImTextureID>(m_InterfaceThemeTexture), iconMin, iconMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), color::GetIconTintU32(), 7.0f, ImDrawFlags_RoundCornersAll);
+        themeTitleX += themeIconSize + 10.0f;
+    }
+
+    drawList->AddText(titleFont, titleFontSize, ImVec2(themeTitleX, themeTitleY), titleColor, "Interface Theme");
+    drawList->AddLine(ImVec2(themeMin.x + cardPadding, themeMin.y + 52.0f), ImVec2(themeMax.x - cardPadding, themeMin.y + 52.0f), dividerColor, 1.0f);
+    drawList->AddText(
+        bodyFont,
+        bodyFontSize,
+        ImVec2(themeMin.x + cardPadding, themeMin.y + 66.0f),
+        bodyColor,
+        "Choose how the loader feels. Checkmark Contrast flips the neutral palette into a darker, sharper look without changing the layout.",
+        nullptr,
+        pageWidth - cardPadding * 2.0f);
+
+    const float themeOptionGap = 12.0f;
+    const float themeOptionY = themeMin.y + 104.0f;
+    const ImVec2 themeOptionSize((pageWidth - cardPadding * 2.0f - themeOptionGap) * 0.5f, themeOptionHeight);
+    const ImVec2 defaultThemePos(themeMin.x + cardPadding, themeOptionY);
+    const ImVec2 contrastThemePos(defaultThemePos.x + themeOptionSize.x + themeOptionGap, themeOptionY);
+    const ImVec2 automaticThemePos(themeMin.x + cardPadding, themeOptionY + themeOptionHeight + themeOptionRowGap);
+    const ImVec2 customThemePos(automaticThemePos.x + themeOptionSize.x + themeOptionGap, automaticThemePos.y);
+
+    auto applySelectedTheme = [&](InterfaceTheme nextTheme) {
+        if (m_InterfaceTheme != nextTheme) {
+            m_InterfaceTheme = nextTheme;
+            ApplyInterfaceTheme();
+        }
+    };
+
+    auto resetAutomaticTheme = [&]() {
+        for (int index = 0; index < 4; ++index) {
+            m_AutomaticPalette[index] = kDefaultAutomaticPalette[index];
+        }
+        m_ImportedPaletteSource.clear();
+        ApplyInterfaceTheme();
+    };
+
+    auto applyAutomaticPreset = [&](const AutomaticThemePreset& preset) {
+        for (int index = 0; index < 4; ++index) {
+            m_AutomaticPalette[index] = preset.palette[index];
+        }
+        m_ImportedPaletteSource.clear();
+        ApplyInterfaceTheme();
+    };
+
+    auto resetCustomTheme = [&]() {
+        m_CustomTextColor = kDefaultCustomTextColor;
+        m_CustomBackgroundColor = kDefaultCustomBackgroundColor;
+        for (int index = 0; index < 3; ++index) {
+            m_CustomIconColorBytes[index] = kDefaultCustomIconColorBytes[index];
+        }
+        ApplyInterfaceTheme();
+    };
+
+    auto applyCustomPreset = [&](const CustomThemePreset& preset) {
+        m_CustomTextColor = preset.textColor;
+        m_CustomBackgroundColor = preset.backgroundColor;
+        for (int index = 0; index < 3; ++index) {
+            m_CustomIconColorBytes[index] = preset.iconColorBytes[index];
+        }
+        ApplyInterfaceTheme();
+    };
+
+    auto themeChipWidth = [&](const char* label) -> float {
+        return (std::max)(62.0f, CalcTextSizeWithFont(bodyFont, label, bodyFontSize).x + 22.0f);
+    };
+
+    auto placeThemeChip = [&](float& chipX, float& chipY, float chipWidth, float startX) -> ImVec2 {
+        if (chipX > startX && chipX + chipWidth > startX + themeLeftColumnWidth) {
+            chipX = startX;
+            chipY += themeChipHeight + themeChipGap;
+        }
+
+        const ImVec2 chipPos(chipX, chipY);
+        chipX += chipWidth + themeChipGap;
+        return chipPos;
+    };
+
+    if (DrawThemeOptionCard(
+            drawList,
+            "##settings_theme_default",
+            defaultThemePos,
+            themeOptionSize,
+            "Default",
+            "Keep the current bright black-and-white interface.",
+            m_InterfaceTheme == InterfaceTheme::Default,
+            accentFont,
+            bodyFontSize,
+            bodyFont,
+            bodyFontSize - 1.0f)) {
+        applySelectedTheme(InterfaceTheme::Default);
+    }
+
+    if (DrawThemeOptionCard(
+            drawList,
+            "##settings_theme_contrast",
+            contrastThemePos,
+            themeOptionSize,
+            "Checkmark Contrast",
+            "Invert the neutral palette so light surfaces go dark and dark surfaces go light.",
+            contrastTheme,
+            accentFont,
+            bodyFontSize,
+            bodyFont,
+            bodyFontSize - 1.0f)) {
+        applySelectedTheme(InterfaceTheme::CheckmarkContrast);
+    }
+
+    if (DrawThemeOptionCard(
+            drawList,
+            "##settings_theme_automatic",
+            automaticThemePos,
+            themeOptionSize,
+            "Automatic",
+            "Use a palette and let the loader build the theme for you.",
+            automaticTheme,
+            accentFont,
+            bodyFontSize,
+            bodyFont,
+            bodyFontSize - 1.0f)) {
+        applySelectedTheme(InterfaceTheme::Automatic);
+    }
+
+    if (DrawThemeOptionCard(
+            drawList,
+            "##settings_theme_custom",
+            customThemePos,
+            themeOptionSize,
+            "Custom",
+            "Pick the text, background and image colors yourself.",
+            customTheme,
+            accentFont,
+            bodyFontSize,
+            bodyFont,
+            bodyFontSize - 1.0f)) {
+        applySelectedTheme(InterfaceTheme::Custom);
+    }
+
+    const float themeControlsY = automaticThemePos.y + themeOptionHeight + 22.0f;
+    if (automaticTheme || customTheme) {
+        drawList->AddLine(
+            ImVec2(themeMin.x + cardPadding, themeControlsY - 12.0f),
+            ImVec2(themeMax.x - cardPadding, themeControlsY - 12.0f),
+            dividerColor,
+            1.0f);
+    }
+
+    if (automaticTheme) {
+        const ImVec2 previewPos(themeMax.x - cardPadding - themePreviewSize.x, themeControlsY + 16.0f);
+        const float descriptionWidth = themeLeftColumnWidth;
+        const float chipStartX = themeMin.x + cardPadding;
+        float chipX = chipStartX;
+        float chipY = themeControlsY + 68.0f;
+        const ImVec2 compactColorFieldSize(124.0f, compactColorFieldHeight);
+        const float controlX = previewPos.x - 16.0f - compactColorFieldSize.x;
+
+        drawList->AddText(accentFont, bodyFontSize, ImVec2(themeMin.x + cardPadding, themeControlsY), titleColor, "Automatic Palette");
+        drawList->AddText(
+            bodyFont,
+            bodyFontSize - 1.0f,
+            ImVec2(themeMin.x + cardPadding, themeControlsY + 24.0f),
+            bodyColor,
+            "Choose up to four colors and the loader will derive contrast, panels, links and icon tint automatically.",
+            nullptr,
+            descriptionWidth);
+
+        DrawThemePreviewPanel(drawList, previewPos, themePreviewSize, accentFont, bodyFont, bodyFontSize, bodyFontSize);
+
+        for (size_t presetIndex = 0; presetIndex < sizeof(kAutomaticThemePresets) / sizeof(kAutomaticThemePresets[0]); ++presetIndex) {
+            const AutomaticThemePreset& preset = kAutomaticThemePresets[presetIndex];
+            const float chipWidth = themeChipWidth(preset.label);
+            const ImVec2 chipPos = placeThemeChip(chipX, chipY, chipWidth, chipStartX);
+            char chipId[64];
+            snprintf(chipId, sizeof(chipId), "##settings_automatic_preset_%zu", presetIndex);
+            if (DrawThemeActionChip(
+                    drawList,
+                    chipId,
+                    chipPos,
+                    ImVec2(chipWidth, themeChipHeight),
+                    preset.label,
+                    MatchesAutomaticPreset(m_AutomaticPalette, preset),
+                    bodyFont,
+                    bodyFontSize)) {
+                applyAutomaticPreset(preset);
+            }
+        }
+
+        bool automaticIsDefault = true;
+        for (int index = 0; index < 4; ++index) {
+            if (!NearlyEqualColor(m_AutomaticPalette[index], kDefaultAutomaticPalette[index])) {
+                automaticIsDefault = false;
+                break;
+            }
+        }
+        const float importChipWidth = themeChipWidth("Import Palette");
+        const ImVec2 importChipPos = placeThemeChip(chipX, chipY, importChipWidth, chipStartX);
+        if (DrawThemeActionChip(
+                drawList,
+                "##settings_automatic_import",
+                importChipPos,
+                ImVec2(importChipWidth, themeChipHeight),
+                "Import Palette",
+                !m_ImportedPaletteSource.empty(),
+                bodyFont,
+                bodyFontSize)) {
+            ImportAutomaticPaletteFromImage();
+        }
+
+        const float resetChipWidth = themeChipWidth("Reset");
+        const ImVec2 resetChipPos = placeThemeChip(chipX, chipY, resetChipWidth, chipStartX);
+        if (DrawThemeActionChip(
+                drawList,
+                "##settings_automatic_reset",
+                resetChipPos,
+                ImVec2(resetChipWidth, themeChipHeight),
+                "Reset",
+                automaticIsDefault,
+                bodyFont,
+                bodyFontSize)) {
+            resetAutomaticTheme();
+        }
+
+        const float automaticFieldsStartY = chipY + themeChipHeight + 12.0f;
+        if (!m_ImportedPaletteSource.empty()) {
+            const std::string importedSourceLabel = std::string("Source: ") + m_ImportedPaletteSource.filename().string();
+            drawList->AddText(
+                bodyFont,
+                bodyFontSize - 1.0f,
+                ImVec2(themeMin.x + cardPadding, automaticFieldsStartY - 18.0f),
+                color::GetMutedTextU32(),
+                importedSourceLabel.c_str(),
+                nullptr,
+                themeLeftColumnWidth);
+        }
+        for (int index = 0; index < 4; ++index) {
+            const float controlY = automaticFieldsStartY + index * (compactColorFieldHeight + compactColorFieldGap);
+            char labelBuffer[32];
+            snprintf(labelBuffer, sizeof(labelBuffer), "Palette %d", index + 1);
+            drawList->AddText(bodyFont, bodyFontSize, ImVec2(themeMin.x + cardPadding, controlY + 4.0f), color::GetStrongTextU32(), labelBuffer);
+
+            char colorId[48];
+            snprintf(colorId, sizeof(colorId), "##settings_theme_palette_%d", index);
+            if (DrawCompactThemeColorField(
+                    drawList,
+                    colorId,
+                    ImVec2(controlX, controlY),
+                    compactColorFieldSize,
+                    m_AutomaticPalette[index],
+                    bodyFont,
+                    bodyFontSize)) {
+                if (automaticTheme) {
+                    ApplyInterfaceTheme();
+                }
+            }
+        }
+    } else if (customTheme) {
+        const ImVec2 previewPos(themeMax.x - cardPadding - themePreviewSize.x, themeControlsY + 16.0f);
+        const float descriptionWidth = themeLeftColumnWidth;
+        const float chipStartX = themeMin.x + cardPadding;
+        float chipX = chipStartX;
+        float chipY = themeControlsY + 68.0f;
+        const ImVec2 compactColorFieldSize(124.0f, compactColorFieldHeight);
+        const float customControlX = previewPos.x - 16.0f - compactColorFieldSize.x;
+
+        drawList->AddText(accentFont, bodyFontSize, ImVec2(themeMin.x + cardPadding, themeControlsY), titleColor, "Custom Controls");
+        drawList->AddText(
+            bodyFont,
+            bodyFontSize - 1.0f,
+            ImVec2(themeMin.x + cardPadding, themeControlsY + 24.0f),
+            bodyColor,
+            "Drive the loader manually. Text and background use direct colors, and the image tint is controlled through RGB bytes.",
+            nullptr,
+            descriptionWidth);
+
+        DrawThemePreviewPanel(drawList, previewPos, themePreviewSize, accentFont, bodyFont, bodyFontSize, bodyFontSize);
+
+        for (size_t presetIndex = 0; presetIndex < sizeof(kCustomThemePresets) / sizeof(kCustomThemePresets[0]); ++presetIndex) {
+            const CustomThemePreset& preset = kCustomThemePresets[presetIndex];
+            const float chipWidth = themeChipWidth(preset.label);
+            const ImVec2 chipPos = placeThemeChip(chipX, chipY, chipWidth, chipStartX);
+            char chipId[64];
+            snprintf(chipId, sizeof(chipId), "##settings_custom_preset_%zu", presetIndex);
+            if (DrawThemeActionChip(
+                    drawList,
+                    chipId,
+                    chipPos,
+                    ImVec2(chipWidth, themeChipHeight),
+                    preset.label,
+                    MatchesCustomPreset(m_CustomTextColor, m_CustomBackgroundColor, m_CustomIconColorBytes, preset),
+                    bodyFont,
+                    bodyFontSize)) {
+                applyCustomPreset(preset);
+            }
+        }
+
+        const bool customIsDefault =
+            NearlyEqualColor(m_CustomTextColor, kDefaultCustomTextColor) &&
+            NearlyEqualColor(m_CustomBackgroundColor, kDefaultCustomBackgroundColor) &&
+            m_CustomIconColorBytes[0] == kDefaultCustomIconColorBytes[0] &&
+            m_CustomIconColorBytes[1] == kDefaultCustomIconColorBytes[1] &&
+            m_CustomIconColorBytes[2] == kDefaultCustomIconColorBytes[2];
+        const float customResetChipWidth = themeChipWidth("Reset");
+        const ImVec2 customResetChipPos = placeThemeChip(chipX, chipY, customResetChipWidth, chipStartX);
+        if (DrawThemeActionChip(
+                drawList,
+                "##settings_custom_reset",
+                customResetChipPos,
+                ImVec2(customResetChipWidth, themeChipHeight),
+                "Reset",
+                customIsDefault,
+                bodyFont,
+                bodyFontSize)) {
+            resetCustomTheme();
+        }
+
+        const float customStartY = chipY + themeChipHeight + 12.0f;
+
+        drawList->AddText(bodyFont, bodyFontSize, ImVec2(themeMin.x + cardPadding, customStartY + 4.0f), color::GetStrongTextU32(), "Text Color");
+        if (DrawCompactThemeColorField(
+                drawList,
+                "##settings_custom_text_color",
+                ImVec2(customControlX, customStartY),
+                compactColorFieldSize,
+                m_CustomTextColor,
+                bodyFont,
+                bodyFontSize)) {
+            ApplyInterfaceTheme();
+        }
+
+        const float backgroundColorY = customStartY + compactColorFieldHeight + compactColorFieldGap;
+        drawList->AddText(bodyFont, bodyFontSize, ImVec2(themeMin.x + cardPadding, backgroundColorY + 4.0f), color::GetStrongTextU32(), "Background Color");
+        if (DrawCompactThemeColorField(
+                drawList,
+                "##settings_custom_background_color",
+                ImVec2(customControlX, backgroundColorY),
+                compactColorFieldSize,
+                m_CustomBackgroundColor,
+                bodyFont,
+                bodyFontSize)) {
+            ApplyInterfaceTheme();
+        }
+
+        const float imageColorY = backgroundColorY + compactColorFieldHeight + compactColorFieldGap;
+        drawList->AddText(bodyFont, bodyFontSize, ImVec2(themeMin.x + cardPadding, imageColorY + 4.0f), color::GetStrongTextU32(), "Image Color (bytes)");
+
+        ImVec4 imageColorValue(
+            m_CustomIconColorBytes[0] / 255.0f,
+            m_CustomIconColorBytes[1] / 255.0f,
+            m_CustomIconColorBytes[2] / 255.0f,
+            1.0f);
+        if (DrawCompactThemeColorField(
+                drawList,
+                "##settings_custom_icon_color",
+                ImVec2(customControlX, imageColorY),
+                compactColorFieldSize,
+                imageColorValue,
+                bodyFont,
+                bodyFontSize)) {
+            m_CustomIconColorBytes[0] = (std::clamp)(static_cast<int>(imageColorValue.x * 255.0f + 0.5f), 0, 255);
+            m_CustomIconColorBytes[1] = (std::clamp)(static_cast<int>(imageColorValue.y * 255.0f + 0.5f), 0, 255);
+            m_CustomIconColorBytes[2] = (std::clamp)(static_cast<int>(imageColorValue.z * 255.0f + 0.5f), 0, 255);
+            ApplyInterfaceTheme();
+        }
+    }
+
     ReleaseCheckStatus releaseStatus;
     {
         std::lock_guard<std::mutex> lock(g_ReleaseCheckMutex);
@@ -3258,16 +4710,16 @@ void Screen::RenderSettingsTab() {
     ImU32 releaseAccentColor = linkColor;
     switch (releaseStatus.state) {
     case ReleaseCheckState::UpToDate:
-        releaseAccentColor = IM_COL32(66, 157, 93, 255);
+        releaseAccentColor = color::GetSuccessU32();
         break;
     case ReleaseCheckState::UpdateAvailable:
-        releaseAccentColor = IM_COL32(212, 135, 46, 255);
+        releaseAccentColor = color::GetWarningU32();
         break;
     case ReleaseCheckState::Checking:
-        releaseAccentColor = IM_COL32(64, 118, 220, 255);
+        releaseAccentColor = color::GetLinkU32();
         break;
     case ReleaseCheckState::Error:
-        releaseAccentColor = IM_COL32(196, 79, 79, 255);
+        releaseAccentColor = color::GetDangerU32();
         break;
     case ReleaseCheckState::LocalBuild:
     case ReleaseCheckState::Idle:
@@ -3276,7 +4728,16 @@ void Screen::RenderSettingsTab() {
         break;
     }
 
-    drawList->AddText(titleFont, titleFontSize, ImVec2(updatesMin.x + cardPadding, updatesMin.y + 16.0f), titleColor, "Updates");
+    const float updatesTitleY = updatesMin.y + 16.0f;
+    float updatesTitleX = updatesMin.x + cardPadding;
+    if (m_UpdatesTexture) {
+        const float updatesIconSize = 24.0f;
+        const ImVec2 iconMin(updatesTitleX, updatesTitleY - 1.0f);
+        const ImVec2 iconMax(iconMin.x + updatesIconSize, iconMin.y + updatesIconSize);
+        drawList->AddImageRounded(reinterpret_cast<ImTextureID>(m_UpdatesTexture), iconMin, iconMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), color::GetIconTintU32(), 7.0f, ImDrawFlags_RoundCornersAll);
+        updatesTitleX += updatesIconSize + 10.0f;
+    }
+    drawList->AddText(titleFont, titleFontSize, ImVec2(updatesTitleX, updatesTitleY), titleColor, "Updates");
 
     std::vector<SettingsTextSegment> currentBuildLine = {
         { "Current build: " },
@@ -3360,11 +4821,11 @@ void Screen::RenderSettingsTab() {
             updateButtonPos,
             ImVec2(updateButtonWidth, updateButtonHeight),
             14.0f,
-            IM_COL32(43, 115, 232, 255),
-            IM_COL32(34, 100, 213, 255),
-            IM_COL32(26, 84, 190, 255),
-            IM_COL32(27, 86, 178, 255),
-            IM_COL32(255, 255, 255, 255),
+            color::GetLinkU32(),
+            color::GetLinkHoverU32(),
+            color::GetLinkU32(0.90f),
+            color::GetLinkU32(0.82f),
+            SolidTextColorForBackground(color::GetLinkVec4()),
             accentFont,
             bodyFontSize,
             !isCheckingUpdates)) {
@@ -3378,11 +4839,11 @@ void Screen::RenderSettingsTab() {
             closeMin,
             ImVec2(pageWidth, buttonHeight),
             16.0f,
-            IM_COL32(24, 29, 39, 255),
-            IM_COL32(32, 39, 51, 255),
-            IM_COL32(42, 49, 61, 255),
-            IM_COL32(18, 22, 30, 255),
-            IM_COL32(247, 249, 252, 255),
+            darkBackgroundTheme ? color::GetGlassHighlightU32(0.90f) : IM_COL32(24, 29, 39, 255),
+            darkBackgroundTheme ? color::GetGlassHighlightU32() : IM_COL32(32, 39, 51, 255),
+            darkBackgroundTheme ? color::GetStrongTextU32() : IM_COL32(42, 49, 61, 255),
+            darkBackgroundTheme ? color::GetBorderU32() : IM_COL32(18, 22, 30, 255),
+            darkBackgroundTheme ? SolidTextColorForBackground(color::GetGlassHighlightVec4()) : IM_COL32(247, 249, 252, 255),
             accentFont,
             bodyFontSize,
             true)) {
@@ -3416,17 +4877,17 @@ void Screen::RenderClosing() {
         const float charsPerSec = 18.0f;
         const float totalDuration = textStart + (msgLen / charsPerSec) + 1.0f;
 
-        dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(255, 255, 255, 255));
+        dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), color::GetBackgroundU32());
 
         if (t < squeezeDuration) {
             float progress = t / squeezeDuration;
             float ease = 1.0f - (1.0f - progress) * (1.0f - progress);
             float barW = (m_Width * 0.5f) * ease;
 
-            dl->AddRectFilled(wp, ImVec2(wp.x + barW, wp.y + m_Height), IM_COL32(241, 244, 248, 255));
-            dl->AddRectFilled(ImVec2(wp.x + m_Width - barW, wp.y), ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(241, 244, 248, 255));
+            dl->AddRectFilled(wp, ImVec2(wp.x + barW, wp.y + m_Height), color::GetPanelU32());
+            dl->AddRectFilled(ImVec2(wp.x + m_Width - barW, wp.y), ImVec2(wp.x + m_Width, wp.y + m_Height), color::GetPanelU32());
         } else {
-            dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(255, 255, 255, 255));
+            dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), color::GetBackgroundU32());
 
             if (t >= textStart) {
                 float textT = t - textStart;
@@ -3443,7 +4904,7 @@ void Screen::RenderClosing() {
                 float tx = wp.x + (m_Width - textSize.x) * 0.5f;
                 float ty = wp.y + (m_Height - textSize.y) * 0.5f;
 
-                dl->AddText(font, fontSize, ImVec2(tx, ty), IM_COL32(20, 24, 32, 255), buf);
+                dl->AddText(font, fontSize, ImVec2(tx, ty), color::GetStrongTextU32(), buf);
             }
         }
 
@@ -3472,7 +4933,7 @@ void Screen::RenderMainInterfaceLayer(const char* windowName, const ImVec2& wind
         ImDrawList* dl = ImGui::GetWindowDrawList();
         ImVec2 wp = ImGui::GetWindowPos();
 
-        dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), IM_COL32(255, 255, 255, 255));
+        dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), color::GetBackgroundU32());
         DrawTopographicBackground(dl, wp, m_Width, m_Height, 0.0f);
 
         const float sidebarW = 52.0f;
@@ -3486,7 +4947,7 @@ void Screen::RenderMainInterfaceLayer(const char* windowName, const ImVec2& wind
         const float lineMid = wp.y + m_Height * 0.5f;
         const float lineTop = lineMid - lineH * 0.5f;
         const float lineBottom = lineMid + lineH * 0.5f;
-        dl->AddLine(ImVec2(lineX, lineTop), ImVec2(lineX, lineBottom), IM_COL32(200, 200, 200, 255), 1.0f);
+        dl->AddLine(ImVec2(lineX, lineTop), ImVec2(lineX, lineBottom), color::GetBorderU32(0.74f), 1.0f);
 
         ID3D11ShaderResourceView* icons[4] = { m_IconCombat, m_IconMovement, m_IconVisuals, m_IconSettings };
 
@@ -3512,7 +4973,7 @@ void Screen::RenderMainInterfaceLayer(const char* windowName, const ImVec2& wind
                     ImGui::ColorConvertHSVtoRGB(hue, 0.85f, 1.0f, rgb.x, rgb.y, rgb.z);
                     tintCol = IM_COL32((int)(rgb.x * 255), (int)(rgb.y * 255), (int)(rgb.z * 255), 255);
                 } else {
-                    tintCol = IM_COL32(0, 0, 0, 255);
+                    tintCol = color::GetIconTintU32();
                 }
                 dl->AddImage((ImTextureID)icons[i], iconMin, iconMax, ImVec2(0, 0), ImVec2(1, 1), tintCol);
             }
@@ -3537,7 +4998,7 @@ void Screen::RenderMainInterfaceLayer(const char* windowName, const ImVec2& wind
             dl->AddRectFilled(
                 wp,
                 ImVec2(wp.x + m_Width, wp.y + m_Height),
-                IM_COL32(255, 255, 255, static_cast<int>(255.0f * Clamp01(overlayAlpha))));
+                color::GetBackgroundU32(Clamp01(overlayAlpha)));
         }
 
         ImGui::End();
@@ -3579,7 +5040,7 @@ void Screen::RenderTransitionToInterface() {
             foreground->AddRectFilled(
                 ImVec2(0.0f, 0.0f),
                 ImVec2(m_Width, m_Height),
-                IM_COL32(255, 255, 255, static_cast<int>(255.0f * veilAlpha)));
+                color::GetBackgroundU32(veilAlpha));
         }
     }
 
