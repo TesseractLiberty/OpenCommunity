@@ -18,6 +18,7 @@
 #define STB_IMAGE_STATIC
 #include "../../../deps/imgui/stb_image.h"
 #include "../../../shared/common/RegisterModules.h"
+#include <array>
 #include <algorithm>
 #include <cctype>
 #include <cfloat>
@@ -79,6 +80,11 @@ namespace
         bool downloadQueued = false;
         bool downloadFailed = false;
     };
+
+    constexpr float kInjectionTypewriterCharsPerSecond = 30.0f;
+    constexpr float kInjectionCursorBlinkSpeed = 6.0f;
+    constexpr char kInjectingHeadline[] = "Injecting";
+    constexpr char kInjectedHeadline[] = "Successful, Injected!";
 
     std::mutex g_PlayerHeadCacheMutex;
     std::unordered_map<std::string, PlayerHeadTextureEntry> g_PlayerHeadCache;
@@ -1202,7 +1208,7 @@ namespace
         return value;
     }
 
-    void DrawTopographicBackground(ImDrawList* drawList, const ImVec2& origin, float width, float height, float /*elapsed*/) {
+    void DrawTopographicBackground(ImDrawList* drawList, const ImVec2& origin, float width, float height, float /*elapsed*/, float alphaMultiplier = 1.0f) {
         drawList->PushClipRect(origin, ImVec2(origin.x + width, origin.y + height), true);
 
         const int gridW = 120;
@@ -1211,7 +1217,8 @@ namespace
         const float cellH = height / (float)gridH;
         const float scale = 0.04f;
         const int numLevels = 14;
-        const ImU32 lineColor = IM_COL32(200, 200, 200, 80);
+        const int lineAlpha = static_cast<int>(80.0f * (std::clamp)(alphaMultiplier, 0.0f, 1.0f));
+        const ImU32 lineColor = IM_COL32(200, 200, 200, lineAlpha);
 
         // sample noise grid
         static float grid[121][91];
@@ -1302,35 +1309,56 @@ namespace
         drawList->AddRect(ImVec2(min.x + 1.0f, min.y + 1.0f), ImVec2(max.x - 1.0f, max.y - 1.0f), color::GetGlassHighlightU32(0.26f), rounding - 1.0f, 0, 1.0f);
     }
 
-    void DrawWindowMoveBlurOverlay(ImDrawList* drawList, const ImVec2& origin, float width, float height, float time)
+    void DrawWindowMoveBlurOverlay(
+        ImDrawList* drawList,
+        const ImVec2& origin,
+        float width,
+        float height,
+        float time,
+        float overlayAlpha,
+        ImFont* headlineFont,
+        float headlineFontSize)
     {
-        if (!drawList || width <= 0.0f || height <= 0.0f) {
+        if (!drawList || width <= 0.0f || height <= 0.0f || overlayAlpha <= 0.001f) {
             return;
         }
 
-        const float pulse = 0.5f + 0.5f * std::sinf(time * 4.5f);
-        const int outerAlpha = 118 + static_cast<int>(pulse * 20.0f);
-        const int innerAlpha = 72 + static_cast<int>(pulse * 18.0f);
-        const int edgeAlpha = 38 + static_cast<int>(pulse * 10.0f);
-
         const ImVec2 max(origin.x + width, origin.y + height);
-        drawList->AddRectFilled(origin, max, IM_COL32(255, 255, 255, outerAlpha), 0.0f);
-        drawList->AddRectFilled(origin, max, IM_COL32(248, 250, 255, innerAlpha), 0.0f);
+        const float easedAlpha = overlayAlpha * overlayAlpha * (3.0f - 2.0f * overlayAlpha);
+        const float pulse = 0.5f + 0.5f * std::sinf(time * 3.2f);
 
-        for (int index = 0; index < 4; ++index) {
-            const float inset = 14.0f + index * 10.0f;
-            const int alpha = (std::max)(8, edgeAlpha - index * 8);
-            drawList->AddRect(
-                ImVec2(origin.x + inset, origin.y + inset),
-                ImVec2(max.x - inset, max.y - inset),
-                IM_COL32(255, 255, 255, alpha),
-                26.0f,
-                0,
+        drawList->PushClipRect(origin, max, true);
+        drawList->AddRectFilled(origin, max, IM_COL32(255, 255, 255, static_cast<int>(255.0f * easedAlpha)), 0.0f);
+        DrawTopographicBackground(drawList, origin, width, height, 0.0f, easedAlpha);
+
+        ImFont* font = headlineFont ? headlineFont : ImGui::GetFont();
+        const float fontSize = headlineFontSize > 0.0f ? headlineFontSize : ImGui::GetFontSize();
+        const char* draggingLabel = "Dragging...";
+        const ImVec2 textSize = CalcTextSizeWithFont(font, draggingLabel, fontSize);
+        const ImVec2 textPos(origin.x + (width - textSize.x) * 0.5f, origin.y + (height - textSize.y) * 0.5f - 2.0f);
+        drawList->AddText(
+            font,
+            fontSize,
+            ImVec2(textPos.x, textPos.y + 2.0f),
+            IM_COL32(255, 255, 255, static_cast<int>(120.0f * easedAlpha)),
+            draggingLabel);
+        drawList->AddText(
+            font,
+            fontSize,
+            textPos,
+            IM_COL32(20, 22, 28, static_cast<int>(255.0f * easedAlpha)),
+            draggingLabel);
+
+        if (pulse > 0.22f) {
+            const float cursorX = textPos.x + textSize.x + 8.0f;
+            drawList->AddRectFilled(
+                ImVec2(cursorX, textPos.y + 2.0f),
+                ImVec2(cursorX + 2.5f, textPos.y + 2.0f + fontSize * 0.92f),
+                IM_COL32(20, 22, 28, static_cast<int>(235.0f * easedAlpha)),
                 1.0f);
         }
 
-        drawList->AddRectFilled(origin, ImVec2(max.x, origin.y + 42.0f), IM_COL32(244, 247, 252, 190), 0.0f);
-        drawList->AddLine(ImVec2(origin.x, origin.y + 42.0f), ImVec2(max.x, origin.y + 42.0f), IM_COL32(214, 220, 230, 210), 1.0f);
+        drawList->PopClipRect();
     }
 
     bool DrawRoundedActionButton(
@@ -1435,31 +1463,77 @@ LRESULT WINAPI Screen::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 }
 
 LRESULT Screen::HandleWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    constexpr LONG kWindowDragHeight = 14;
+    auto isWithinDragStrip = [&](LPARAM mouseParam) -> bool {
+        const LONG x = static_cast<LONG>(static_cast<SHORT>(LOWORD(mouseParam)));
+        const LONG y = static_cast<LONG>(static_cast<SHORT>(HIWORD(mouseParam)));
+        return x >= 0 &&
+            y >= 0 &&
+            x < static_cast<LONG>(m_Width) &&
+            y < kWindowDragHeight;
+    };
+
     switch (msg) {
     case WM_NCHITTEST: {
         const LRESULT defaultHit = DefWindowProcW(hwnd, msg, wParam, lParam);
         if (defaultHit != HTCLIENT) {
             return defaultHit;
         }
-
-        POINT cursorPoint = {
-            static_cast<LONG>(static_cast<SHORT>(LOWORD(lParam))),
-            static_cast<LONG>(static_cast<SHORT>(HIWORD(lParam)))
-        };
-        ScreenToClient(hwnd, &cursorPoint);
-        constexpr LONG dragHeight = 42;
-        if (cursorPoint.y >= 0 && cursorPoint.y < dragHeight) {
-            return HTCAPTION;
-        }
         return HTCLIENT;
     }
+    case WM_LBUTTONDOWN:
+        if (isWithinDragStrip(lParam)) {
+            RECT windowRect = {};
+            POINT cursorPoint = {};
+            GetWindowRect(hwnd, &windowRect);
+            GetCursorPos(&cursorPoint);
+
+            m_IsManualWindowDrag = true;
+            m_IsWindowMoveActive = true;
+            m_WindowDragOffset.x = cursorPoint.x - windowRect.left;
+            m_WindowDragOffset.y = cursorPoint.y - windowRect.top;
+            SetCapture(hwnd);
+            return 0;
+        }
+        break;
+    case WM_MOUSEMOVE:
+        if (m_IsManualWindowDrag) {
+            POINT cursorPoint = {};
+            GetCursorPos(&cursorPoint);
+
+            const int nextX = cursorPoint.x - m_WindowDragOffset.x;
+            const int nextY = cursorPoint.y - m_WindowDragOffset.y;
+            SetWindowPos(
+                hwnd,
+                nullptr,
+                nextX,
+                nextY,
+                0,
+                0,
+                SWP_NOACTIVATE | SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_NOZORDER);
+            return 0;
+        }
+        break;
+    case WM_LBUTTONUP:
+        if (m_IsManualWindowDrag) {
+            m_IsManualWindowDrag = false;
+            m_IsWindowMoveActive = false;
+            if (GetCapture() == hwnd) {
+                ReleaseCapture();
+            }
+            return 0;
+        }
+        break;
     case WM_ENTERSIZEMOVE:
         m_IsWindowMoveActive = true;
         return 0;
     case WM_EXITSIZEMOVE:
+        m_IsManualWindowDrag = false;
         m_IsWindowMoveActive = false;
         return 0;
     case WM_CAPTURECHANGED:
+    case WM_CANCELMODE:
+        m_IsManualWindowDrag = false;
         m_IsWindowMoveActive = false;
         break;
     }
@@ -2030,30 +2104,31 @@ void Screen::RenderInstanceChooser() {
                         m_State = AppState::Injecting;
                         m_InjectionDone = false;
                         m_InjectionFailed = false;
+                        m_InjectionCompleteTime = -1.0f;
+                        m_InjectionViewStartTime = -1.0f;
+                        m_InterfaceTransitionStartTime = -1.0f;
                         m_InjectionStatus = "Injecting...";
                         
                         std::thread([this, pid]() {
                             Bridge::Get()->Initialize();
-                            
+
                             wchar_t exePath[MAX_PATH] = {};
                             GetModuleFileNameW(nullptr, exePath, MAX_PATH);
                             std::wstring dllPath(exePath);
                             dllPath = dllPath.substr(0, dllPath.find_last_of(L"\\/") + 1);
                             dllPath += L"backdoor.dll";
 
-                            m_InjectionStatus = "Attaching to process...";
-                            Sleep(300);
-
                             bool success = Injector::Get()->InjectFromFile(pid, dllPath);
                             
                             if (success) {
-                                m_InjectionStatus = "Injection complete!";
                                 m_InjectionDone = true;
-                                Sleep(1000);
-                                m_State = AppState::MainInterface;
+                                m_InjectionStatus = "Injected";
+                                m_InjectionCompleteTime = -1.0f;
                             } else {
                                 m_InjectionStatus = "Injection failed! Check if backdoor.dll exists.";
                                 m_InjectionFailed = true;
+                                m_InjectionCompleteTime = -1.0f;
+                                m_InterfaceTransitionStartTime = -1.0f;
                                 Sleep(3000);
                                 m_State = AppState::InstanceChooser;
                             }
@@ -2071,41 +2146,142 @@ void Screen::RenderInstanceChooser() {
     }
 }
 
-void Screen::RenderInjecting() {
+void Screen::DrawInjectionStatusText(
+    ImDrawList* drawList,
+    const ImVec2& windowPos,
+    float alpha,
+    float offsetY,
+    float scale,
+    const char* headline,
+    float elapsed,
+    bool showCursor,
+    const char* detailText) {
+    if (!drawList || alpha <= 0.0f || !headline) {
+        return;
+    }
+
+    const float clampedAlpha = Clamp01(alpha);
+    const float clampedScale = (std::max)(0.85f, scale);
+    const float headlineFontSize = 72.0f * clampedScale;
+    const float detailFontSize = 19.0f * clampedScale;
+    const float charsVisible = (std::max)(0.0f, elapsed) * kInjectionTypewriterCharsPerSecond;
+    const int totalChars = static_cast<int>(strlen(headline));
+    const int visibleChars = (std::min)(totalChars, static_cast<int>(charsVisible));
+
+    std::string visibleHeadline;
+    if (visibleChars > 0) {
+        visibleHeadline.assign(headline, headline + visibleChars);
+    }
+
+    ImFont* headlineFont = m_FontHero ? m_FontHero : (m_FontTitle ? m_FontTitle : ImGui::GetFont());
+    ImFont* detailFont = m_FontBodyMed ? m_FontBodyMed : ImGui::GetFont();
+    if (!headlineFont || !detailFont) {
+        return;
+    }
+
+    const ImVec2 headlineSize = CalcTextSizeWithFont(headlineFont, visibleHeadline.c_str(), headlineFontSize);
+    const bool hasDetailText = detailText && detailText[0] != '\0';
+    const float verticalGap = hasDetailText ? (24.0f * clampedScale) : 0.0f;
+    const float detailBlockHeight = hasDetailText ? detailFontSize : 0.0f;
+    const float totalBlockHeight = headlineFontSize + verticalGap + detailBlockHeight;
+    const float baseY = windowPos.y + ((m_Height - totalBlockHeight) * 0.5f) + offsetY;
+    const float headlineX = windowPos.x + ((m_Width - headlineSize.x) * 0.5f);
+    const ImU32 headlineColor = IM_COL32(12, 12, 12, static_cast<int>(255.0f * clampedAlpha));
+    drawList->AddText(headlineFont, headlineFontSize, ImVec2(headlineX, baseY), headlineColor, visibleHeadline.c_str());
+
+    if (showCursor) {
+        const bool typingInProgress = visibleChars < totalChars;
+        const float blink = std::sinf(static_cast<float>(ImGui::GetTime()) * kInjectionCursorBlinkSpeed);
+        const float cursorAlpha = typingInProgress ? clampedAlpha : (blink > 0.0f ? clampedAlpha : 0.0f);
+        if (cursorAlpha > 0.0f) {
+            const float cursorX = headlineX + headlineSize.x + (8.0f * clampedScale);
+            const float cursorTop = baseY + (10.0f * clampedScale);
+            const float cursorBottom = baseY + headlineFontSize - (10.0f * clampedScale);
+            drawList->AddLine(
+                ImVec2(cursorX, cursorTop),
+                ImVec2(cursorX, cursorBottom),
+                IM_COL32(12, 12, 12, static_cast<int>(255.0f * cursorAlpha)),
+                2.0f * clampedScale);
+        }
+    }
+
+    if (hasDetailText) {
+        const ImVec2 detailSize = CalcTextSizeWithFont(detailFont, detailText, detailFontSize);
+        const float detailX = windowPos.x + ((m_Width - detailSize.x) * 0.5f);
+        const float detailY = baseY + headlineFontSize + verticalGap;
+        drawList->AddText(
+            detailFont,
+            detailFontSize,
+            ImVec2(detailX, detailY),
+            IM_COL32(110, 110, 110, static_cast<int>(255.0f * clampedAlpha)),
+            detailText);
+    }
+}
+
+void Screen::RenderInjectingLayer(
+    const char* windowName,
+    float alpha,
+    float offsetY,
+    float scale,
+    const char* headline,
+    float elapsed,
+    bool showCursor,
+    bool drawTopographicBackground,
+    const char* detailText) {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(m_Width, m_Height));
 
-    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-                             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-                             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground;
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                                   ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground;
 
-    if (ImGui::Begin("Injecting", nullptr, flags)) {
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        ImVec2 wp = ImGui::GetWindowPos();
-        DrawWindowBase(dl, wp, m_Width, m_Height);
-        DrawTopographicBackground(dl, wp, m_Width, m_Height, 0.0f);
-
-        {
-        const char* title = "Injecting";
-        ImGui::PushFont(m_FontBody);
-        ImVec2 tSz = ImGui::CalcTextSize(title);
-        ImGui::SetCursorPos(ImVec2((m_Width - tSz.x) * 0.5f, m_Height * 0.35f));
-        ImGui::TextColored(color::GetStrongTextVec4(0.96f), "%s", title);
-        
-        ImVec2 sSz = ImGui::CalcTextSize(m_InjectionStatus.c_str());
-        ImGui::SetCursorPos(ImVec2((m_Width - sSz.x) * 0.5f, m_Height * 0.35f + 35.f));
-        if (m_InjectionFailed) {
-            ImGui::TextColored(color::GetModuleTextVec4(0.95f), "%s", m_InjectionStatus.c_str());
-        } else if (m_InjectionDone) {
-            ImGui::TextColored(color::GetStrongTextVec4(0.95f), "%s", m_InjectionStatus.c_str());
-        } else {
-            ImGui::TextColored(color::GetSecondaryTextVec4(0.92f), "%s", m_InjectionStatus.c_str());
+    if (ImGui::Begin(windowName, nullptr, flags)) {
+        ImDrawList* drawList = ImGui::GetWindowDrawList();
+        const ImVec2 windowPos = ImGui::GetWindowPos();
+        DrawWindowBase(drawList, windowPos, m_Width, m_Height);
+        if (drawTopographicBackground) {
+            DrawTopographicBackground(drawList, windowPos, m_Width, m_Height, 0.0f);
         }
-        ImGui::PopFont();
-        }
-
+        DrawInjectionStatusText(drawList, windowPos, alpha, offsetY, scale, headline, elapsed, showCursor, detailText);
         ImGui::End();
     }
+}
+
+void Screen::RenderInjecting() {
+    const float now = static_cast<float>(ImGui::GetTime());
+    if (m_InjectionViewStartTime < 0.0f) {
+        m_InjectionViewStartTime = now;
+    }
+
+    if (m_InjectionFailed) {
+        const float failureElapsed = now - m_InjectionViewStartTime;
+        RenderInjectingLayer("Injecting", 1.0f, 0.0f, 1.0f, "Injection failed", failureElapsed, true, false, m_InjectionStatus.c_str());
+        return;
+    }
+
+    if (m_InjectionDone && !m_InjectionFailed) {
+        if (m_InjectionCompleteTime < 0.0f) {
+            m_InjectionCompleteTime = now;
+        }
+
+        const float successElapsed = now - m_InjectionCompleteTime;
+        const float successTextDuration = (static_cast<float>(strlen(kInjectedHeadline)) / kInjectionTypewriterCharsPerSecond) + 0.7f;
+        RenderInjectingLayer("Injecting", 1.0f, 0.0f, 1.0f, kInjectedHeadline, successElapsed, true, true);
+
+        if (successElapsed >= successTextDuration) {
+            if (m_InterfaceTransitionStartTime < 0.0f) {
+                m_InterfaceTransitionStartTime = now;
+            }
+            m_State = AppState::TransitionToInterface;
+            RenderTransitionToInterface();
+            return;
+        }
+
+        return;
+    }
+
+    const float injectingElapsed = now - m_InjectionViewStartTime;
+    RenderInjectingLayer("Injecting", 1.0f, 0.0f, 1.0f, kInjectingHeadline, injectingElapsed, true, false);
 }
 
 void Screen::RenderHUDPreview() {
@@ -3279,17 +3455,20 @@ void Screen::RenderClosing() {
     }
 }
 
-void Screen::RenderMainInterface() {
+void Screen::RenderMainInterfaceLayer(const char* windowName, const ImVec2& windowPos, bool interactive, float overlayAlpha) {
     FeatureManager::Get()->SyncAllFromConfig(Bridge::Get()->GetConfig());
 
-    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowPos(windowPos);
     ImGui::SetNextWindowSize(ImVec2(m_Width, m_Height));
     
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                              ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
                              ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground;
+    if (!interactive) {
+        flags |= ImGuiWindowFlags_NoInputs;
+    }
     
-    if (ImGui::Begin("OpenCommunity", nullptr, flags)) {
+    if (ImGui::Begin(windowName, nullptr, flags)) {
         ImDrawList* dl = ImGui::GetWindowDrawList();
         ImVec2 wp = ImGui::GetWindowPos();
 
@@ -3354,12 +3533,60 @@ void Screen::RenderMainInterface() {
         ImGui::PopClipRect();
         ImGui::EndGroup();
 
+        if (overlayAlpha > 0.0f) {
+            dl->AddRectFilled(
+                wp,
+                ImVec2(wp.x + m_Width, wp.y + m_Height),
+                IM_COL32(255, 255, 255, static_cast<int>(255.0f * Clamp01(overlayAlpha))));
+        }
+
         ImGui::End();
     }
 
 
     // Automatically process keybinds and sync all modules to shared memory
-    FeatureManager::Get()->UpdateFrontdoor(Bridge::Get()->GetConfig());
+    if (interactive) {
+        FeatureManager::Get()->UpdateFrontdoor(Bridge::Get()->GetConfig());
+    }
+}
+
+void Screen::RenderMainInterface() {
+    RenderMainInterfaceLayer("OpenCommunity", ImVec2(0.0f, 0.0f), true, 0.0f);
+}
+
+void Screen::RenderTransitionToInterface() {
+    if (m_InterfaceTransitionStartTime < 0.0f) {
+        m_InterfaceTransitionStartTime = static_cast<float>(ImGui::GetTime());
+    }
+
+    const float now = static_cast<float>(ImGui::GetTime());
+    const float progress = Clamp01((now - m_InterfaceTransitionStartTime) / 0.80f);
+    const float eased = EaseInOutCubic(progress);
+
+    const float injectAlpha = 1.0f - eased;
+    const float injectOffsetY = -10.0f * eased;
+    const float injectScale = 1.0f - 0.02f * eased;
+    RenderInjectingLayer("InjectingTransition", injectAlpha, injectOffsetY, injectScale, kInjectedHeadline, 99.0f, true, true);
+
+    const float interfaceOffsetY = 22.0f * (1.0f - eased);
+    const float overlayAlpha = 0.34f * (1.0f - eased);
+    RenderMainInterfaceLayer("OpenCommunityTransition", ImVec2(0.0f, interfaceOffsetY), false, overlayAlpha);
+
+    ImDrawList* foreground = ImGui::GetForegroundDrawList();
+    if (foreground) {
+        const float veilAlpha = 0.18f * (1.0f - eased);
+        if (veilAlpha > 0.0f) {
+            foreground->AddRectFilled(
+                ImVec2(0.0f, 0.0f),
+                ImVec2(m_Width, m_Height),
+                IM_COL32(255, 255, 255, static_cast<int>(255.0f * veilAlpha)));
+        }
+    }
+
+    if (progress >= 1.0f) {
+        m_State = AppState::MainInterface;
+        m_InterfaceTransitionStartTime = -1.0f;
+    }
 }
 
 
@@ -3373,6 +3600,12 @@ void Screen::Render() {
     ImGui_ImplDX11_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
+
+    const float deltaTime = (std::max)(ImGui::GetIO().DeltaTime, 1.0f / 240.0f);
+    const float overlayTarget = m_IsWindowMoveActive ? 1.0f : 0.0f;
+    const float overlayBlend = 1.0f - std::exp(-deltaTime * 18.0f);
+    m_WindowMoveOverlayAlpha += (overlayTarget - m_WindowMoveOverlayAlpha) * overlayBlend;
+    m_WindowMoveOverlayAlpha = (std::clamp)(m_WindowMoveOverlayAlpha, 0.0f, 1.0f);
     
     switch (m_State) {
     case AppState::Intro:
@@ -3384,6 +3617,9 @@ void Screen::Render() {
     case AppState::Injecting:
         RenderInjecting();
         break;
+    case AppState::TransitionToInterface:
+        RenderTransitionToInterface();
+        break;
     case AppState::MainInterface:
         RenderMainInterface();
         break;
@@ -3392,10 +3628,18 @@ void Screen::Render() {
         break;
     }
 
-    if (m_IsWindowMoveActive) {
-        DrawWindowMoveBlurOverlay(ImGui::GetForegroundDrawList(), ImVec2(0.0f, 0.0f), m_Width, m_Height, static_cast<float>(ImGui::GetTime()));
+    if (m_WindowMoveOverlayAlpha > 0.001f) {
+        DrawWindowMoveBlurOverlay(
+            ImGui::GetForegroundDrawList(),
+            ImVec2(0.0f, 0.0f),
+            m_Width,
+            m_Height,
+            static_cast<float>(ImGui::GetTime()),
+            m_WindowMoveOverlayAlpha,
+            m_FontHero ? m_FontHero : m_FontBold,
+            m_FontHero ? 34.0f : 28.0f);
     }
-    
+
     ImGui::Render();
     ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
     

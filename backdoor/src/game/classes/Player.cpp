@@ -239,6 +239,38 @@ std::string Player::GetName(JNIEnv* env, bool stripFormatting) {
         }
     }
 
+    if (result.empty()) {
+        const std::string mappedGetGameProfile = Mapper::Get("getGameProfile");
+        const char* profileMethodNames[] = {
+            mappedGetGameProfile.c_str(),
+            "getGameProfile",
+            "func_146103_bH",
+            "cd",
+            nullptr
+        };
+
+        Method* getGameProfileMethod = FindMethod(env, playerClass, profileMethodNames, "()Lcom/mojang/authlib/GameProfile;");
+        if (getGameProfileMethod) {
+            jobject profileObject = getGameProfileMethod->CallObjectMethod(env, reinterpret_cast<jobject>(this));
+            if (profileObject) {
+                jclass profileClass = env->GetObjectClass(profileObject);
+                if (profileClass) {
+                    jmethodID getProfileNameMethod = env->GetMethodID(profileClass, "getName", "()Ljava/lang/String;");
+                    if (getProfileNameMethod) {
+                        jstring profileNameObject = static_cast<jstring>(env->CallObjectMethod(profileObject, getProfileNameMethod));
+                        result = ReadJString(env, profileNameObject);
+                        if (profileNameObject) {
+                            env->DeleteLocalRef(profileNameObject);
+                        }
+                    }
+                    env->DeleteLocalRef(profileClass);
+                }
+
+                env->DeleteLocalRef(profileObject);
+            }
+        }
+    }
+
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
 
     if (result.empty()) {

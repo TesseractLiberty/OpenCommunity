@@ -23,6 +23,7 @@ private:
     void RenderIntro();
     void RenderInstanceChooser();
     void RenderInjecting();
+    void RenderTransitionToInterface();
     void RenderMainInterface();
     void RenderHUDPreview();
 
@@ -31,6 +32,9 @@ private:
     void RenderVisualsTab();
     void RenderSettingsTab();
     void RenderClosing();
+    void DrawInjectionStatusText(ImDrawList* drawList, const ImVec2& windowPos, float alpha, float offsetY, float scale, const char* headline, float elapsed, bool showCursor, const char* detailText = nullptr);
+    void RenderInjectingLayer(const char* windowName, float alpha, float offsetY, float scale, const char* headline, float elapsed, bool showCursor, bool drawTopographicBackground = false, const char* detailText = nullptr);
+    void RenderMainInterfaceLayer(const char* windowName, const ImVec2& windowPos, bool interactive, float overlayAlpha);
 
     bool LoadTextureFromMemory(const unsigned char* data, unsigned int dataSize, ID3D11ShaderResourceView** outSrv, int* outW, int* outH, bool invertRGB = false);
     void LoadIconTextures();
@@ -54,12 +58,18 @@ private:
     bool m_Initialized = false;
     bool m_Minimized = false;
     bool m_IsWindowMoveActive = false;
+    bool m_IsManualWindowDrag = false;
+    float m_WindowMoveOverlayAlpha = 0.0f;
+    POINT m_WindowDragOffset = {};
     int m_CurrentTab = 0;
     float m_IntroStartTime = -1.0f;
 
-    enum class AppState { Intro, InstanceChooser, Injecting, MainInterface, Closing };
+    enum class AppState { Intro, InstanceChooser, Injecting, TransitionToInterface, MainInterface, Closing };
     AppState m_State = AppState::Intro;
     float m_ClosingStartTime = -1.0f;
+    float m_InjectionCompleteTime = -1.0f;
+    float m_InjectionViewStartTime = -1.0f;
+    float m_InterfaceTransitionStartTime = -1.0f;
 
     bool m_InjectionDone = false;
     bool m_InjectionFailed = false;

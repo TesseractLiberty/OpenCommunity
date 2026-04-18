@@ -9,6 +9,11 @@
 #include <chrono>
 #include <windows.h>
 
+#ifndef _BACKDOOR
+#include "../../frontdoor/src/config/ClientInfo.h"
+#include "Common.h"
+#endif
+
 struct ImDrawList;
 
 #define MODULE_INFO(className, moduleName, moduleDescription, moduleCategory) \
@@ -259,6 +264,10 @@ public:
     }
 
     void ProcessKeybinds() {
+        if (!IsKeybindInputAllowed()) {
+            return;
+        }
+
         for (auto& [cat, mods] : m_Modules) {
             for (auto& mod : mods) {
                 if (!mod->SupportsKeybind()) continue;
@@ -332,6 +341,33 @@ public:
     }
 
 private:
+    bool IsKeybindInputAllowed() const {
+        HWND foregroundWindow = GetForegroundWindow();
+        if (!foregroundWindow || !IsWindow(foregroundWindow)) {
+            return false;
+        }
+
+        DWORD foregroundProcessId = 0;
+        GetWindowThreadProcessId(foregroundWindow, &foregroundProcessId);
+        if (foregroundProcessId == 0) {
+            return false;
+        }
+
+        if (foregroundProcessId == GetCurrentProcessId()) {
+            return true;
+        }
+
+#ifndef _BACKDOOR
+        if (const auto* info = Singleton<ClientInfo>::Get()) {
+            if (info->m_TargetPid != 0 && foregroundProcessId == info->m_TargetPid) {
+                return true;
+            }
+        }
+#endif
+
+        return false;
+    }
+
     FeatureManager() = default;
     std::unordered_map<ModuleCategory, std::vector<std::shared_ptr<Module>>> m_Modules;
 };

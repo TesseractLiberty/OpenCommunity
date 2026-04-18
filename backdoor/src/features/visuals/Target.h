@@ -180,6 +180,7 @@ public:
 
     bool IsSynchronous() const override { return true; }
     void TickSynchronous(void* env) override;
+    void RenderOverlay(ImDrawList* drawList, float screenW, float screenH) override;
 
     static void OnEntityAttacked(JNIEnv* env, Player* attackedPlayer);
     static std::string GetCurrentTargetName();

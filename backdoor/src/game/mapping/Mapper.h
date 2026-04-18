@@ -4,13 +4,10 @@
 
 enum GameVersions {
 	UNKNOWN = 0,
-	CASUAL_1_7_10 = 1,
-	CASUAL_1_8 = 2,
-	FORGE_1_7_10 = 3,
+	BADLION = 2,
 	FORGE_1_8 = 4,
 	FEATHER_1_8 = 5,
-	LUNAR_1_7_10 = 6,
-	LUNAR_1_8 = 7
+	LUNAR = 7
 };
 
 class Mapper

@@ -7,11 +7,11 @@
 #include "../../backdoor/src/features/combat/ArmorSwap.h"
 #include "../../backdoor/src/features/combat/AutoGapple.h"
 #include "../../backdoor/src/features/combat/NoHitDelay.h"
-#include "../../backdoor/src/features/combat/Target.h"
-#include "../../backdoor/src/features/combat/HideClans.h"
 #include "../../backdoor/src/features/movement/NoJumpDelay.h"
 #include "../../backdoor/src/features/visuals/ArrayList.h"
 #include "../../backdoor/src/features/visuals/DamageIndicator.h"
+#include "../../backdoor/src/features/visuals/Target.h"
+#include "../../backdoor/src/features/visuals/HideClans.h"
 
 inline void RegisterAllModules() {
     auto* fm = FeatureManager::Get();

@@ -9,7 +9,7 @@ void Mapper::Initialize(const GameVersions version)
 {
 	switch (version)
 	{
-	case CASUAL_1_8: {
+	case BADLION: {
 		g_Mappings = {
 			{"net/minecraft/client/Minecraft", "ave"},
 			{"net/minecraft/client/entity/AbstractClientPlayer", "bet"},
@@ -66,13 +66,14 @@ void Mapper::Initialize(const GameVersions version)
 			{"thePlayer", "h"},
 			{"theWorld", "f"},
 			{"currentScreen", "m"},
+			{"getNetHandler", "u"},
 			{"getRenderManager", "af"},
 			{"getEntityRenderObject", "a"},
 			{"doRenderEntity", "a"},
 			{"mainModel", "f"},
 			{"PROJECTION", "c"},
 			{"MODELVIEW", "b"},
-				{"getSlot", "a"},
+			{"getSlot", "a"},
 			{"playerEntities", "j"},
 			{ "getDisplayName", "f_" },
 			{"getUnformattedTextForChat", "e"},
@@ -276,6 +277,8 @@ void Mapper::Initialize(const GameVersions version)
 			{ "STOP_SPRINTING", "e" },
 			{ "sendQueue", "a" },
 			{ "addToSendQueue", "a" },
+			{ "getPlayerInfoMap", "d" },
+			{ "getNetworkPlayerInfoGameProfile", "a" },
 			{ "net/minecraft/client/network/NetHandlerPlayClient", "bcy" },
 			{ "net/minecraft/network/Packet", "ff" },
 			{ "net/minecraft/network/play/client/C03PacketPlayer", "ip" },
@@ -286,7 +289,7 @@ void Mapper::Initialize(const GameVersions version)
 		};
 		break;
 	}
-	case LUNAR_1_8: {
+	case LUNAR: {
 		g_Mappings = {
 			{"net/minecraft/client/Minecraft", "net/minecraft/client/Minecraft"},
 			{"net/minecraft/client/entity/AbstractClientPlayer", "net/minecraft/client/entity/AbstractClientPlayer"},

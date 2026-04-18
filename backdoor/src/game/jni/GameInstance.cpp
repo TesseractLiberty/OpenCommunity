@@ -165,11 +165,10 @@ GameVersions GameInstance::DetectGameVersion()
 	GetWindowTextA(currentWindowHandle, windowTitle, sizeof(windowTitle));
 	std::string title(windowTitle);
 
-	bool is1_7 = title.find("1.7.10") != std::string::npos;
 	bool vanillaMappings = title.find("Badlion Minecraft") != std::string::npos;
 
 	if (title.find("Lunar Client") != std::string::npos)
-		return is1_7 ? LUNAR_1_7_10 : LUNAR_1_8;
+		return LUNAR;
 
 	Class* launchWrapper = FindClass("net.minecraft.launchwrapper.LaunchClassLoader");
 	Class* launchClass = FindClass("net.minecraft.launchwrapper.Launch");
@@ -185,13 +184,13 @@ GameVersions GameInstance::DetectGameVersion()
 	GameVersions version = UNKNOWN;
 	if (hasLaunch && !vanillaMappings)
 	{
-		version = is1_7 ? FORGE_1_7_10 : FORGE_1_8;
+		version = FORGE_1_8;
 		if (!FindClass("net.minecraft.client.Minecraft")) {
-			version = is1_7 ? CASUAL_1_7_10 : CASUAL_1_8;
+			version = BADLION;
 		}
 	}
 	else {
-		version = is1_7 ? CASUAL_1_7_10 : CASUAL_1_8;
+		version = BADLION;
 	}
 
 	if (FindClass("net.digitalingot.featheropt.FeatherCoreMod")) {

@@ -68,6 +68,16 @@ public:
         }
     }
 
+    std::string GetTag() const override {
+        switch (GetMode()) {
+        case DamageIndicatorMode::Astralis:
+            return "Astralis";
+        case DamageIndicatorMode::J3Ultimate:
+        default:
+            return "J3 Ultimate";
+        }
+    }
+
 private:
     static constexpr size_t kModeOption = 0;
     static constexpr size_t kColorOption = 1;

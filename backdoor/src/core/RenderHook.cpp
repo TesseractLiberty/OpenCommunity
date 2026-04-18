@@ -45,7 +45,11 @@ namespace RenderCache {
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 namespace {
-    void StoreRenderMatrices(const std::vector<float>& modelView, const std::vector<float>& projection, int viewportWidth, int viewportHeight) {
+    void StoreRenderMatrices(
+        const std::vector<float>& modelView,
+        const std::vector<float>& projection,
+        int viewportWidth,
+        int viewportHeight) {
         if (modelView.size() != 16 || projection.size() != 16 || viewportWidth <= 0 || viewportHeight <= 0) {
             return;
         }
@@ -113,7 +117,11 @@ namespace {
 
         if (activeModelView.size() == 16 && activeProjection.size() == 16 &&
             std::fabs(activeProjection[11] + 1.0f) < 0.0001f) {
-            StoreRenderMatrices(activeModelView, activeProjection, viewport[2], viewport[3]);
+            StoreRenderMatrices(
+                activeModelView,
+                activeProjection,
+                viewport[2],
+                viewport[3]);
             return true;
         }
 
@@ -148,7 +156,11 @@ namespace {
             std::vector<float> computedProjection;
             BuildViewMatrix(pitch, yaw, renderPos.x, renderPos.y + 1.62, renderPos.z, computedModelView);
             BuildPerspective(70.0f, aspect, 0.05f, 512.0f, computedProjection);
-            StoreRenderMatrices(computedModelView, computedProjection, viewport[2], viewport[3]);
+            StoreRenderMatrices(
+                computedModelView,
+                computedProjection,
+                viewport[2],
+                viewport[3]);
             captured = true;
         }
 

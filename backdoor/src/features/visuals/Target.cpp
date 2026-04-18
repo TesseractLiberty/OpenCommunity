@@ -2,6 +2,7 @@
 #include "Target.h"
 
 #include "../../core/Bridge.h"
+#include "../../core/RenderHook.h"
 #include "../../game/classes/Minecraft.h"
 #include "../../game/classes/MovingObjectPosition.h"
 #include "../../game/classes/Scoreboard.h"
@@ -10,13 +11,289 @@
 #include "../../game/classes/World.h"
 #include "../../game/jni/GameInstance.h"
 
+#include <array>
+#include <cmath>
 #include <cctype>
 #include <cfloat>
-#include <gl/GL.h>
+#include <cstring>
 #include <limits>
 
 namespace {
     constexpr int kOnlineTargetPlayerLimit = 100;
+    constexpr float kTargetEspLineThickness = 1.6f;
+    constexpr float kTargetEspOutlineThickness = 3.4f;
+    constexpr float kTargetHealthBarOffset = 8.0f;
+    constexpr float kTargetHealthBarWidth = 6.0f;
+
+    struct ScreenPoint {
+        float x = 0.0f;
+        float y = 0.0f;
+    };
+
+    struct WorldPoint {
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+    };
+
+    struct ClipPoint {
+        float x = 0.0f;
+        float y = 0.0f;
+        float z = 0.0f;
+        float w = 0.0f;
+    };
+
+    struct ProjectedTargetBox {
+        float minX = 0.0f;
+        float minY = 0.0f;
+        float maxX = 0.0f;
+        float maxY = 0.0f;
+    };
+
+    struct RenderMatrixSnapshot {
+        std::vector<float> modelView;
+        std::vector<float> projection;
+        int viewportWidth = 0;
+        int viewportHeight = 0;
+
+        bool IsValid() const {
+            return modelView.size() == 16 &&
+                projection.size() == 16 &&
+                viewportWidth > 0 &&
+                viewportHeight > 0;
+        }
+    };
+
+    ClipPoint MultiplyMatrixVector(const ClipPoint& vec, const std::vector<float>& mat) {
+        if (mat.size() != 16) {
+            return {};
+        }
+
+        return {
+            vec.x * mat[0] + vec.y * mat[4] + vec.z * mat[8] + vec.w * mat[12],
+            vec.x * mat[1] + vec.y * mat[5] + vec.z * mat[9] + vec.w * mat[13],
+            vec.x * mat[2] + vec.y * mat[6] + vec.z * mat[10] + vec.w * mat[14],
+            vec.x * mat[3] + vec.y * mat[7] + vec.z * mat[11] + vec.w * mat[15]
+        };
+    }
+
+    RenderMatrixSnapshot CaptureRenderMatrixSnapshot() {
+        std::lock_guard<std::mutex> lock(RenderCache::mtx);
+        return {
+            RenderCache::modelView,
+            RenderCache::projection,
+            RenderCache::viewportW,
+            RenderCache::viewportH
+        };
+    }
+
+    bool TryProjectPoint(const WorldPoint& worldPoint, const RenderMatrixSnapshot& snapshot, ScreenPoint& screenPoint) {
+        if (!snapshot.IsValid()) {
+            return false;
+        }
+
+        const ClipPoint clipPoint = MultiplyMatrixVector(
+            MultiplyMatrixVector({ worldPoint.x, worldPoint.y, worldPoint.z, 1.0f }, snapshot.modelView),
+            snapshot.projection);
+        if (!std::isfinite(clipPoint.x) || !std::isfinite(clipPoint.y) ||
+            !std::isfinite(clipPoint.z) || !std::isfinite(clipPoint.w)) {
+            return false;
+        }
+
+        if (std::fabs(clipPoint.w) < 0.0001f) {
+            return false;
+        }
+
+        const float ndcX = clipPoint.x / clipPoint.w;
+        const float ndcY = clipPoint.y / clipPoint.w;
+        const float ndcZ = clipPoint.z / clipPoint.w;
+        if (!std::isfinite(ndcX) || !std::isfinite(ndcY) || !std::isfinite(ndcZ)) {
+            return false;
+        }
+
+        if (ndcZ < -1.0f || ndcZ > 1.0f) {
+            return false;
+        }
+
+        screenPoint.x = snapshot.viewportWidth * ((ndcX + 1.0f) * 0.5f);
+        screenPoint.y = snapshot.viewportHeight * ((1.0f - ndcY) * 0.5f);
+        return std::isfinite(screenPoint.x) && std::isfinite(screenPoint.y);
+    }
+
+    bool TryBuildProjectedTargetBox(
+        double entityX,
+        double entityY,
+        double entityZ,
+        float entityWidth,
+        float entityHeight,
+        const RenderMatrixSnapshot& snapshot,
+        ProjectedTargetBox& projectedBox) {
+        if (!snapshot.IsValid()) {
+            return false;
+        }
+
+        if (!std::isfinite(entityX) || !std::isfinite(entityY) || !std::isfinite(entityZ) ||
+            !std::isfinite(entityWidth) || !std::isfinite(entityHeight) ||
+            entityWidth <= 0.05f || entityHeight <= 0.05f) {
+            return false;
+        }
+
+        const float halfWidth = entityWidth * 0.5f;
+        const std::array<WorldPoint, 8> corners = {{
+            { static_cast<float>(entityX - halfWidth), static_cast<float>(entityY),                static_cast<float>(entityZ - halfWidth) },
+            { static_cast<float>(entityX + halfWidth), static_cast<float>(entityY),                static_cast<float>(entityZ - halfWidth) },
+            { static_cast<float>(entityX + halfWidth), static_cast<float>(entityY),                static_cast<float>(entityZ + halfWidth) },
+            { static_cast<float>(entityX - halfWidth), static_cast<float>(entityY),                static_cast<float>(entityZ + halfWidth) },
+            { static_cast<float>(entityX - halfWidth), static_cast<float>(entityY + entityHeight), static_cast<float>(entityZ - halfWidth) },
+            { static_cast<float>(entityX + halfWidth), static_cast<float>(entityY + entityHeight), static_cast<float>(entityZ - halfWidth) },
+            { static_cast<float>(entityX + halfWidth), static_cast<float>(entityY + entityHeight), static_cast<float>(entityZ + halfWidth) },
+            { static_cast<float>(entityX - halfWidth), static_cast<float>(entityY + entityHeight), static_cast<float>(entityZ + halfWidth) }
+        }};
+
+        int visibleCorners = 0;
+        float minX = FLT_MAX;
+        float minY = FLT_MAX;
+        float maxX = -FLT_MAX;
+        float maxY = -FLT_MAX;
+
+        for (const auto& corner : corners) {
+            ScreenPoint projectedCorner;
+            if (!TryProjectPoint(corner, snapshot, projectedCorner)) {
+                continue;
+            }
+
+            minX = (std::min)(minX, projectedCorner.x);
+            minY = (std::min)(minY, projectedCorner.y);
+            maxX = (std::max)(maxX, projectedCorner.x);
+            maxY = (std::max)(maxY, projectedCorner.y);
+            ++visibleCorners;
+        }
+
+        if (visibleCorners == 0 ||
+            !std::isfinite(minX) || !std::isfinite(minY) ||
+            !std::isfinite(maxX) || !std::isfinite(maxY) ||
+            maxX <= minX || maxY <= minY) {
+            return false;
+        }
+
+        projectedBox.minX = minX;
+        projectedBox.minY = minY;
+        projectedBox.maxX = maxX;
+        projectedBox.maxY = maxY;
+        return true;
+    }
+
+    float ComputeTargetHealthRatio(float currentHealth, float maxHealth) {
+        const float safeHealth = (std::max)(0.0f, currentHealth);
+        float safeMaxHealth = maxHealth;
+        if (safeMaxHealth <= 0.0f) {
+            safeMaxHealth = (std::max)(20.0f, safeHealth);
+        }
+        if (safeHealth > safeMaxHealth) {
+            safeMaxHealth = safeHealth;
+        }
+
+        return (std::max)(0.0f, (std::min)(1.0f, safeHealth / safeMaxHealth));
+    }
+
+    std::string NormalizeTargetName(std::string name) {
+        const auto notSpace = [](unsigned char ch) {
+            return !std::isspace(ch);
+        };
+
+        const auto begin = std::find_if(name.begin(), name.end(), notSpace);
+        if (begin == name.end()) {
+            return {};
+        }
+
+        const auto end = std::find_if(name.rbegin(), name.rend(), notSpace).base();
+        std::string normalized(begin, end);
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        return normalized;
+    }
+
+    bool TargetNamesMatch(const std::string& left, const std::string& right) {
+        if (left.empty() || right.empty()) {
+            return false;
+        }
+
+        return NormalizeTargetName(left) == NormalizeTargetName(right);
+    }
+
+    ImU32 BuildTargetEspColor(float currentHealth, float maxHealth, int hurtTime) {
+        const float ratio = ComputeTargetHealthRatio(currentHealth, maxHealth);
+        float red = 1.0f;
+        float green = ratio > 0.5f ? 1.0f : ratio * 2.0f;
+        if (ratio > 0.5f) {
+            red = 1.0f - ((ratio - 0.5f) * 2.0f);
+        }
+
+        if (hurtTime > 0) {
+            red = (std::min)(1.0f, red + 0.35f);
+            green *= 0.55f;
+        }
+
+        return IM_COL32(
+            static_cast<int>(red * 255.0f),
+            static_cast<int>(green * 255.0f),
+            0,
+            255);
+    }
+
+    void DrawProjectedTargetBox(ImDrawList* drawList, const ProjectedTargetBox& projectedBox, ImU32 color) {
+        if (!drawList) {
+            return;
+        }
+
+        drawList->AddRect(
+            ImVec2(projectedBox.minX, projectedBox.minY),
+            ImVec2(projectedBox.maxX, projectedBox.maxY),
+            IM_COL32(0, 0, 0, 190),
+            0.0f,
+            0,
+            kTargetEspOutlineThickness);
+        drawList->AddRect(
+            ImVec2(projectedBox.minX, projectedBox.minY),
+            ImVec2(projectedBox.maxX, projectedBox.maxY),
+            color,
+            0.0f,
+            0,
+            kTargetEspLineThickness);
+    }
+
+    void DrawTargetHealthBar(ImDrawList* drawList, const ProjectedTargetBox& projectedBox, float currentHealth, float maxHealth, ImU32 color) {
+        if (!drawList) {
+            return;
+        }
+
+        const float ratio = ComputeTargetHealthRatio(currentHealth, maxHealth);
+        const float minX = projectedBox.minX - kTargetHealthBarOffset;
+        const float maxX = minX + kTargetHealthBarWidth;
+        const float minY = projectedBox.minY;
+        const float maxY = projectedBox.maxY;
+        const float barHeight = maxY - minY;
+        if (!std::isfinite(barHeight) || barHeight <= 1.0f) {
+            return;
+        }
+
+        drawList->AddRectFilled(
+            ImVec2(minX, minY),
+            ImVec2(maxX, maxY),
+            IM_COL32(10, 10, 10, 200),
+            0.0f);
+
+        const float fillMinX = minX + 1.0f;
+        const float fillMaxX = maxX - 1.0f;
+        const float fillMaxY = maxY;
+        const float fillMinY = maxY - (barHeight * ratio);
+        drawList->AddRectFilled(
+            ImVec2(fillMinX, fillMinY),
+            ImVec2(fillMaxX, fillMaxY),
+            color,
+            0.0f);
+    }
 
     struct BrowseCacheState {
         bool active = false;
@@ -30,6 +307,8 @@ namespace {
     std::mutex g_CurrentTargetMutex;
     std::string g_CurrentTargetName;
     std::atomic<bool> g_TargetActiveManages{ false };
+    std::mutex g_TargetHealthMutex;
+    std::unordered_map<std::string, float> g_TargetRealHealthCache;
 
     std::mutex g_BrowseMutex;
     BrowseCacheState g_BrowseCache;
@@ -95,6 +374,53 @@ namespace {
         SyncBrowseCacheToConfig(snapshot);
     }
 
+    void ClearTargetHealthCache() {
+        std::lock_guard<std::mutex> lock(g_TargetHealthMutex);
+        g_TargetRealHealthCache.clear();
+    }
+
+    void UpdateTargetRealHealth(const std::string& playerName, float realHealth) {
+        if (playerName.empty() || realHealth < 0.0f) {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(g_TargetHealthMutex);
+        g_TargetRealHealthCache[playerName] = realHealth;
+    }
+
+    float GetCachedTargetRealHealth(const std::string& playerName) {
+        if (playerName.empty()) {
+            return -1.0f;
+        }
+
+        std::lock_guard<std::mutex> lock(g_TargetHealthMutex);
+        const auto it = g_TargetRealHealthCache.find(playerName);
+        return it != g_TargetRealHealthCache.end() ? it->second : -1.0f;
+    }
+
+    void SyncTargetHealthCache(JNIEnv* env, World* world, jobject localPlayerObject) {
+        if (!env || !world) {
+            return;
+        }
+
+        const auto players = world->GetPlayerEntities(env);
+        for (auto* player : players) {
+            if (!player) {
+                continue;
+            }
+
+            if (localPlayerObject && env->IsSameObject(reinterpret_cast<jobject>(player), localPlayerObject)) {
+                env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+                continue;
+            }
+
+            const std::string playerName = player->GetName(env, true);
+            const float realHealth = player->GetRealHealth(env);
+            UpdateTargetRealHealth(playerName, realHealth);
+            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+        }
+    }
+
     void MarkBrowsePlayerProcessed(const std::string& playerName) {
         if (playerName.empty()) {
             return;
@@ -128,6 +454,41 @@ namespace {
             });
     }
 
+    std::string ReadJavaString(JNIEnv* env, jstring stringObject) {
+        if (!env || !stringObject) {
+            return {};
+        }
+
+        const char* chars = env->GetStringUTFChars(stringObject, nullptr);
+        std::string result = chars ? chars : "";
+        if (chars) {
+            env->ReleaseStringUTFChars(stringObject, chars);
+        }
+        return result;
+    }
+
+    jmethodID FindMethodIdByNames(JNIEnv* env, jclass ownerClass, const char* signature, std::initializer_list<const char*> names) {
+        if (!env || !ownerClass || !signature) {
+            return nullptr;
+        }
+
+        for (const char* name : names) {
+            if (!name || !name[0]) {
+                continue;
+            }
+
+            jmethodID methodId = env->GetMethodID(ownerClass, name, signature);
+            if (methodId) {
+                return methodId;
+            }
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
+        }
+
+        return nullptr;
+    }
+
     void ClearOnlinePlayersToConfig(ModuleConfig* config) {
         if (!config) {
             return;
@@ -135,6 +496,145 @@ namespace {
 
         config->Target.m_OnlinePlayersCount = 0;
         memset(config->Target.m_OnlinePlayerNames, 0, sizeof(config->Target.m_OnlinePlayerNames));
+    }
+
+    bool CollectOnlinePlayersFromNetHandler(JNIEnv* env, jobject localPlayerObject, std::vector<std::string>& onlinePlayers) {
+        if (!env) {
+            return false;
+        }
+
+        jobject netHandlerObject = Minecraft::GetNetHandler(env);
+        if (!netHandlerObject) {
+            return false;
+        }
+
+        std::string localPlayerName;
+        if (localPlayerObject) {
+            localPlayerName = reinterpret_cast<Player*>(localPlayerObject)->GetName(env, true);
+        }
+
+        bool collectedAny = false;
+        jclass netHandlerClass = env->GetObjectClass(netHandlerObject);
+        const std::string mappedGetPlayerInfoMap = Mapper::Get("getPlayerInfoMap");
+        jmethodID getPlayerInfoMapMethod = FindMethodIdByNames(
+            env,
+            netHandlerClass,
+            "()Ljava/util/Collection;",
+            {
+                mappedGetPlayerInfoMap.c_str(),
+                "getPlayerInfoMap",
+                "func_175106_d",
+                "d"
+            });
+
+        jobject playerInfoCollection = getPlayerInfoMapMethod
+            ? env->CallObjectMethod(netHandlerObject, getPlayerInfoMapMethod)
+            : nullptr;
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            playerInfoCollection = nullptr;
+        }
+
+        if (playerInfoCollection) {
+            jclass collectionClass = env->GetObjectClass(playerInfoCollection);
+            jmethodID toArrayMethod = collectionClass
+                ? env->GetMethodID(collectionClass, "toArray", "()[Ljava/lang/Object;")
+                : nullptr;
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                toArrayMethod = nullptr;
+            }
+
+            jobjectArray playerInfoArray = toArrayMethod
+                ? static_cast<jobjectArray>(env->CallObjectMethod(playerInfoCollection, toArrayMethod))
+                : nullptr;
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                playerInfoArray = nullptr;
+            }
+
+            if (playerInfoArray) {
+                const jsize playerCount = env->GetArrayLength(playerInfoArray);
+                for (jsize index = 0; index < playerCount; ++index) {
+                    jobject playerInfoObject = env->GetObjectArrayElement(playerInfoArray, index);
+                    if (!playerInfoObject) {
+                        continue;
+                    }
+
+                    jclass playerInfoClass = env->GetObjectClass(playerInfoObject);
+                    const std::string mappedGetNetworkPlayerGameProfile = Mapper::Get("getNetworkPlayerInfoGameProfile");
+                    jmethodID getGameProfileMethod = FindMethodIdByNames(
+                        env,
+                        playerInfoClass,
+                        "()Lcom/mojang/authlib/GameProfile;",
+                        {
+                            mappedGetNetworkPlayerGameProfile.c_str(),
+                            "getGameProfile",
+                            "func_178845_a",
+                            "a"
+                        });
+
+                    jobject gameProfileObject = getGameProfileMethod
+                        ? env->CallObjectMethod(playerInfoObject, getGameProfileMethod)
+                        : nullptr;
+                    if (env->ExceptionCheck()) {
+                        env->ExceptionClear();
+                        gameProfileObject = nullptr;
+                    }
+
+                    if (gameProfileObject) {
+                        jclass gameProfileClass = env->GetObjectClass(gameProfileObject);
+                        jmethodID getNameMethod = gameProfileClass
+                            ? env->GetMethodID(gameProfileClass, "getName", "()Ljava/lang/String;")
+                            : nullptr;
+                        if (env->ExceptionCheck()) {
+                            env->ExceptionClear();
+                            getNameMethod = nullptr;
+                        }
+
+                        jstring playerNameObject = getNameMethod
+                            ? static_cast<jstring>(env->CallObjectMethod(gameProfileObject, getNameMethod))
+                            : nullptr;
+                        if (env->ExceptionCheck()) {
+                            env->ExceptionClear();
+                            playerNameObject = nullptr;
+                        }
+
+                        const std::string playerName = ReadJavaString(env, playerNameObject);
+                        if (playerNameObject) {
+                            env->DeleteLocalRef(playerNameObject);
+                        }
+                        if (gameProfileClass) {
+                            env->DeleteLocalRef(gameProfileClass);
+                        }
+                        env->DeleteLocalRef(gameProfileObject);
+
+                        if (!playerName.empty() && playerName != localPlayerName) {
+                            onlinePlayers.push_back(playerName);
+                            collectedAny = true;
+                        }
+                    }
+
+                    if (playerInfoClass) {
+                        env->DeleteLocalRef(playerInfoClass);
+                    }
+                    env->DeleteLocalRef(playerInfoObject);
+                }
+
+                env->DeleteLocalRef(playerInfoArray);
+            }
+
+            if (collectionClass) {
+                env->DeleteLocalRef(collectionClass);
+            }
+            env->DeleteLocalRef(playerInfoCollection);
+        }
+
+        if (netHandlerClass) {
+            env->DeleteLocalRef(netHandlerClass);
+        }
+        env->DeleteLocalRef(netHandlerObject);
+        return collectedAny;
     }
 
     void SyncOnlinePlayersToConfig(JNIEnv* env, World* world, jobject localPlayerObject, ModuleConfig* config) {
@@ -158,25 +658,27 @@ namespace {
         std::vector<std::string> onlinePlayers;
         onlinePlayers.reserve(kOnlineTargetPlayerLimit);
 
-        const auto players = world->GetPlayerEntities(env);
-        for (auto* player : players) {
-            if (!player) {
-                continue;
-            }
+        if (!CollectOnlinePlayersFromNetHandler(env, localPlayerObject, onlinePlayers)) {
+            const auto players = world->GetPlayerEntities(env);
+            for (auto* player : players) {
+                if (!player) {
+                    continue;
+                }
 
-            if (localPlayerObject && env->IsSameObject(reinterpret_cast<jobject>(player), localPlayerObject)) {
+                if (localPlayerObject && env->IsSameObject(reinterpret_cast<jobject>(player), localPlayerObject)) {
+                    env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+                    continue;
+                }
+
+                const std::string playerName = player->GetName(env, true);
                 env->DeleteLocalRef(reinterpret_cast<jobject>(player));
-                continue;
+
+                if (playerName.empty()) {
+                    continue;
+                }
+
+                onlinePlayers.push_back(playerName);
             }
-
-            const std::string playerName = player->GetName(env, true);
-            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
-
-            if (playerName.empty()) {
-                continue;
-            }
-
-            onlinePlayers.push_back(playerName);
         }
 
         std::sort(onlinePlayers.begin(), onlinePlayers.end(), CaseInsensitiveNameLess);
@@ -195,6 +697,27 @@ namespace {
         }
 
         config->Target.m_OnlinePlayersCount = count;
+    }
+
+    void SyncOnlinePlayersToConfigSafe(JNIEnv* env, World* world, jobject localPlayerObject, ModuleConfig* config) {
+        if (!config) {
+            return;
+        }
+
+        if (!env || !world) {
+            ClearOnlinePlayersToConfig(config);
+            return;
+        }
+
+        if (env->PushLocalFrame(256) != 0) {
+            return;
+        }
+
+        SyncOnlinePlayersToConfig(env, world, localPlayerObject, config);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        env->PopLocalFrame(nullptr);
     }
 
     bool IsSameClanLikeHideClans(JNIEnv* env, Player* player, Player* localPlayer, Scoreboard* scoreboard) {
@@ -481,6 +1004,7 @@ void Target::TickSynchronous(void* envPtr) {
 
     if (!env) {
         ClearOnlinePlayersToConfig(config);
+        ClearTargetHealthCache();
         return;
     }
 
@@ -492,12 +1016,12 @@ void Target::TickSynchronous(void* envPtr) {
     jobject worldObject = Minecraft::GetTheWorld(env);
     if (!worldObject) {
         ClearOnlinePlayersToConfig(config);
+        ClearTargetHealthCache();
         return;
     }
 
     auto* world = reinterpret_cast<World*>(worldObject);
     jobject localPlayerObject = Minecraft::GetThePlayer(env);
-    SyncOnlinePlayersToConfig(env, world, localPlayerObject, config);
 
     if (!IsEnabled()) {
         g_TargetActiveManages.store(false);
@@ -516,6 +1040,7 @@ void Target::TickSynchronous(void* envPtr) {
         m_PreviousSwingProgressInt = 0;
         m_PreviousPhysicalClick = false;
         ClearInUse();
+        ClearTargetHealthCache();
         if (localPlayerObject) {
             env->DeleteLocalRef(localPlayerObject);
         }
@@ -532,6 +1057,7 @@ void Target::TickSynchronous(void* envPtr) {
     }
 
     auto* localPlayer = reinterpret_cast<Player*>(localPlayerObject);
+    SyncTargetHealthCache(env, world, localPlayerObject);
     const auto now = std::chrono::steady_clock::now();
     const bool isClicking = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
     const int swingProgress = localPlayer->GetSwingProgressInt(env);
@@ -658,7 +1184,7 @@ void Target::TickSynchronous(void* envPtr) {
             }
 
             const std::string playerName = player->GetName(env, true);
-            if (!targetName.empty() && playerName == targetName) {
+            if (!targetName.empty() && TargetNamesMatch(playerName, targetName)) {
                 try { player->Restore(env); } catch (...) {}
             } else {
                 try { player->Zero(env); } catch (...) {}
@@ -688,8 +1214,177 @@ void Target::TickSynchronous(void* envPtr) {
         }
     }
 
+    SyncOnlinePlayersToConfigSafe(env, world, localPlayerObject, config);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+
     m_PreviousPhysicalClick = isClicking;
     m_PreviousSwingProgressInt = swingProgress;
+    env->DeleteLocalRef(localPlayerObject);
+    env->DeleteLocalRef(worldObject);
+}
+
+void Target::RenderOverlay(ImDrawList* drawList, float screenW, float screenH) {
+    (void)screenW;
+    (void)screenH;
+
+    if (!IsEnabled() || !drawList || !g_Game || !g_Game->IsInitialized()) {
+        return;
+    }
+
+    auto* config = Bridge::Get()->GetConfig();
+    if (!config) {
+        return;
+    }
+
+    JNIEnv* env = g_Game->GetCurrentEnv();
+    if (!env) {
+        return;
+    }
+
+    jobject timerObject = Minecraft::GetTimer(env);
+    jobject worldObject = Minecraft::GetTheWorld(env);
+    jobject localPlayerObject = Minecraft::GetThePlayer(env);
+    if (!timerObject || !worldObject || !localPlayerObject) {
+        if (localPlayerObject) {
+            env->DeleteLocalRef(localPlayerObject);
+        }
+        if (worldObject) {
+            env->DeleteLocalRef(worldObject);
+        }
+        if (timerObject) {
+            env->DeleteLocalRef(timerObject);
+        }
+        return;
+    }
+
+    auto* timer = reinterpret_cast<Timer*>(timerObject);
+    auto* world = reinterpret_cast<World*>(worldObject);
+    auto* localPlayer = reinterpret_cast<Player*>(localPlayerObject);
+    const float partialTicks = timer->GetRenderPartialTicks(env);
+    env->DeleteLocalRef(timerObject);
+
+    const Vec3D localPos = localPlayer->GetPos(env);
+    const Vec3D localLastPos = localPlayer->GetLastTickPos(env);
+    const double localViewX = localLastPos.x + (localPos.x - localLastPos.x) * partialTicks;
+    const double localViewY = localLastPos.y + (localPos.y - localLastPos.y) * partialTicks;
+    const double localViewZ = localLastPos.z + (localPos.z - localLastPos.z) * partialTicks;
+
+    const RenderMatrixSnapshot renderSnapshot = CaptureRenderMatrixSnapshot();
+    if (!renderSnapshot.IsValid()) {
+        env->DeleteLocalRef(localPlayerObject);
+        env->DeleteLocalRef(worldObject);
+        return;
+    }
+
+    std::string targetName;
+    if (config->Target.m_AutoTarget || config->Target.m_TargetSwitch) {
+        targetName = GetLockedTarget();
+    } else {
+        targetName = config->Target.m_PlayerName;
+    }
+
+    if (targetName.empty()) {
+        env->DeleteLocalRef(localPlayerObject);
+        env->DeleteLocalRef(worldObject);
+        return;
+    }
+
+    ImDrawList* backgroundDrawList = ImGui::GetBackgroundDrawList();
+    if (!backgroundDrawList) {
+        backgroundDrawList = drawList;
+    }
+
+    bool drewAnyEsp = false;
+    const auto players = world->GetPlayerEntities(env);
+    for (auto* player : players) {
+        if (!player) {
+            continue;
+        }
+
+        if (env->IsSameObject(reinterpret_cast<jobject>(player), localPlayerObject)) {
+            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+            continue;
+        }
+
+        const std::string playerName = player->GetName(env, true);
+        if (!TargetNamesMatch(playerName, targetName)) {
+            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+            continue;
+        }
+
+        if (player->GetHealth(env) <= 0.0f) {
+            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+            continue;
+        }
+
+        float realHealth = player->GetRealHealth(env);
+        if (realHealth < 0.0f) {
+            realHealth = GetCachedTargetRealHealth(playerName);
+        }
+        if (realHealth < 0.0f) {
+            realHealth = player->GetHealth(env);
+        } else {
+            UpdateTargetRealHealth(playerName, realHealth);
+        }
+
+        if (player->IsInvisible(env)) {
+            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+            continue;
+        }
+
+        const Vec3D playerPos = player->GetPos(env);
+        const Vec3D playerLastPos = player->GetLastTickPos(env);
+        const double playerViewX = playerLastPos.x + (playerPos.x - playerLastPos.x) * partialTicks;
+        const double playerViewY = playerLastPos.y + (playerPos.y - playerLastPos.y) * partialTicks;
+        const double playerViewZ = playerLastPos.z + (playerPos.z - playerLastPos.z) * partialTicks;
+
+        const double dx = playerViewX - localViewX;
+        const double dy = playerViewY - localViewY;
+        const double dz = playerViewZ - localViewZ;
+        if (std::sqrt(dx * dx + dy * dy + dz * dz) > 255.0) {
+            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+            continue;
+        }
+
+        float width = player->GetWidth(env);
+        float height = player->GetHeight(env);
+        if (width <= 0.05f) {
+            width = 0.6f;
+        }
+        if (height <= 0.05f) {
+            height = 1.8f;
+        }
+
+        ProjectedTargetBox projectedBox;
+        if (!TryBuildProjectedTargetBox(
+                playerViewX,
+                playerViewY,
+                playerViewZ,
+                width,
+                height,
+                renderSnapshot,
+                projectedBox)) {
+            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+            continue;
+        }
+
+        float maxHealth = player->GetMaxHealth(env);
+        const int hurtTime = player->GetHurtTime(env);
+        const ImU32 color = BuildTargetEspColor(realHealth, maxHealth, hurtTime);
+        DrawProjectedTargetBox(backgroundDrawList, projectedBox, color);
+        DrawTargetHealthBar(backgroundDrawList, projectedBox, realHealth, maxHealth, color);
+
+        drewAnyEsp = true;
+        env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+        break;
+    }
+
+    if (drewAnyEsp) {
+        MarkInUse(120);
+    }
+
     env->DeleteLocalRef(localPlayerObject);
     env->DeleteLocalRef(worldObject);
 }
@@ -782,7 +1477,7 @@ void Target::ManageHitboxes(JNIEnv* env, Player* localPlayer, World* world) {
             }
         } else {
             const std::string playerName = player->GetName(env, true);
-            if (playerName == lockedTarget) {
+            if (TargetNamesMatch(playerName, lockedTarget)) {
                 try { player->Restore(env); } catch (...) {}
             } else {
                 try { player->Zero(env); } catch (...) {}
@@ -917,7 +1612,7 @@ bool Target::TrySelectBrowseTarget(JNIEnv* env, Player* localPlayer, World* worl
         }
 
         const float distance = localPlayer->GetDistanceToEntity(reinterpret_cast<jobject>(player), env);
-        if (!previousTarget.empty() && playerName == previousTarget) {
+        if (!previousTarget.empty() && TargetNamesMatch(playerName, previousTarget)) {
             if (distance < fallbackDistance) {
                 if (previousFallback) {
                     env->DeleteLocalRef(reinterpret_cast<jobject>(previousFallback));
@@ -1015,7 +1710,7 @@ void Target::SwitchToNextTarget(JNIEnv* env) {
         }
 
         const std::string playerName = player->GetName(env, true);
-        if (!previousTarget.empty() && playerName == previousTarget) {
+        if (!previousTarget.empty() && TargetNamesMatch(playerName, previousTarget)) {
             env->DeleteLocalRef(reinterpret_cast<jobject>(player));
             continue;
         }
@@ -1072,7 +1767,7 @@ bool Target::IsCurrentTargetInvalid(JNIEnv* env, Player* localPlayer) {
         }
 
         const std::string playerName = player->GetName(env, true);
-        if (playerName == currentTarget) {
+        if (TargetNamesMatch(playerName, currentTarget)) {
             found = IsValidCombatTarget(env, player, localPlayer);
             env->DeleteLocalRef(reinterpret_cast<jobject>(player));
             break;

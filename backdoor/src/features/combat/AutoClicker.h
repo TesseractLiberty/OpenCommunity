@@ -26,6 +26,8 @@ public:
     void SyncToConfig(void* configPtr) override {
         auto* config = static_cast<ModuleConfig*>(configPtr);
         if (!config) return;
+
+        SanitizeCpsRange();
         config->AutoClicker.m_Enabled = IsEnabled();
         if (m_Options.size() >= 4) {
             config->AutoClicker.m_MinCps = m_Options[0].intValue;
@@ -40,8 +42,13 @@ public:
         if (!config) return;
         SetEnabled(config->AutoClicker.m_Enabled);
         if (m_Options.size() >= 4) {
-            m_Options[0].intValue = config->AutoClicker.m_MinCps;
-            m_Options[1].intValue = config->AutoClicker.m_MaxCps;
+            int minCps = config->AutoClicker.m_MinCps;
+            int maxCps = config->AutoClicker.m_MaxCps;
+            NormalizeCpsRange(minCps, maxCps);
+            config->AutoClicker.m_MinCps = minCps;
+            config->AutoClicker.m_MaxCps = maxCps;
+            m_Options[0].intValue = minCps;
+            m_Options[1].intValue = maxCps;
             m_Options[2].boolValue = config->AutoClicker.m_Jitter;
             m_Options[3].boolValue = config->AutoClicker.m_OnlyWhileHolding;
         }
@@ -50,6 +57,7 @@ public:
     std::string GetTag() const override {
         int minCps = m_Options.size() >= 1 ? m_Options[0].intValue : 0;
         int maxCps = m_Options.size() >= 2 ? m_Options[1].intValue : 0;
+        NormalizeCpsRange(minCps, maxCps);
         char buf[32];
         if (minCps == maxCps)
             snprintf(buf, sizeof(buf), "%dcps", minCps);
@@ -58,13 +66,45 @@ public:
         return buf;
     }
 
+private:
+    static void NormalizeCpsRange(int& minCps, int& maxCps) {
+        minCps = (std::max)(1, minCps);
+        maxCps = (std::max)(1, maxCps);
+        if (minCps > maxCps) {
+            minCps = maxCps;
+        }
+    }
+
+    void SanitizeCpsRange() {
+        if (m_Options.size() < 2) {
+            return;
+        }
+
+        int minCps = m_Options[0].intValue;
+        int maxCps = m_Options[1].intValue;
+        NormalizeCpsRange(minCps, maxCps);
+        m_Options[0].intValue = minCps;
+        m_Options[1].intValue = maxCps;
+    }
+
 #ifdef _BACKDOOR
+public:
     void Tick() override;
     void Run();
     void Reset();
 
-    int GetMinCps() const { return m_Options[0].intValue; }
-    int GetMaxCps() const { return m_Options[1].intValue; }
+    int GetMinCps() const {
+        int minCps = m_Options[0].intValue;
+        int maxCps = m_Options[1].intValue;
+        NormalizeCpsRange(minCps, maxCps);
+        return minCps;
+    }
+    int GetMaxCps() const {
+        int minCps = m_Options[0].intValue;
+        int maxCps = m_Options[1].intValue;
+        NormalizeCpsRange(minCps, maxCps);
+        return maxCps;
+    }
     bool GetJitter() const { return m_Options[2].boolValue; }
     bool GetOnlyWhileHolding() const { return m_Options[3].boolValue; }
 

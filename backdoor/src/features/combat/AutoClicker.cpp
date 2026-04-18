@@ -43,7 +43,7 @@ bool AutoClicker::InitGameClasses() {
     }
 
     // Find theMinecraft static field and use it to get the instance method
-    // In Badlion (CASUAL_1_8): theMinecraft is static field "S" of type Lave;
+    // In Badlion (BADLION): theMinecraft is static field "S" of type Lave;
     auto theMinecraftName = Mapper::Get("theMinecraft");
     auto mcClassDesc = Mapper::Get("net/minecraft/client/Minecraft", 2); // "Lave;"
     
