@@ -30,6 +30,7 @@ namespace {
     constexpr float kNametagBaseFontSize = 15.5f;
     constexpr float kNametagSegmentSpacing = 5.0f;
     constexpr float kNametagShadowOffset = 1.0f;
+    constexpr float kHeartVerticalOffset = 3.25f;
     constexpr float kMinimumNametagScale = 0.72f;
     constexpr float kMaximumNametagScale = 1.08f;
     constexpr float kNametagTopOffset = 4.0f;
@@ -894,7 +895,7 @@ void Nametags::RenderOverlay(ImDrawList* drawList, float screenW, float screenH)
         DrawShadowedText(backgroundDrawList, tagFont, fontSize, ImVec2(cursorX, textBaselineY), healthColor, healthText);
         cursorX += healthSize.x + scaledSpacing;
 
-        const float iconY = std::round(tagMin.y + (tagHeight - heartSize.y) * 0.5f) + (0.9f * smoothedScale);
+        const float iconY = std::round(tagMin.y + (tagHeight - heartSize.y) * 0.5f) + (kHeartVerticalOffset * smoothedScale);
         DrawShadowedIcon(backgroundDrawList, tagFont, iconFontSize, ImVec2(cursorX, iconY), IM_COL32(255, 72, 72, 255), ICON_MD_FAVORITE);
         cursorX += heartSize.x + scaledSpacing;
 
