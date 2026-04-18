@@ -118,6 +118,7 @@
     <ClCompile Include="src\features\visuals\Target.cpp" />
     <ClCompile Include="src\features\visuals\HideClans.cpp" />
     <ClCompile Include="src\features\visuals\DamageIndicator.cpp" />
+    <ClCompile Include="src\features\visuals\Nametags.cpp" />
     <ClCompile Include="src\game\classes\ActiveRenderInfo.cpp" />
     <ClCompile Include="src\game\classes\Container.cpp" />
     <ClCompile Include="src\game\classes\GuiScreen.cpp" />
@@ -162,6 +163,7 @@
     <ClInclude Include="src\features\visuals\Target.h" />
     <ClInclude Include="src\features\visuals\HideClans.h" />
     <ClInclude Include="src\features\visuals\DamageIndicator.h" />
+    <ClInclude Include="src\features\visuals\Nametags.h" />
     <ClInclude Include="src\game\classes\ActiveRenderInfo.h" />
     <ClInclude Include="src\game\classes\Container.h" />
     <ClInclude Include="src\game\classes\GuiScreen.h" />

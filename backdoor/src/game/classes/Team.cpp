@@ -47,6 +47,46 @@ std::string Team::GetRegisteredName(JNIEnv* env) {
     return ReadStringResult(env, reinterpret_cast<jobject>(this), Mapper::Get("getRegisteredName").c_str());
 }
 
+jobject Team::GetNameTagVisibility(JNIEnv* env) {
+    if (!env || !this) {
+        return nullptr;
+    }
+
+    auto* teamClass = reinterpret_cast<Class*>(env->GetObjectClass(reinterpret_cast<jobject>(this)));
+    if (!teamClass) {
+        return nullptr;
+    }
+
+    const std::string methodName = Mapper::Get("getNameTagVisibility");
+    const std::string visibilitySignature = Mapper::Get("net/minecraft/scoreboard/Team$EnumVisible", 2);
+    const std::string signature = "()" + visibilitySignature;
+    Method* method = (methodName.empty() || visibilitySignature.empty()) ? nullptr : teamClass->GetMethod(env, methodName.c_str(), signature.c_str());
+    jobject visibility = method ? method->CallObjectMethod(env, this) : nullptr;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(teamClass));
+    return visibility;
+}
+
+void Team::SetNameTagVisibility(JNIEnv* env, jobject visibilityObject) {
+    if (!env || !this || !visibilityObject) {
+        return;
+    }
+
+    auto* teamClass = reinterpret_cast<Class*>(env->GetObjectClass(reinterpret_cast<jobject>(this)));
+    if (!teamClass) {
+        return;
+    }
+
+    const std::string methodName = Mapper::Get("setNameTagVisibility");
+    const std::string visibilitySignature = Mapper::Get("net/minecraft/scoreboard/Team$EnumVisible", 2);
+    const std::string signature = "(" + visibilitySignature + ")V";
+    Method* method = (methodName.empty() || visibilitySignature.empty()) ? nullptr : teamClass->GetMethod(env, methodName.c_str(), signature.c_str());
+    if (method) {
+        method->CallVoidMethod(env, this, false, visibilityObject);
+    }
+
+    env->DeleteLocalRef(reinterpret_cast<jclass>(teamClass));
+}
+
 bool Team::IsSameTeam(JNIEnv* env, Team* other) {
     if (!env || !this || !other) {
         return false;

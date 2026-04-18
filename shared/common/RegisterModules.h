@@ -10,6 +10,7 @@
 #include "../../backdoor/src/features/movement/NoJumpDelay.h"
 #include "../../backdoor/src/features/visuals/ArrayList.h"
 #include "../../backdoor/src/features/visuals/DamageIndicator.h"
+#include "../../backdoor/src/features/visuals/Nametags.h"
 #include "../../backdoor/src/features/visuals/Target.h"
 #include "../../backdoor/src/features/visuals/HideClans.h"
 
@@ -26,4 +27,5 @@ inline void RegisterAllModules() {
     fm->RegisterModule(std::make_shared<NoJumpDelay>());
     fm->RegisterModule(std::make_shared<ArrayList>());
     fm->RegisterModule(std::make_shared<DamageIndicator>());
+    fm->RegisterModule(std::make_shared<Nametags>());
 }

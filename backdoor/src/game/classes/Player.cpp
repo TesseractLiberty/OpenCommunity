@@ -777,6 +777,33 @@ void Player::SetPosition(double x, double y, double z, JNIEnv* env) {
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
 }
 
+void Player::SetAlwaysRenderNameTag(bool value, JNIEnv* env) {
+    if (!env || !this) {
+        return;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return;
+    }
+
+    const std::string mappedMethod = Mapper::Get("setAlwaysRenderNameTag");
+    const char* methodNames[] = {
+        mappedMethod.c_str(),
+        "setAlwaysRenderNameTag",
+        "func_174805_g",
+        "g",
+        nullptr
+    };
+
+    Method* method = FindMethod(env, playerClass, methodNames, "(Z)V");
+    if (method) {
+        method->CallVoidMethod(env, this, false, value);
+    }
+
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+}
+
 bool Player::IsInvisible(JNIEnv* env) {
     if (!env || !this) {
         return true;

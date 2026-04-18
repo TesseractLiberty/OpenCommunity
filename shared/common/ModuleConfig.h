@@ -102,6 +102,10 @@ struct ModuleConfig {
 
     struct {
         bool m_Enabled = false;
+    } Nametags;
+
+    struct {
+        bool m_Enabled = false;
     } NoHitDelay;
 
     struct {
@@ -127,6 +131,7 @@ struct ModuleConfig {
         bool m_DamageIndicator = false;
         bool m_Target = false;
         bool m_HideClans = false;
+        bool m_Nametags = false;
         bool m_RightClicker = false;
         bool m_WTap = false;
         bool m_AimAssist = false;

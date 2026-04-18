@@ -7,6 +7,31 @@
 #include "../jni/Method.h"
 #include "../mapping/Mapper.h"
 
+jobject Scoreboard::GetTeam(JNIEnv* env, const std::string& teamName) {
+    if (!env || !this || teamName.empty()) {
+        return nullptr;
+    }
+
+    auto* scoreboardClass = reinterpret_cast<Class*>(env->GetObjectClass(reinterpret_cast<jobject>(this)));
+    if (!scoreboardClass) {
+        return nullptr;
+    }
+
+    const std::string methodName = Mapper::Get("getTeam");
+    const std::string teamSignature = Mapper::Get("net/minecraft/scoreboard/ScorePlayerTeam", 2);
+    const std::string signature = "(Ljava/lang/String;)" + teamSignature;
+    Method* method = (methodName.empty() || teamSignature.empty()) ? nullptr : scoreboardClass->GetMethod(env, methodName.c_str(), signature.c_str());
+
+    jstring teamNameObject = env->NewStringUTF(teamName.c_str());
+    jobject team = (method && teamNameObject) ? method->CallObjectMethod(env, this, false, teamNameObject) : nullptr;
+    if (teamNameObject) {
+        env->DeleteLocalRef(teamNameObject);
+    }
+
+    env->DeleteLocalRef(reinterpret_cast<jclass>(scoreboardClass));
+    return team;
+}
+
 jobject Scoreboard::GetPlayersTeam(JNIEnv* env, const std::string& playerName) {
     if (!env || !this || playerName.empty()) {
         return nullptr;
@@ -30,6 +55,107 @@ jobject Scoreboard::GetPlayersTeam(JNIEnv* env, const std::string& playerName) {
 
     env->DeleteLocalRef(reinterpret_cast<jclass>(scoreboardClass));
     return team;
+}
+
+jobject Scoreboard::CreateTeam(JNIEnv* env, const std::string& teamName) {
+    if (!env || !this || teamName.empty()) {
+        return nullptr;
+    }
+
+    auto* scoreboardClass = reinterpret_cast<Class*>(env->GetObjectClass(reinterpret_cast<jobject>(this)));
+    if (!scoreboardClass) {
+        return nullptr;
+    }
+
+    const std::string methodName = Mapper::Get("createTeam");
+    const std::string teamSignature = Mapper::Get("net/minecraft/scoreboard/ScorePlayerTeam", 2);
+    const std::string signature = "(Ljava/lang/String;)" + teamSignature;
+    Method* method = (methodName.empty() || teamSignature.empty()) ? nullptr : scoreboardClass->GetMethod(env, methodName.c_str(), signature.c_str());
+
+    jstring teamNameObject = env->NewStringUTF(teamName.c_str());
+    jobject team = (method && teamNameObject) ? method->CallObjectMethod(env, this, false, teamNameObject) : nullptr;
+    if (teamNameObject) {
+        env->DeleteLocalRef(teamNameObject);
+    }
+
+    env->DeleteLocalRef(reinterpret_cast<jclass>(scoreboardClass));
+    return team;
+}
+
+bool Scoreboard::AddPlayerToTeam(JNIEnv* env, const std::string& playerName, const std::string& teamName) {
+    if (!env || !this || playerName.empty() || teamName.empty()) {
+        return false;
+    }
+
+    auto* scoreboardClass = reinterpret_cast<Class*>(env->GetObjectClass(reinterpret_cast<jobject>(this)));
+    if (!scoreboardClass) {
+        return false;
+    }
+
+    const std::string methodName = Mapper::Get("addPlayerToTeam");
+    Method* method = methodName.empty() ? nullptr : scoreboardClass->GetMethod(env, methodName.c_str(), "(Ljava/lang/String;Ljava/lang/String;)Z");
+
+    jstring playerNameObject = env->NewStringUTF(playerName.c_str());
+    jstring teamNameObject = env->NewStringUTF(teamName.c_str());
+    const bool added = (method && playerNameObject && teamNameObject)
+        ? method->CallBooleanMethod(env, this, false, playerNameObject, teamNameObject)
+        : false;
+
+    if (playerNameObject) {
+        env->DeleteLocalRef(playerNameObject);
+    }
+    if (teamNameObject) {
+        env->DeleteLocalRef(teamNameObject);
+    }
+
+    env->DeleteLocalRef(reinterpret_cast<jclass>(scoreboardClass));
+    return added;
+}
+
+bool Scoreboard::RemovePlayerFromTeams(JNIEnv* env, const std::string& playerName) {
+    if (!env || !this || playerName.empty()) {
+        return false;
+    }
+
+    auto* scoreboardClass = reinterpret_cast<Class*>(env->GetObjectClass(reinterpret_cast<jobject>(this)));
+    if (!scoreboardClass) {
+        return false;
+    }
+
+    const std::string methodName = Mapper::Get("removePlayerFromTeams");
+    Method* method = methodName.empty() ? nullptr : scoreboardClass->GetMethod(env, methodName.c_str(), "(Ljava/lang/String;)Z");
+
+    jstring playerNameObject = env->NewStringUTF(playerName.c_str());
+    const bool removed = (method && playerNameObject)
+        ? method->CallBooleanMethod(env, this, false, playerNameObject)
+        : false;
+    if (playerNameObject) {
+        env->DeleteLocalRef(playerNameObject);
+    }
+
+    env->DeleteLocalRef(reinterpret_cast<jclass>(scoreboardClass));
+    return removed;
+}
+
+void Scoreboard::RemoveTeam(JNIEnv* env, jobject teamObject) {
+    if (!env || !this || !teamObject) {
+        return;
+    }
+
+    auto* scoreboardClass = reinterpret_cast<Class*>(env->GetObjectClass(reinterpret_cast<jobject>(this)));
+    if (!scoreboardClass) {
+        return;
+    }
+
+    const std::string methodName = Mapper::Get("removeTeam");
+    const std::string teamSignature = Mapper::Get("net/minecraft/scoreboard/ScorePlayerTeam", 2);
+    const std::string signature = "(" + teamSignature + ")V";
+    Method* method = (methodName.empty() || teamSignature.empty()) ? nullptr : scoreboardClass->GetMethod(env, methodName.c_str(), signature.c_str());
+    if (method) {
+        method->CallVoidMethod(env, this, false, teamObject);
+    }
+
+    env->DeleteLocalRef(reinterpret_cast<jclass>(scoreboardClass));
 }
 
 jobject Scoreboard::GetObjectiveInDisplaySlot(JNIEnv* env, int slot) {

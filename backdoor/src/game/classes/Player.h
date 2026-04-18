@@ -33,6 +33,7 @@ public:
     void SetWidth(float value, JNIEnv* env);
     void SetHeight(float value, JNIEnv* env);
     void SetPosition(double x, double y, double z, JNIEnv* env);
+    void SetAlwaysRenderNameTag(bool value, JNIEnv* env);
     bool IsInvisible(JNIEnv* env);
     int GetHurtTime(JNIEnv* env);
     bool IsUsingItem(JNIEnv* env);

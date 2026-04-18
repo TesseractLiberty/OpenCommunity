@@ -2,6 +2,7 @@
 #include "RenderHook.h"
 #include "../features/render/HUD.h"
 #include "../features/visuals/DamageIndicator.h"
+#include "../features/visuals/Nametags.h"
 #include "Bridge.h"
 #include "../game/classes/ActiveRenderInfo.h"
 #include "../game/classes/Minecraft.h"
@@ -19,6 +20,7 @@
 #include "../../../deps/imgui/open_sans_regular_font.h"
 #include "../../../deps/imgui/play_bold_font.h"
 #include "../../../deps/imgui/play_regular_font.h"
+#include "../../../deps/imgui/sf_ui_display_bold_font.h"
 
 #include <filesystem>
 #include <gl/GL.h>
@@ -32,6 +34,7 @@ static ImFont* g_overlayBoldFont = nullptr;
 static ImFont* g_overlayVapeFont = nullptr;
 static ImFont* g_overlayOpenSansRegularFont = nullptr;
 static ImFont* g_overlayOpenSansBoldFont = nullptr;
+static ImFont* g_overlaySanFranciscoBoldFont = nullptr;
 
 namespace RenderCache {
     std::vector<float> modelView(16, 0.0f);
@@ -289,6 +292,28 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
             &fontCfg
         );
 
+        fontCfg.FontDataOwnedByAtlas = false;
+        g_overlaySanFranciscoBoldFont = io.Fonts->AddFontFromMemoryTTF(
+            const_cast<unsigned char*>(fonts::sf_ui_display_bold_data),
+            fonts::sf_ui_display_bold_size,
+            16.0f,
+            &fontCfg
+        );
+
+        if (g_overlaySanFranciscoBoldFont) {
+            static const ImWchar iconRanges[] = { static_cast<ImWchar>(ICON_MIN_MD), static_cast<ImWchar>(ICON_MAX_16_MD), 0 };
+            ImFontConfig iconCfg;
+            iconCfg.MergeMode = true;
+            iconCfg.PixelSnapH = true;
+            io.Fonts->AddFontFromMemoryCompressedTTF(
+                fonts::materialicons_compressed_data,
+                fonts::materialicons_compressed_size,
+                16.0f,
+                &iconCfg,
+                iconRanges
+            );
+        }
+
         const auto vapeFontPath = FindOverlayFontPath();
         if (!vapeFontPath.empty()) {
             ImFontConfig vapeCfg;
@@ -318,9 +343,13 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
         if (!g_overlayOpenSansBoldFont) {
             g_overlayOpenSansBoldFont = g_overlayOpenSansRegularFont;
         }
+        if (!g_overlaySanFranciscoBoldFont) {
+            g_overlaySanFranciscoBoldFont = g_overlayRegularFont;
+        }
 
         HUD::Get()->SetFonts(g_overlayRegularFont, g_overlayBoldFont, g_overlayVapeFont);
         DamageIndicator::SetFonts(g_overlayOpenSansRegularFont, g_overlayOpenSansBoldFont);
+        Nametags::SetFont(g_overlaySanFranciscoBoldFont);
         ImGui_ImplOpenGL2_Init();
         g_fontsInitialized = true;
     });
@@ -400,6 +429,8 @@ void RenderHook::Shutdown() {
         g_overlayVapeFont = nullptr;
         g_overlayOpenSansRegularFont = nullptr;
         g_overlayOpenSansBoldFont = nullptr;
+        g_overlaySanFranciscoBoldFont = nullptr;
+        Nametags::SetFont(nullptr);
         g_fontsInitialized = false;
     }
 
