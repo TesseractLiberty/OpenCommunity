@@ -5064,7 +5064,7 @@ void Screen::Render() {
 
     const float deltaTime = (std::max)(ImGui::GetIO().DeltaTime, 1.0f / 240.0f);
     const float overlayTarget = m_IsWindowMoveActive ? 1.0f : 0.0f;
-    const float overlayBlend = 1.0f - std::exp(-deltaTime * 18.0f);
+    const float overlayBlend = 1.0f - static_cast<float>(std::exp(-static_cast<double>(deltaTime * 18.0f)));
     m_WindowMoveOverlayAlpha += (overlayTarget - m_WindowMoveOverlayAlpha) * overlayBlend;
     m_WindowMoveOverlayAlpha = (std::clamp)(m_WindowMoveOverlayAlpha, 0.0f, 1.0f);
     

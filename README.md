@@ -267,14 +267,16 @@ The frontdoor also handles DLL obfuscation/deobfuscation before injection so the
 
 ## Dependencies
 
-The following runtimes must be installed before building or running:
+The following runtimes and SDKs must be installed before building or running:
 
 | Dependency | Download |
 |------------|----------|
 | DirectX End-User Runtime (June 2010) | [microsoft.com](https://www.microsoft.com/en-US/download/details.aspx?id=6812) |
-| .NET Framework 3.5 SP1 | [microsoft.com](https://www.microsoft.com/en-US/download/details.aspx?id=35) |
+| .NET Framework 3.5 SP1 runtime | [microsoft.com](https://www.microsoft.com/en-US/download/details.aspx?id=35) |
 | Visual C++ Redistributable (x64) | [aka.ms](https://aka.ms/vc14/vc_redist.x64.exe) |
 | .NET SDK 10.0 | [dotnet.microsoft.com](https://dotnet.microsoft.com/en-us/download/dotnet/thank-you/sdk-10.0.201-windows-x64-installer) |
+| Visual Studio .NET Framework SDK / targeting pack (NETFXSDK, provides `cor.h`) | Install through the Visual Studio Installer |
+| A JDK with JNI headers (`jni.h`) and `JAVA_HOME` pointing to it | Install through Adoptium, Zulu, or another JDK distribution |
 
 ### Bundled Libraries
 
@@ -290,16 +292,18 @@ The following runtimes must be installed before building or running:
 - Windows 10/11 x64
 - Visual Studio 2022 (or later) with C++17 support
 - Windows SDK 10.0+
+- A Visual Studio installation that includes the .NET Framework SDK / targeting pack
 - All [dependencies](#dependencies) listed above
 
 **Steps:**
 
 1. Clone the repository.
 2. Open the solution in Visual Studio.
-3. Set the build configuration to `x64` (Release or Debug).
-4. Build the **frontdoor** project first.
-5. Build the **backdoor** project.
-6. Run the frontdoor — it handles injection automatically.
+3. Set `JAVA_HOME` to a JDK root that contains `include\jni.h`.
+4. Set the build configuration to `x64` (Release or Debug).
+5. Build the **frontdoor** project first.
+6. Build the **backdoor** project.
+7. Run the frontdoor — it handles injection automatically.
 
 > The backdoor builds as a DLL and the frontdoor as an EXE. The frontdoor needs the backdoor DLL to be available at injection time.
 
