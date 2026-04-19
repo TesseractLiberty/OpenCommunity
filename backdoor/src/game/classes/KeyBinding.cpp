@@ -12,29 +12,19 @@ int KeyBinding::GetKeyCode(JNIEnv* env) {
         return 0;
     }
 
-    Class* keyBindingClass = g_Game->FindClass(Mapper::Get("net/minecraft/client/settings/KeyBinding"));
+    const std::string className = Mapper::Get("net/minecraft/client/settings/KeyBinding");
+    const std::string fieldName = Mapper::Get("keyCode");
+    if (className.empty() || fieldName.empty()) {
+        return 0;
+    }
+
+    Class* keyBindingClass = g_Game->FindClass(className);
     if (!keyBindingClass) {
         return 0;
     }
 
-    const char* possibleFields[] = {
-        Mapper::Get("keyCode").c_str(),
-        "g",
-        "field_74512_d"
-    };
-
-    for (const char* fieldName : possibleFields) {
-        if (!fieldName || !fieldName[0]) {
-            continue;
-        }
-
-        Field* field = keyBindingClass->GetField(env, fieldName, "I");
-        if (field) {
-            return field->GetIntField(env, this);
-        }
-    }
-
-    return 0;
+    Field* field = keyBindingClass->GetField(env, fieldName.c_str(), "I");
+    return field ? field->GetIntField(env, this) : 0;
 }
 
 void KeyBinding::SetKeyBindState(int keyCode, bool pressed, JNIEnv* env) {
@@ -52,33 +42,13 @@ void KeyBinding::SetKeyBindState(int keyCode, bool pressed, JNIEnv* env) {
         return;
     }
 
-    const char* possibleMethods[] = {
-        Mapper::Get("setKeyBindState").c_str(),
-        "func_74510_a",
-        "a"
-    };
-
-    jmethodID methodId = nullptr;
-    for (const char* methodName : possibleMethods) {
-        if (!methodName || !methodName[0]) {
-            continue;
-        }
-
-        methodId = env->GetStaticMethodID(reinterpret_cast<jclass>(keyBindingClass), methodName, "(IZ)V");
-        if (env->ExceptionCheck()) {
-            env->ExceptionClear();
-            methodId = nullptr;
-        }
-
-        if (methodId) {
-            break;
-        }
+    const std::string methodName = Mapper::Get("setKeyBindState");
+    if (methodName.empty()) {
+        return;
     }
 
-    if (methodId) {
-        env->CallStaticVoidMethod(reinterpret_cast<jclass>(keyBindingClass), methodId, keyCode, pressed);
-        if (env->ExceptionCheck()) {
-            env->ExceptionClear();
-        }
+    Method* method = keyBindingClass->GetMethod(env, methodName.c_str(), "(IZ)V", true);
+    if (method) {
+        method->CallVoidMethod(env, keyBindingClass, true, keyCode, pressed);
     }
 }

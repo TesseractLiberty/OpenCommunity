@@ -22,10 +22,11 @@ struct ModuleConfig {
         bool m_Watermark = true;
         bool m_SpacedModules = false;
         bool m_ColorBar = true;
-        bool m_Rainbow = true;
+        bool m_Wave = true;
         bool m_Background = true;
-        float m_RainbowSpeed = 1.0f;
-        float m_Color[4] = { 78.0f / 255.0f, 86.0f / 255.0f, 107.0f / 255.0f, 1.0f };
+        float m_WaveSpeed = 1.0f;
+        float m_PrimaryColor[4] = { 78.0f / 255.0f, 86.0f / 255.0f, 107.0f / 255.0f, 1.0f };
+        float m_SecondaryColor[4] = { 120.0f / 255.0f, 146.0f / 255.0f, 214.0f / 255.0f, 1.0f };
         int m_Mode = static_cast<int>(ArrayListMode::Default);
     } HUD;
 

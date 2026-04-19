@@ -1607,6 +1607,27 @@ namespace
         ImGui::ColorConvertHSVtoRGB(hue, 0.72f, 0.95f, r, g, b);
     }
 
+    void GetWaveRGB(const ModuleConfig* config, int offset, float& r, float& g, float& b)
+    {
+        if (!config) {
+            r = 78.0f / 255.0f;
+            g = 86.0f / 255.0f;
+            b = 107.0f / 255.0f;
+            return;
+        }
+
+        const float speed = (std::max)(config->HUD.m_WaveSpeed, 0.01f);
+        const float cycleDurationMs = 2500.0f / speed;
+        const float elapsedMs = static_cast<float>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count() + offset);
+        const float cycleProgress = fmodf(elapsedMs, cycleDurationMs) / cycleDurationMs;
+        const float blend = 0.5f - 0.5f * cosf(cycleProgress * 6.28318530718f);
+
+        r = config->HUD.m_PrimaryColor[0] + (config->HUD.m_SecondaryColor[0] - config->HUD.m_PrimaryColor[0]) * blend;
+        g = config->HUD.m_PrimaryColor[1] + (config->HUD.m_SecondaryColor[1] - config->HUD.m_PrimaryColor[1]) * blend;
+        b = config->HUD.m_PrimaryColor[2] + (config->HUD.m_SecondaryColor[2] - config->HUD.m_PrimaryColor[2]) * blend;
+    }
+
     void GetTesseractRGB(int offset, float& r, float& g, float& b)
     {
         const double tMs = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -2011,18 +2032,12 @@ namespace
             return false;
         }
 
-        colorValue = ClampColorVec4(colorValue);
-        int rgb[3] = {
-            static_cast<int>(colorValue.x * 255.0f + 0.5f),
-            static_cast<int>(colorValue.y * 255.0f + 0.5f),
-            static_cast<int>(colorValue.z * 255.0f + 0.5f)
-        };
+        (void)font;
+        (void)fontSize;
 
-        char compactLabel[24];
-        snprintf(compactLabel, sizeof(compactLabel), "#%02X%02X%02X", rgb[0], rgb[1], rgb[2]);
+        colorValue = ClampColorVec4(colorValue);
         char popupId[128];
         snprintf(popupId, sizeof(popupId), "%s_picker", id ? id : "theme_color");
-        static ImVec4 s_ThemePickerOriginalColor = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
 
         ImGui::PushID(id);
         ImGui::SetCursorScreenPos(pos);
@@ -2032,7 +2047,6 @@ namespace
         const bool active = ImGui::IsItemActive();
         const bool popupOpen = ImGui::IsPopupOpen(popupId);
         if (ImGui::IsItemClicked()) {
-            s_ThemePickerOriginalColor = colorValue;
             ImGui::OpenPopup(popupId);
         }
 
@@ -2050,26 +2064,31 @@ namespace
         drawList->AddRectFilled(swatchMin, swatchMax, ImGui::ColorConvertFloat4ToU32(colorValue), 7.0f);
         drawList->AddRect(swatchMin, swatchMax, color::GetBorderU32(0.94f), 7.0f, 0, 1.0f);
 
-        const ImVec2 labelSize = CalcTextSizeWithFont(font, compactLabel, fontSize - 1.0f);
-        const float labelX = swatchMax.x + 10.0f;
-        drawList->AddText(
-            font,
-            fontSize - 1.0f,
-            ImVec2(labelX, min.y + (size.y - labelSize.y) * 0.5f - 1.0f),
-            color::GetStrongTextU32(),
-            compactLabel);
+        const float chevronCenterX = max.x - 12.0f;
+        const float chevronCenterY = min.y + size.y * 0.5f;
+        const ImU32 chevronColor = color::GetMutedTextU32(popupOpen || hovered ? 0.95f : 0.82f);
+        drawList->AddLine(
+            ImVec2(chevronCenterX - 3.5f, chevronCenterY - 1.5f),
+            ImVec2(chevronCenterX, chevronCenterY + 2.0f),
+            chevronColor,
+            1.6f);
+        drawList->AddLine(
+            ImVec2(chevronCenterX, chevronCenterY + 2.0f),
+            ImVec2(chevronCenterX + 3.5f, chevronCenterY - 1.5f),
+            chevronColor,
+            1.6f);
 
         bool changed = false;
         ImGui::SetNextWindowPos(ImVec2(min.x, max.y + 8.0f), ImGuiCond_Appearing);
-        ImGui::SetNextWindowSize(ImVec2(402.0f, 0.0f), ImGuiCond_Appearing);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 14.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 12.0f));
+        ImGui::SetNextWindowSize(ImVec2(242.0f, 0.0f), ImGuiCond_Appearing);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 10.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, ImVec2(6.0f, 6.0f));
         ImGui::PushStyleColor(ImGuiCol_PopupBg, color::GetPanelVec4(0.99f));
         ImGui::PushStyleColor(ImGuiCol_Border, color::GetBorderVec4(0.92f));
         if (ImGui::BeginPopup(popupId)) {
             float pickerColor[4] = { colorValue.x, colorValue.y, colorValue.z, 1.0f };
-            const float referenceColor[4] = { s_ThemePickerOriginalColor.x, s_ThemePickerOriginalColor.y, s_ThemePickerOriginalColor.z, 1.0f };
 
             ImGui::PushStyleColor(ImGuiCol_FrameBg, color::GetFieldBgVec4(0.96f));
             ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, color::GetFieldHoverVec4(0.98f));
@@ -2082,11 +2101,14 @@ namespace
             const ImGuiColorEditFlags pickerFlags =
                 ImGuiColorEditFlags_NoAlpha |
                 ImGuiColorEditFlags_PickerHueBar |
-                ImGuiColorEditFlags_DisplayRGB |
-                ImGuiColorEditFlags_DisplayHSV |
+                ImGuiColorEditFlags_NoSidePreview |
+                ImGuiColorEditFlags_NoSmallPreview |
+                ImGuiColorEditFlags_NoInputs |
+                ImGuiColorEditFlags_NoOptions |
+                ImGuiColorEditFlags_NoTooltip |
                 ImGuiColorEditFlags_InputRGB;
 
-            if (ImGui::ColorPicker4("##astralis_theme_picker", pickerColor, pickerFlags, referenceColor)) {
+            if (ImGui::ColorPicker4("##astralis_theme_picker", pickerColor, pickerFlags)) {
                 changed = true;
                 colorValue = ClampColorVec4(ImVec4(pickerColor[0], pickerColor[1], pickerColor[2], 1.0f));
             }
@@ -2095,7 +2117,7 @@ namespace
             ImGui::EndPopup();
         }
         ImGui::PopStyleColor(2);
-        ImGui::PopStyleVar(3);
+        ImGui::PopStyleVar(4);
         ImGui::PopID();
 
         return changed;
@@ -3385,10 +3407,12 @@ void Screen::RenderHUDPreview() {
             GetRiseRGB(0, hueR, hueG, hueB);
         } else if (tesseractMode) {
             GetTesseractHeaderRGB(0, hueR, hueG, hueB);
+        } else if (config && config->HUD.m_Wave) {
+            GetWaveRGB(config, 0, hueR, hueG, hueB);
         } else {
-            const double tMs = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-            ImGui::ColorConvertHSVtoRGB((float)fmod(tMs / 2000.0, 1.0), 0.75f, 0.9f, hueR, hueG, hueB);
+            hueR = config ? config->HUD.m_PrimaryColor[0] : (78.0f / 255.0f);
+            hueG = config ? config->HUD.m_PrimaryColor[1] : (86.0f / 255.0f);
+            hueB = config ? config->HUD.m_PrimaryColor[2] : (107.0f / 255.0f);
         }
         const ImU32 accentColor = MakeColorU32(hueR, hueG, hueB);
         const std::string middle = " | " + nick + " | ";
@@ -3458,7 +3482,6 @@ void Screen::RenderHUDPreview() {
     });
 
     int idx = 0;
-    const float goldenRatio = 0.618033988749895f;
 
     for (const auto& mod : activeModules) {
         const ImVec2 nameSizePx = CalcTextSizeWithFont(nameFont, mod.name.c_str(), nameFontSize);
@@ -3472,13 +3495,12 @@ void Screen::RenderHUDPreview() {
             GetRiseRGB(idx, cr, cg, cb);
         } else if (tesseractMode) {
             GetTesseractRGB(idx, cr, cg, cb);
+        } else if (config && config->HUD.m_Wave) {
+            GetWaveRGB(config, idx * 400, cr, cg, cb);
         } else {
-            double tMsD = (double)std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now().time_since_epoch()).count();
-            float bHue = (float)fmod(tMsD / 2000.0, 1.0);
-            float hueOffset = fmodf(idx * goldenRatio, 1.0f);
-            float hue = fmodf(bHue + hueOffset, 1.0f);
-            ImGui::ColorConvertHSVtoRGB(hue, 0.75f, 0.9f, cr, cg, cb);
+            cr = config ? config->HUD.m_PrimaryColor[0] : (78.0f / 255.0f);
+            cg = config ? config->HUD.m_PrimaryColor[1] : (86.0f / 255.0f);
+            cb = config ? config->HUD.m_PrimaryColor[2] : (107.0f / 255.0f);
         }
         const ImU32 modColor = MakeColorU32(cr, cg, cb);
 
@@ -4039,11 +4061,29 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                 }
                 case OptionType::Color: {
                     dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), color::GetStrongTextU32(), opt.name.c_str());
-                    ImGui::SetCursorScreenPos(ImVec2(optX + optW - sliderW, optY));
-                    ImGui::PushItemWidth(sliderW);
-                    ImGui::ColorEdit3(optId, opt.colorValue, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel);
-                    opt.colorValue[3] = 1.0f;
-                    ImGui::PopItemWidth();
+
+                    ImVec4 colorValue(
+                        opt.colorValue[0],
+                        opt.colorValue[1],
+                        opt.colorValue[2],
+                        1.0f);
+                    if (DrawCompactThemeColorField(
+                            dl,
+                            optId,
+                            ImVec2(optX + optW - sliderW, optY + (optLineH - 28.0f) * 0.5f),
+                            ImVec2(sliderW, 28.0f),
+                            colorValue,
+                            labelFont,
+                            labelFS)) {
+                        opt.colorValue[0] = colorValue.x;
+                        opt.colorValue[1] = colorValue.y;
+                        opt.colorValue[2] = colorValue.z;
+                        opt.colorValue[3] = 1.0f;
+                        mod->OnOptionEdited(optionIndex);
+                    } else {
+                        opt.colorValue[3] = 1.0f;
+                    }
+
                     break;
                 }
                 case OptionType::Text: {

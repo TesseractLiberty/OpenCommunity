@@ -42,32 +42,18 @@ bool AutoClicker::InitGameClasses() {
         return false;
     }
 
-    // Find theMinecraft static field and use it to get the instance method
-    // In Badlion (BADLION): theMinecraft is static field "S" of type Lave;
     auto theMinecraftName = Mapper::Get("theMinecraft");
-    auto mcClassDesc = Mapper::Get("net/minecraft/client/Minecraft", 2); // "Lave;"
-    
+    auto mcClassDesc = Mapper::Get("net/minecraft/client/Minecraft", 2);
     if (!theMinecraftName.empty() && !mcClassDesc.empty()) {
-        m_GetMinecraftMethod = nullptr;
-        // But first try to find getMinecraft() as a static method
-        // The fweet internal uses Mapper::Get with type 3 for method descriptors
-        auto getMinecraftDesc = Mapper::Get("net/minecraft/client/Minecraft", 3); // "()Lave;"
-        
-        // Try common method names for getMinecraft
-        const char* methodNames[] = { "A", "func_71410_x", "getMinecraft" };
-        for (const char* name : methodNames) {
-            m_GetMinecraftMethod = m_MinecraftClass->GetMethod(env, name, getMinecraftDesc.c_str(), true);
-            if (m_GetMinecraftMethod) break;
-        }
+        m_TheMinecraftField = m_MinecraftClass->GetField(env, theMinecraftName.c_str(), mcClassDesc.c_str(), true);
     }
 
-    // Find leftClickCounter field using Mapper
     auto leftClickName = Mapper::Get("leftClickCounter");
     if (!leftClickName.empty()) {
         m_LeftClickCounterField = m_MinecraftClass->GetField(env, leftClickName.c_str(), "I");
     }
 
-    if (!m_LeftClickCounterField) {
+    if (!m_TheMinecraftField || !m_LeftClickCounterField) {
         m_GameClassesFailed = true;
         return false;
     }
@@ -77,25 +63,11 @@ bool AutoClicker::InitGameClasses() {
 }
 
 // SEH wrapper — no C++ objects with destructors allowed here
-static void DoResetLeftClickCounter(JNIEnv* env, Class* minecraftClass, Method* getMinecraftMethod, 
-                                     Field* leftClickCounterField, const char* theMinecraftFieldName, 
-                                     const char* mcClassDescStr) {
+static void DoResetLeftClickCounter(JNIEnv* env, Class* minecraftClass, Field* theMinecraftField, Field* leftClickCounterField) {
     __try {
         if (env->ExceptionCheck()) env->ExceptionClear();
 
-        jobject mcInstance = nullptr;
-        
-        if (getMinecraftMethod) {
-            mcInstance = getMinecraftMethod->CallObjectMethod(env, minecraftClass, true);
-        } else {
-            if (theMinecraftFieldName && mcClassDescStr) {
-                auto* theMinecraftField = minecraftClass->GetField(env, theMinecraftFieldName, mcClassDescStr, true);
-                if (theMinecraftField) {
-                    mcInstance = theMinecraftField->GetObjectField(env, minecraftClass, true);
-                }
-            }
-        }
-
+        jobject mcInstance = theMinecraftField ? theMinecraftField->GetObjectField(env, minecraftClass, true) : nullptr;
         if (!mcInstance) return;
 
         leftClickCounterField->SetIntField(env, mcInstance, 0);
@@ -111,14 +83,7 @@ void AutoClicker::ResetLeftClickCounter() {
     auto* env = g_Game->GetENV();
     if (!env) return;
 
-    // Resolve std::string values here (outside SEH)
-    std::string theMinecraftName = Mapper::Get("theMinecraft");
-    std::string mcClassDesc = Mapper::Get("net/minecraft/client/Minecraft", 2);
-
-    DoResetLeftClickCounter(env, m_MinecraftClass, m_GetMinecraftMethod,
-                            m_LeftClickCounterField,
-                            theMinecraftName.empty() ? nullptr : theMinecraftName.c_str(),
-                            mcClassDesc.empty() ? nullptr : mcClassDesc.c_str());
+    DoResetLeftClickCounter(env, m_MinecraftClass, m_TheMinecraftField, m_LeftClickCounterField);
 }
 
 AutoClicker::Clock::duration AutoClicker::NextInterval() {

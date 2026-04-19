@@ -5,6 +5,17 @@
 #include "../jni/Field.h"
 #include "../mapping/Mapper.h"
 
+namespace {
+    Field* GetBoundingBoxField(JNIEnv* env, Class* axisClass, const char* mappingKey) {
+        if (!env || !axisClass) {
+            return nullptr;
+        }
+
+        const std::string fieldName = Mapper::Get(mappingKey);
+        return fieldName.empty() ? nullptr : axisClass->GetField(env, fieldName.c_str(), "D");
+    }
+}
+
 AxisAlignedBB_t AxisAlignedBB::GetNativeBoundingBox(JNIEnv* env) {
     if (!env || this == nullptr) {
         return {};
@@ -15,29 +26,12 @@ AxisAlignedBB_t AxisAlignedBB::GetNativeBoundingBox(JNIEnv* env) {
         return {};
     }
 
-    Field* minXField = axisClass->GetField(env, Mapper::Get("minX").c_str(), "D");
-    if (!minXField) minXField = axisClass->GetField(env, "field_72340_a", "D");
-    if (!minXField) minXField = axisClass->GetField(env, "a", "D");
-
-    Field* minYField = axisClass->GetField(env, Mapper::Get("minY").c_str(), "D");
-    if (!minYField) minYField = axisClass->GetField(env, "field_72338_b", "D");
-    if (!minYField) minYField = axisClass->GetField(env, "b", "D");
-
-    Field* minZField = axisClass->GetField(env, Mapper::Get("minZ").c_str(), "D");
-    if (!minZField) minZField = axisClass->GetField(env, "field_72339_c", "D");
-    if (!minZField) minZField = axisClass->GetField(env, "c", "D");
-
-    Field* maxXField = axisClass->GetField(env, Mapper::Get("maxX").c_str(), "D");
-    if (!maxXField) maxXField = axisClass->GetField(env, "field_72336_d", "D");
-    if (!maxXField) maxXField = axisClass->GetField(env, "d", "D");
-
-    Field* maxYField = axisClass->GetField(env, Mapper::Get("maxY").c_str(), "D");
-    if (!maxYField) maxYField = axisClass->GetField(env, "field_72337_e", "D");
-    if (!maxYField) maxYField = axisClass->GetField(env, "e", "D");
-
-    Field* maxZField = axisClass->GetField(env, Mapper::Get("maxZ").c_str(), "D");
-    if (!maxZField) maxZField = axisClass->GetField(env, "field_72334_f", "D");
-    if (!maxZField) maxZField = axisClass->GetField(env, "f", "D");
+    Field* minXField = GetBoundingBoxField(env, axisClass, "minX");
+    Field* minYField = GetBoundingBoxField(env, axisClass, "minY");
+    Field* minZField = GetBoundingBoxField(env, axisClass, "minZ");
+    Field* maxXField = GetBoundingBoxField(env, axisClass, "maxX");
+    Field* maxYField = GetBoundingBoxField(env, axisClass, "maxY");
+    Field* maxZField = GetBoundingBoxField(env, axisClass, "maxZ");
 
     AxisAlignedBB_t result{};
 
@@ -70,29 +64,12 @@ void AxisAlignedBB::SetNativeBoundingBox(AxisAlignedBB_t buffer, JNIEnv* env) {
         return;
     }
 
-    Field* minXField = axisClass->GetField(env, Mapper::Get("minX").c_str(), "D");
-    if (!minXField) minXField = axisClass->GetField(env, "field_72340_a", "D");
-    if (!minXField) minXField = axisClass->GetField(env, "a", "D");
-
-    Field* minYField = axisClass->GetField(env, Mapper::Get("minY").c_str(), "D");
-    if (!minYField) minYField = axisClass->GetField(env, "field_72338_b", "D");
-    if (!minYField) minYField = axisClass->GetField(env, "b", "D");
-
-    Field* minZField = axisClass->GetField(env, Mapper::Get("minZ").c_str(), "D");
-    if (!minZField) minZField = axisClass->GetField(env, "field_72339_c", "D");
-    if (!minZField) minZField = axisClass->GetField(env, "c", "D");
-
-    Field* maxXField = axisClass->GetField(env, Mapper::Get("maxX").c_str(), "D");
-    if (!maxXField) maxXField = axisClass->GetField(env, "field_72336_d", "D");
-    if (!maxXField) maxXField = axisClass->GetField(env, "d", "D");
-
-    Field* maxYField = axisClass->GetField(env, Mapper::Get("maxY").c_str(), "D");
-    if (!maxYField) maxYField = axisClass->GetField(env, "field_72337_e", "D");
-    if (!maxYField) maxYField = axisClass->GetField(env, "e", "D");
-
-    Field* maxZField = axisClass->GetField(env, Mapper::Get("maxZ").c_str(), "D");
-    if (!maxZField) maxZField = axisClass->GetField(env, "field_72334_f", "D");
-    if (!maxZField) maxZField = axisClass->GetField(env, "f", "D");
+    Field* minXField = GetBoundingBoxField(env, axisClass, "minX");
+    Field* minYField = GetBoundingBoxField(env, axisClass, "minY");
+    Field* minZField = GetBoundingBoxField(env, axisClass, "minZ");
+    Field* maxXField = GetBoundingBoxField(env, axisClass, "maxX");
+    Field* maxYField = GetBoundingBoxField(env, axisClass, "maxY");
+    Field* maxZField = GetBoundingBoxField(env, axisClass, "maxZ");
 
     try {
         if (minXField && minYField && minZField && maxXField && maxYField && maxZField) {

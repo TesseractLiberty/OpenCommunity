@@ -246,24 +246,8 @@ void Minecraft::SetLeftClickCounter(int value, JNIEnv* env) {
         return;
     }
 
-    const char* fieldNames[] = {
-        Mapper::Get("leftClickCounter").c_str(),
-        "ag",
-        "field_71429_W"
-    };
-
-    Field* field = nullptr;
-    for (const char* fieldName : fieldNames) {
-        if (!fieldName || !fieldName[0]) {
-            continue;
-        }
-
-        field = minecraftClass->GetField(env, fieldName, "I");
-        if (field) {
-            break;
-        }
-    }
-
+    const std::string fieldName = Mapper::Get("leftClickCounter");
+    Field* field = fieldName.empty() ? nullptr : minecraftClass->GetField(env, fieldName.c_str(), "I");
     if (!field) {
         return;
     }
@@ -287,24 +271,8 @@ void Minecraft::SetRightClickCounter(int value, JNIEnv* env) {
         return;
     }
 
-    const char* fieldNames[] = {
-        Mapper::Get("rightClickDelayTimer").c_str(),
-        "ap",
-        "field_71467_ac"
-    };
-
-    Field* field = nullptr;
-    for (const char* fieldName : fieldNames) {
-        if (!fieldName || !fieldName[0]) {
-            continue;
-        }
-
-        field = minecraftClass->GetField(env, fieldName, "I");
-        if (field) {
-            break;
-        }
-    }
-
+    const std::string fieldName = Mapper::Get("rightClickDelayTimer");
+    Field* field = fieldName.empty() ? nullptr : minecraftClass->GetField(env, fieldName.c_str(), "I");
     if (!field) {
         return;
     }

@@ -107,44 +107,22 @@ namespace {
         return value;
     }
 
-    Method* FindMethod(JNIEnv* env, Class* ownerClass, const char* const* names, const char* signature) {
-        if (!env || !ownerClass || !signature) {
+    Method* GetMappedMethod(JNIEnv* env, Class* ownerClass, const char* mappingKey, const char* signature) {
+        if (!env || !ownerClass || !mappingKey || !signature || !signature[0]) {
             return nullptr;
         }
 
-        for (int index = 0; names[index]; ++index) {
-            const char* name = names[index];
-            if (!name || !name[0]) {
-                continue;
-            }
-
-            Method* method = ownerClass->GetMethod(env, name, signature);
-            if (method) {
-                return method;
-            }
-        }
-
-        return nullptr;
+        const std::string methodName = Mapper::Get(mappingKey);
+        return methodName.empty() ? nullptr : ownerClass->GetMethod(env, methodName.c_str(), signature);
     }
 
-    Field* FindField(JNIEnv* env, Class* ownerClass, const char* const* names, const char* signature) {
-        if (!env || !ownerClass || !signature) {
+    Field* GetMappedField(JNIEnv* env, Class* ownerClass, const char* mappingKey, const char* signature) {
+        if (!env || !ownerClass || !mappingKey || !signature || !signature[0]) {
             return nullptr;
         }
 
-        for (int index = 0; names[index]; ++index) {
-            const char* name = names[index];
-            if (!name || !name[0]) {
-                continue;
-            }
-
-            Field* field = ownerClass->GetField(env, name, signature);
-            if (field) {
-                return field;
-            }
-        }
-
-        return nullptr;
+        const std::string fieldName = Mapper::Get(mappingKey);
+        return fieldName.empty() ? nullptr : ownerClass->GetField(env, fieldName.c_str(), signature);
     }
 
     std::string GetDisplayNameText(JNIEnv* env, jobject playerObject) {
@@ -157,16 +135,8 @@ namespace {
             return {};
         }
 
-        const std::string mappedDisplayName = Mapper::Get("getDisplayName");
-        const char* displayNames[] = {
-            mappedDisplayName.c_str(),
-            "getDisplayName",
-            "func_145748_c_",
-            "f_",
-            nullptr
-        };
         const std::string chatSignature = Mapper::Get("net/minecraft/util/IChatComponent", 3);
-        Method* displayNameMethod = chatSignature.empty() ? nullptr : FindMethod(env, playerClass, displayNames, chatSignature.c_str());
+        Method* displayNameMethod = chatSignature.empty() ? nullptr : GetMappedMethod(env, playerClass, "getDisplayName", chatSignature.c_str());
         if (!displayNameMethod) {
             env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
             return {};
@@ -185,15 +155,7 @@ namespace {
             return {};
         }
 
-        const std::string mappedUnformattedText = Mapper::Get("getUnformattedTextForChat");
-        const char* textNames[] = {
-            mappedUnformattedText.c_str(),
-            "getUnformattedTextForChat",
-            "func_150261_e",
-            "e",
-            nullptr
-        };
-        Method* textMethod = FindMethod(env, chatClass, textNames, "()Ljava/lang/String;");
+        Method* textMethod = GetMappedMethod(env, chatClass, "getUnformattedTextForChat", "()Ljava/lang/String;");
         if (!textMethod) {
             env->DeleteLocalRef(chatComponent);
             return {};
@@ -219,16 +181,7 @@ std::string Player::GetName(JNIEnv* env, bool stripFormatting) {
         return {};
     }
 
-    const std::string mappedGetName = Mapper::Get("getName");
-    const char* methodNames[] = {
-        mappedGetName.c_str(),
-        "getName",
-        "func_70005_c_",
-        "e_",
-        nullptr
-    };
-
-    Method* getNameMethod = FindMethod(env, playerClass, methodNames, "()Ljava/lang/String;");
+    Method* getNameMethod = GetMappedMethod(env, playerClass, "getName", "()Ljava/lang/String;");
     std::string result;
 
     if (getNameMethod) {
@@ -240,16 +193,7 @@ std::string Player::GetName(JNIEnv* env, bool stripFormatting) {
     }
 
     if (result.empty()) {
-        const std::string mappedGetGameProfile = Mapper::Get("getGameProfile");
-        const char* profileMethodNames[] = {
-            mappedGetGameProfile.c_str(),
-            "getGameProfile",
-            "func_146103_bH",
-            "cd",
-            nullptr
-        };
-
-        Method* getGameProfileMethod = FindMethod(env, playerClass, profileMethodNames, "()Lcom/mojang/authlib/GameProfile;");
+        Method* getGameProfileMethod = GetMappedMethod(env, playerClass, "getGameProfile", "()Lcom/mojang/authlib/GameProfile;");
         if (getGameProfileMethod) {
             jobject profileObject = getGameProfileMethod->CallObjectMethod(env, reinterpret_cast<jobject>(this));
             if (profileObject) {
@@ -359,15 +303,7 @@ float Player::GetHealth(JNIEnv* env) {
         return 0.0f;
     }
 
-    const std::string mappedGetHealth = Mapper::Get("getHealth");
-    const char* methodNames[] = {
-        mappedGetHealth.c_str(),
-        "getHealth",
-        "func_110143_aJ",
-        "bn",
-        nullptr
-    };
-    Method* method = FindMethod(env, playerClass, methodNames, "()F");
+    Method* method = GetMappedMethod(env, playerClass, "getHealth", "()F");
     const float value = method ? method->CallFloatMethod(env, this) : 0.0f;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return value;
@@ -383,15 +319,7 @@ float Player::GetMaxHealth(JNIEnv* env) {
         return 0.0f;
     }
 
-    const std::string mappedGetMaxHealth = Mapper::Get("getMaxHealth");
-    const char* methodNames[] = {
-        mappedGetMaxHealth.c_str(),
-        "getMaxHealth",
-        "func_110138_aP",
-        "bu",
-        nullptr
-    };
-    Method* method = FindMethod(env, playerClass, methodNames, "()F");
+    Method* method = GetMappedMethod(env, playerClass, "getMaxHealth", "()F");
     const float value = method ? method->CallFloatMethod(env, this) : 0.0f;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return value;
@@ -501,15 +429,7 @@ float Player::GetRotationPitch(JNIEnv* env) {
         return 0.0f;
     }
 
-    const std::string mappedField = Mapper::Get("rotationPitch");
-    const char* fieldNames[] = {
-        mappedField.c_str(),
-        "rotationPitch",
-        "field_70125_A",
-        "z",
-        nullptr
-    };
-    Field* field = FindField(env, playerClass, fieldNames, "F");
+    Field* field = GetMappedField(env, playerClass, "rotationPitch", "F");
     const float value = field ? field->GetFloatField(env, this) : 0.0f;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return value;
@@ -525,15 +445,7 @@ float Player::GetRotationYaw(JNIEnv* env) {
         return 0.0f;
     }
 
-    const std::string mappedField = Mapper::Get("rotationYaw");
-    const char* fieldNames[] = {
-        mappedField.c_str(),
-        "rotationYaw",
-        "field_70177_z",
-        "y",
-        nullptr
-    };
-    Field* field = FindField(env, playerClass, fieldNames, "F");
+    Field* field = GetMappedField(env, playerClass, "rotationYaw", "F");
     const float value = field ? field->GetFloatField(env, this) : 0.0f;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return value;
@@ -549,15 +461,7 @@ float Player::GetPrevRotationPitch(JNIEnv* env) {
         return 0.0f;
     }
 
-    const std::string mappedField = Mapper::Get("prevRotationPitch");
-    const char* fieldNames[] = {
-        mappedField.c_str(),
-        "prevRotationPitch",
-        "field_70127_C",
-        "B",
-        nullptr
-    };
-    Field* field = FindField(env, playerClass, fieldNames, "F");
+    Field* field = GetMappedField(env, playerClass, "prevRotationPitch", "F");
     const float value = field ? field->GetFloatField(env, this) : 0.0f;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return value;
@@ -573,15 +477,7 @@ float Player::GetPrevRotationYaw(JNIEnv* env) {
         return 0.0f;
     }
 
-    const std::string mappedField = Mapper::Get("prevRotationYaw");
-    const char* fieldNames[] = {
-        mappedField.c_str(),
-        "prevRotationYaw",
-        "field_70126_B",
-        "A",
-        nullptr
-    };
-    Field* field = FindField(env, playerClass, fieldNames, "F");
+    Field* field = GetMappedField(env, playerClass, "prevRotationYaw", "F");
     const float value = field ? field->GetFloatField(env, this) : 0.0f;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return value;
@@ -641,16 +537,8 @@ float Player::GetDistanceToEntity(jobject entity, JNIEnv* env) {
         return 1000.0f;
     }
 
-    const std::string mappedDistanceMethod = Mapper::Get("getDistanceToEntity");
-    const char* methodNames[] = {
-        mappedDistanceMethod.c_str(),
-        "getDistanceToEntity",
-        "func_70032_d",
-        "g",
-        nullptr
-    };
     const std::string entitySignature = Mapper::Get("net/minecraft/entity/Entity", 2);
-    Method* method = entitySignature.empty() ? nullptr : FindMethod(env, entityClass, methodNames, ("(" + entitySignature + ")F").c_str());
+    Method* method = entitySignature.empty() ? nullptr : GetMappedMethod(env, entityClass, "getDistanceToEntity", ("(" + entitySignature + ")F").c_str());
     return method ? method->CallFloatMethod(env, this, false, entity) : 1000.0f;
 }
 
@@ -664,15 +552,7 @@ float Player::GetWidth(JNIEnv* env) {
         return 0.0f;
     }
 
-    const std::string mappedWidthField = Mapper::Get("width");
-    const char* fieldNames[] = {
-        mappedWidthField.c_str(),
-        "width",
-        "field_70130_N",
-        "J",
-        nullptr
-    };
-    Field* field = FindField(env, playerClass, fieldNames, "F");
+    Field* field = GetMappedField(env, playerClass, "width", "F");
     const float value = field ? field->GetFloatField(env, this) : 0.0f;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return value;
@@ -688,15 +568,7 @@ float Player::GetHeight(JNIEnv* env) {
         return 0.0f;
     }
 
-    const std::string mappedHeightField = Mapper::Get("height");
-    const char* fieldNames[] = {
-        mappedHeightField.c_str(),
-        "height",
-        "field_70131_O",
-        "K",
-        nullptr
-    };
-    Field* field = FindField(env, playerClass, fieldNames, "F");
+    Field* field = GetMappedField(env, playerClass, "height", "F");
     const float value = field ? field->GetFloatField(env, this) : 0.0f;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return value;
@@ -712,15 +584,7 @@ void Player::SetWidth(float value, JNIEnv* env) {
         return;
     }
 
-    const std::string mappedWidthField = Mapper::Get("width");
-    const char* fieldNames[] = {
-        mappedWidthField.c_str(),
-        "width",
-        "field_70130_N",
-        "J",
-        nullptr
-    };
-    Field* field = FindField(env, playerClass, fieldNames, "F");
+    Field* field = GetMappedField(env, playerClass, "width", "F");
     if (field) {
         field->SetFloatField(env, this, value);
     }
@@ -737,15 +601,7 @@ void Player::SetHeight(float value, JNIEnv* env) {
         return;
     }
 
-    const std::string mappedHeightField = Mapper::Get("height");
-    const char* fieldNames[] = {
-        mappedHeightField.c_str(),
-        "height",
-        "field_70131_O",
-        "K",
-        nullptr
-    };
-    Field* field = FindField(env, playerClass, fieldNames, "F");
+    Field* field = GetMappedField(env, playerClass, "height", "F");
     if (field) {
         field->SetFloatField(env, this, value);
     }
@@ -762,15 +618,7 @@ void Player::SetPosition(double x, double y, double z, JNIEnv* env) {
         return;
     }
 
-    const std::string mappedSetPosition = Mapper::Get("setPosition");
-    const char* methodNames[] = {
-        mappedSetPosition.c_str(),
-        "setPosition",
-        "func_70107_b",
-        "b",
-        nullptr
-    };
-    Method* method = FindMethod(env, playerClass, methodNames, "(DDD)V");
+    Method* method = GetMappedMethod(env, playerClass, "setPosition", "(DDD)V");
     if (method) {
         method->CallVoidMethod(env, this, false, x, y, z);
     }
@@ -787,16 +635,7 @@ void Player::SetAlwaysRenderNameTag(bool value, JNIEnv* env) {
         return;
     }
 
-    const std::string mappedMethod = Mapper::Get("setAlwaysRenderNameTag");
-    const char* methodNames[] = {
-        mappedMethod.c_str(),
-        "setAlwaysRenderNameTag",
-        "func_174805_g",
-        "g",
-        nullptr
-    };
-
-    Method* method = FindMethod(env, playerClass, methodNames, "(Z)V");
+    Method* method = GetMappedMethod(env, playerClass, "setAlwaysRenderNameTag", "(Z)V");
     if (method) {
         method->CallVoidMethod(env, this, false, value);
     }
@@ -814,15 +653,7 @@ bool Player::IsInvisible(JNIEnv* env) {
         return true;
     }
 
-    const std::string mappedIsInvisible = Mapper::Get("isInvisible");
-    const char* methodNames[] = {
-        mappedIsInvisible.c_str(),
-        "isInvisible",
-        "func_82150_aj",
-        "ax",
-        nullptr
-    };
-    Method* method = FindMethod(env, playerClass, methodNames, "()Z");
+    Method* method = GetMappedMethod(env, playerClass, "isInvisible", "()Z");
     const bool invisible = method ? method->CallBooleanMethod(env, this) : true;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return invisible;
@@ -838,15 +669,7 @@ int Player::GetHurtTime(JNIEnv* env) {
         return 0;
     }
 
-    const std::string mappedHurtTime = Mapper::Get("hurtTime");
-    const char* fieldNames[] = {
-        mappedHurtTime.c_str(),
-        "hurtTime",
-        "field_70737_aN",
-        "au",
-        nullptr
-    };
-    Field* field = FindField(env, playerClass, fieldNames, "I");
+    Field* field = GetMappedField(env, playerClass, "hurtTime", "I");
     const int hurtTime = field ? field->GetIntField(env, this) : 0;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return hurtTime;
@@ -887,15 +710,7 @@ int Player::GetSwingProgressInt(JNIEnv* env) {
         return 0;
     }
 
-    const std::string mappedSwingProgress = Mapper::Get("swingProgressInt");
-    const char* fieldNames[] = {
-        mappedSwingProgress.c_str(),
-        "swingProgressInt",
-        "field_110158_av",
-        "as",
-        nullptr
-    };
-    Field* field = FindField(env, playerClass, fieldNames, "I");
+    Field* field = GetMappedField(env, playerClass, "swingProgressInt", "I");
     const int swingProgress = field ? field->GetIntField(env, this) : 0;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return swingProgress;
@@ -1138,27 +953,12 @@ void Player::SetJumpTicks(int ticks, JNIEnv* env) {
         return;
     }
 
-    const std::string mappedJumpTicks = Mapper::Get("jumpTicks");
-    const char* fieldNames[] = {
-        mappedJumpTicks.c_str(),
-        "bn",
-        "field_70773_bE",
-        nullptr
-    };
-
-    Field* jumpTicksField = FindField(env, playerClass, fieldNames, "I");
+    Field* jumpTicksField = GetMappedField(env, playerClass, "jumpTicks", "I");
     if (jumpTicksField) {
         jumpTicksField->SetIntField(env, this, ticks);
     }
 
-    const std::string mappedSetJumping = Mapper::Get("setJumping");
-    const char* methodNames[] = {
-        mappedSetJumping.c_str(),
-        "setJumping",
-        nullptr
-    };
-
-    Method* setJumpingMethod = FindMethod(env, playerClass, methodNames, "(Z)V");
+    Method* setJumpingMethod = GetMappedMethod(env, playerClass, "setJumping", "(Z)V");
     if (setJumpingMethod) {
         setJumpingMethod->CallVoidMethod(env, this, false, false);
     }

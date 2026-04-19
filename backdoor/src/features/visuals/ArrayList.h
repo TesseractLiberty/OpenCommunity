@@ -14,6 +14,27 @@ public:
         AddOption(ModuleOption::Combo("Mode", { "Default", "Rise", "Tesseract", "VapeV4" }, static_cast<int>(ArrayListMode::Default)));
         AddOption(ModuleOption::Toggle("Watermark", true));
         AddOption(ModuleOption::Toggle("Spaced Modules", false));
+        AddOption(ModuleOption::Toggle("Wave", true));
+        AddOption(ModuleOption::Color("Primary Color", 78.0f / 255.0f, 86.0f / 255.0f, 107.0f / 255.0f, 1.0f));
+        AddOption(ModuleOption::Color("Secondary Color", 120.0f / 255.0f, 146.0f / 255.0f, 214.0f / 255.0f, 1.0f));
+    }
+
+    bool ShouldRenderOption(size_t optionIndex) const override {
+        if (optionIndex == kWaveOption || optionIndex == kPrimaryColorOption || optionIndex == kSecondaryColorOption) {
+            const bool defaultMode = m_Options.size() > kModeOption &&
+                m_Options[kModeOption].comboIndex == static_cast<int>(ArrayListMode::Default);
+            if (!defaultMode) {
+                return false;
+            }
+
+            if (optionIndex == kSecondaryColorOption) {
+                return m_Options.size() > kWaveOption && m_Options[kWaveOption].boolValue;
+            }
+
+            return true;
+        }
+
+        return true;
     }
 
     void SyncToConfig(void* configPtr) override {
@@ -29,6 +50,19 @@ public:
         }
         if (m_Options.size() > kSpacedModulesOption) {
             config->HUD.m_SpacedModules = m_Options[kSpacedModulesOption].boolValue;
+        }
+        if (m_Options.size() > kWaveOption) {
+            config->HUD.m_Wave = m_Options[kWaveOption].boolValue;
+        }
+        if (m_Options.size() > kPrimaryColorOption) {
+            for (int index = 0; index < 4; ++index) {
+                config->HUD.m_PrimaryColor[index] = m_Options[kPrimaryColorOption].colorValue[index];
+            }
+        }
+        if (m_Options.size() > kSecondaryColorOption) {
+            for (int index = 0; index < 4; ++index) {
+                config->HUD.m_SecondaryColor[index] = m_Options[kSecondaryColorOption].colorValue[index];
+            }
         }
     }
 
@@ -47,10 +81,26 @@ public:
         if (m_Options.size() > kSpacedModulesOption) {
             m_Options[kSpacedModulesOption].boolValue = config->HUD.m_SpacedModules;
         }
+        if (m_Options.size() > kWaveOption) {
+            m_Options[kWaveOption].boolValue = config->HUD.m_Wave;
+        }
+        if (m_Options.size() > kPrimaryColorOption) {
+            for (int index = 0; index < 4; ++index) {
+                m_Options[kPrimaryColorOption].colorValue[index] = config->HUD.m_PrimaryColor[index];
+            }
+        }
+        if (m_Options.size() > kSecondaryColorOption) {
+            for (int index = 0; index < 4; ++index) {
+                m_Options[kSecondaryColorOption].colorValue[index] = config->HUD.m_SecondaryColor[index];
+            }
+        }
     }
 
 private:
     static constexpr size_t kModeOption = 0;
     static constexpr size_t kWatermarkOption = 1;
     static constexpr size_t kSpacedModulesOption = 2;
+    static constexpr size_t kWaveOption = 3;
+    static constexpr size_t kPrimaryColorOption = 4;
+    static constexpr size_t kSecondaryColorOption = 5;
 };

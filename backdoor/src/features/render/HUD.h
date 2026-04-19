@@ -32,7 +32,7 @@ private:
     std::vector<ModuleEntry> GetActiveModules(ImFont* nameFont, float nameFontSize, ImFont* tagFont, float tagFontSize);
     float DrawFormattedTag(ImDrawList* drawList, ImFont* font, float fontSize, const ImVec2& pos, const std::string& text, ImU32 defaultColor, ImU32 shadowColor);
     float CalcFormattedTagWidth(ImFont* font, float fontSize, const std::string& text) const;
-    void GetRainbowRGB(int offset, float& r, float& g, float& b);
+    void GetWaveRGB(const ModuleConfig* config, int offset, float& r, float& g, float& b);
     void GetRiseRGB(int offset, float& r, float& g, float& b);
     void GetVapeV4RGB(int offset, float& r, float& g, float& b);
     void GetTesseractRGB(int offset, float& r, float& g, float& b);

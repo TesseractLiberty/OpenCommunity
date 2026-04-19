@@ -246,13 +246,27 @@ void HUD::SetFonts(ImFont* regular, ImFont* bold, ImFont* vape) {
     m_VapeFont = vape;
 }
 
-void HUD::GetRainbowRGB(int offset, float& r, float& g, float& b) {
+void HUD::GetWaveRGB(const ModuleConfig* config, int offset, float& r, float& g, float& b) {
+    if (!config) {
+        r = 1.0f;
+        g = 1.0f;
+        b = 1.0f;
+        return;
+    }
+
     const auto now = std::chrono::steady_clock::now();
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-    const ImVec4 themed = color::GetCycleVec4((float)((ms + offset) % 10000) / 10000.0f);
-    r = themed.x;
-    g = themed.y;
-    b = themed.z;
+    const float speed = (std::max)(config->HUD.m_WaveSpeed, 0.01f);
+    const float cycleDurationMs = 2500.0f / speed;
+    const float elapsedMs = static_cast<float>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() + offset);
+    const float cycleProgress = fmodf(elapsedMs, cycleDurationMs) / cycleDurationMs;
+    const float blend = 0.5f - 0.5f * cosf(cycleProgress * 6.28318530718f);
+
+    const float* primary = config->HUD.m_PrimaryColor;
+    const float* secondary = config->HUD.m_SecondaryColor;
+    r = primary[0] + (secondary[0] - primary[0]) * blend;
+    g = primary[1] + (secondary[1] - primary[1]) * blend;
+    b = primary[2] + (secondary[2] - primary[2]) * blend;
 }
 
 void HUD::GetRiseRGB(int offset, float& r, float& g, float& b) {
@@ -501,8 +515,12 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
             GetVapeV4RGB(0, r, g, b);
         } else if (tesseractMode) {
             GetTesseractHeaderRGB(0, r, g, b);
-        } else if (config->HUD.m_Rainbow) {
-            GetRainbowRGB(0, r, g, b);
+        } else if (config->HUD.m_Wave) {
+            GetWaveRGB(config, 0, r, g, b);
+        } else {
+            r = config->HUD.m_PrimaryColor[0];
+            g = config->HUD.m_PrimaryColor[1];
+            b = config->HUD.m_PrimaryColor[2];
         }
 
         std::string nick = ResolvePlayerNick(config);
@@ -559,16 +577,12 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
             GetVapeV4RGB(index, r, g, b);
         } else if (tesseractMode) {
             GetTesseractRGB(index, r, g, b);
-        } else if (config->HUD.m_Rainbow) {
-            GetRainbowRGB(index * 400, r, g, b);
+        } else if (config->HUD.m_Wave) {
+            GetWaveRGB(config, index * 400, r, g, b);
         } else {
-            const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-            const float baseHue = fmodf((float)ms / 5000.0f, 1.0f);
-            const float hueOffset = fmodf(index * 0.618033988749895f, 1.0f);
-            const ImVec4 themed = color::GetCycleVec4(fmodf(baseHue + hueOffset, 1.0f));
-            r = themed.x;
-            g = themed.y;
-            b = themed.z;
+            r = config->HUD.m_PrimaryColor[0];
+            g = config->HUD.m_PrimaryColor[1];
+            b = config->HUD.m_PrimaryColor[2];
         }
 
         activeKeys.push_back(mod.name);

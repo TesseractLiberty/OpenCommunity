@@ -8,7 +8,6 @@
 #include "../../game/mapping/Mapper.h"
 #include "../../game/jni/Class.h"
 #include "../../game/jni/Field.h"
-#include "../../game/jni/Method.h"
 #include <chrono>
 #include <random>
 #endif
@@ -141,7 +140,7 @@ private:
     bool m_GameClassesInit = false;
     bool m_GameClassesFailed = false;
     Class* m_MinecraftClass = nullptr;
+    Field* m_TheMinecraftField = nullptr;
     Field* m_LeftClickCounterField = nullptr;
-    Method* m_GetMinecraftMethod = nullptr;
 #endif
 };

@@ -467,26 +467,23 @@ namespace {
         return result;
     }
 
-    jmethodID FindMethodIdByNames(JNIEnv* env, jclass ownerClass, const char* signature, std::initializer_list<const char*> names) {
-        if (!env || !ownerClass || !signature) {
+    jmethodID GetMappedMethodId(JNIEnv* env, jclass ownerClass, const char* mappingKey, const char* signature) {
+        if (!env || !ownerClass || !mappingKey || !signature) {
             return nullptr;
         }
 
-        for (const char* name : names) {
-            if (!name || !name[0]) {
-                continue;
-            }
-
-            jmethodID methodId = env->GetMethodID(ownerClass, name, signature);
-            if (methodId) {
-                return methodId;
-            }
-            if (env->ExceptionCheck()) {
-                env->ExceptionClear();
-            }
+        const std::string methodName = Mapper::Get(mappingKey);
+        if (methodName.empty()) {
+            return nullptr;
         }
 
-        return nullptr;
+        jmethodID methodId = env->GetMethodID(ownerClass, methodName.c_str(), signature);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return nullptr;
+        }
+
+        return methodId;
     }
 
     void ClearOnlinePlayersToConfig(ModuleConfig* config) {
@@ -515,17 +512,7 @@ namespace {
 
         bool collectedAny = false;
         jclass netHandlerClass = env->GetObjectClass(netHandlerObject);
-        const std::string mappedGetPlayerInfoMap = Mapper::Get("getPlayerInfoMap");
-        jmethodID getPlayerInfoMapMethod = FindMethodIdByNames(
-            env,
-            netHandlerClass,
-            "()Ljava/util/Collection;",
-            {
-                mappedGetPlayerInfoMap.c_str(),
-                "getPlayerInfoMap",
-                "func_175106_d",
-                "d"
-            });
+        jmethodID getPlayerInfoMapMethod = GetMappedMethodId(env, netHandlerClass, "getPlayerInfoMap", "()Ljava/util/Collection;");
 
         jobject playerInfoCollection = getPlayerInfoMapMethod
             ? env->CallObjectMethod(netHandlerObject, getPlayerInfoMapMethod)
@@ -562,17 +549,11 @@ namespace {
                     }
 
                     jclass playerInfoClass = env->GetObjectClass(playerInfoObject);
-                    const std::string mappedGetNetworkPlayerGameProfile = Mapper::Get("getNetworkPlayerInfoGameProfile");
-                    jmethodID getGameProfileMethod = FindMethodIdByNames(
+                    jmethodID getGameProfileMethod = GetMappedMethodId(
                         env,
                         playerInfoClass,
-                        "()Lcom/mojang/authlib/GameProfile;",
-                        {
-                            mappedGetNetworkPlayerGameProfile.c_str(),
-                            "getGameProfile",
-                            "func_178845_a",
-                            "a"
-                        });
+                        "getNetworkPlayerInfoGameProfile",
+                        "()Lcom/mojang/authlib/GameProfile;");
 
                     jobject gameProfileObject = getGameProfileMethod
                         ? env->CallObjectMethod(playerInfoObject, getGameProfileMethod)
