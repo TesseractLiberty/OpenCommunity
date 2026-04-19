@@ -104,6 +104,7 @@
   </Target>
   <!-- Arquivos fonte -->
   <ItemGroup>
+    <ClCompile Include="pch.cpp" />
     <ClCompile Include="src\Main.cpp" />
     <ClCompile Include="src\core\Bridge.cpp" />
     <ClCompile Include="src\core\Injector.cpp" />

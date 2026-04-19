@@ -167,6 +167,7 @@ public:
         (void)optionIndex;
         return true;
     }
+    virtual void OnOptionEdited(size_t optionIndex) { (void)optionIndex; }
 
     virtual void SyncToConfig(void* configPtr) { (void)configPtr; }
     virtual void SyncFromConfig(void* configPtr) { (void)configPtr; }

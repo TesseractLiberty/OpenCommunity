@@ -15,12 +15,26 @@
 
 class AutoClicker : public Module {
 public:
+    enum OptionIndex {
+        OptionMinCps = 0,
+        OptionMaxCps,
+        OptionJitter,
+        OptionOnlyWhileHolding,
+        OptionCount
+    };
+
     MODULE_INFO(AutoClicker, "AutoClicker", "Automatically clicks for you.", ModuleCategory::Combat) {
         SetImagePrefix(module_icons::mouse_icon_data, module_icons::mouse_icon_data_size);
         AddOption(ModuleOption::SliderInt("Min CPS", 10, 1, 20));
         AddOption(ModuleOption::SliderInt("Max CPS", 14, 1, 20));
         AddOption(ModuleOption::Toggle("Jitter", false));
         AddOption(ModuleOption::Toggle("Only While Holding", true));
+    }
+
+    void OnOptionEdited(size_t optionIndex) override {
+        if (optionIndex == OptionMinCps || optionIndex == OptionMaxCps) {
+            SanitizeCpsRange();
+        }
     }
 
     void SyncToConfig(void* configPtr) override {
@@ -67,24 +81,29 @@ public:
     }
 
 private:
+    static constexpr int kMinAllowedCps = 1;
+    static constexpr int kMaxAllowedCps = 20;
+
     static void NormalizeCpsRange(int& minCps, int& maxCps) {
-        minCps = (std::max)(1, minCps);
-        maxCps = (std::max)(1, maxCps);
+        if (minCps < kMinAllowedCps) minCps = kMinAllowedCps;
+        if (minCps > kMaxAllowedCps) minCps = kMaxAllowedCps;
+        if (maxCps < kMinAllowedCps) maxCps = kMinAllowedCps;
+        if (maxCps > kMaxAllowedCps) maxCps = kMaxAllowedCps;
         if (minCps > maxCps) {
             minCps = maxCps;
         }
     }
 
     void SanitizeCpsRange() {
-        if (m_Options.size() < 2) {
+        if (m_Options.size() < OptionCount) {
             return;
         }
 
-        int minCps = m_Options[0].intValue;
-        int maxCps = m_Options[1].intValue;
+        int minCps = m_Options[OptionMinCps].intValue;
+        int maxCps = m_Options[OptionMaxCps].intValue;
         NormalizeCpsRange(minCps, maxCps);
-        m_Options[0].intValue = minCps;
-        m_Options[1].intValue = maxCps;
+        m_Options[OptionMinCps].intValue = minCps;
+        m_Options[OptionMaxCps].intValue = maxCps;
     }
 
 #ifdef _BACKDOOR
@@ -94,19 +113,19 @@ public:
     void Reset();
 
     int GetMinCps() const {
-        int minCps = m_Options[0].intValue;
-        int maxCps = m_Options[1].intValue;
+        int minCps = m_Options[OptionMinCps].intValue;
+        int maxCps = m_Options[OptionMaxCps].intValue;
         NormalizeCpsRange(minCps, maxCps);
         return minCps;
     }
     int GetMaxCps() const {
-        int minCps = m_Options[0].intValue;
-        int maxCps = m_Options[1].intValue;
+        int minCps = m_Options[OptionMinCps].intValue;
+        int maxCps = m_Options[OptionMaxCps].intValue;
         NormalizeCpsRange(minCps, maxCps);
         return maxCps;
     }
-    bool GetJitter() const { return m_Options[2].boolValue; }
-    bool GetOnlyWhileHolding() const { return m_Options[3].boolValue; }
+    bool GetJitter() const { return m_Options[OptionJitter].boolValue; }
+    bool GetOnlyWhileHolding() const { return m_Options[OptionOnlyWhileHolding].boolValue; }
 
 private:
     using Clock = std::chrono::steady_clock;

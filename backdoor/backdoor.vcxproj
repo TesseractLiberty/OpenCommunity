@@ -166,6 +166,7 @@
     <ClInclude Include="src\features\combat\AutoGapple.h" />
     <ClInclude Include="src\features\combat\NoHitDelay.h" />
     <ClInclude Include="src\features\movement\NoJumpDelay.h" />
+    <ClInclude Include="src\features\visuals\ArrayList.h" />
     <ClInclude Include="src\features\visuals\Target.h" />
     <ClInclude Include="src\features\visuals\HideClans.h" />
     <ClInclude Include="src\features\visuals\DamageIndicator.h" />

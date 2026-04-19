@@ -3892,6 +3892,25 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     ImVec2 trackMax(sliderX + actualSliderW, sliderY + sliderH);
                     float trackRounding = sliderH * 0.5f;
 
+                    ImVec2 interactMin(sliderX - grabRadius, sliderY - grabRadius);
+                    ImVec2 interactMax(sliderX + actualSliderW + grabRadius, sliderY + sliderH + grabRadius);
+                    ImGui::SetCursorScreenPos(interactMin);
+                    ImGui::InvisibleButton(optId, ImVec2(interactMax.x - interactMin.x, interactMax.y - interactMin.y));
+                    if (opt.intValue < opt.intMin) opt.intValue = opt.intMin;
+                    if (opt.intValue > opt.intMax) opt.intValue = opt.intMax;
+                    if (ImGui::IsItemActive()) {
+                        float mouseX = ImGui::GetIO().MousePos.x;
+                        float newT = (mouseX - sliderX) / actualSliderW;
+                        if (newT < 0.0f) newT = 0.0f; if (newT > 1.0f) newT = 1.0f;
+                        const int newValue = opt.intMin + (int)(newT * (opt.intMax - opt.intMin) + 0.5f);
+                        if (newValue != opt.intValue) {
+                            opt.intValue = newValue;
+                            mod->OnOptionEdited(optionIndex);
+                        }
+                    }
+                    if (opt.intValue < opt.intMin) opt.intValue = opt.intMin;
+                    if (opt.intValue > opt.intMax) opt.intValue = opt.intMax;
+
                     // Track background
                     dl->AddRectFilled(trackMin, trackMax, color::GetPanelActiveU32(0.92f), trackRounding);
                     dl->AddRect(trackMin, trackMax, color::GetBorderU32(0.72f), trackRounding, 0, 1.0f);
@@ -3910,22 +3929,10 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     dl->AddCircleFilled(ImVec2(grabCX, grabCY), grabRadius, color::GetStrongTextU32());
                     dl->AddCircle(ImVec2(grabCX, grabCY), grabRadius, color::GetModuleAltTextU32(), 0, 1.2f);
 
-                    // Invisible button for interaction
-                    ImVec2 interactMin(sliderX - grabRadius, sliderY - grabRadius);
-                    ImVec2 interactMax(sliderX + actualSliderW + grabRadius, sliderY + sliderH + grabRadius);
-                    ImGui::SetCursorScreenPos(interactMin);
-                    ImGui::InvisibleButton(optId, ImVec2(interactMax.x - interactMin.x, interactMax.y - interactMin.y));
-                    if (ImGui::IsItemActive()) {
-                        float mouseX = ImGui::GetIO().MousePos.x;
-                        float newT = (mouseX - sliderX) / actualSliderW;
-                        if (newT < 0.0f) newT = 0.0f; if (newT > 1.0f) newT = 1.0f;
-                        opt.intValue = opt.intMin + (int)(newT * (opt.intMax - opt.intMin) + 0.5f);
-                    }
-
                     // Value text
                     char valBuf[32];
                     snprintf(valBuf, sizeof(valBuf), "%d", opt.intValue);
-                    dl->AddText(labelFont, labelFS, ImVec2(sliderX + actualSliderW + 6.0f, optY + (optLineH - labelFS) * 0.5f), color::GetSecondaryTextU32(), valBuf);
+                    dl->AddText(labelFont, labelFS, ImVec2(sliderX + actualSliderW + 7.0f, optY + (optLineH - labelFS) * 0.5f), color::GetSecondaryTextU32(), valBuf);
 
                     break;
                 }
@@ -3943,6 +3950,25 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     ImVec2 trackMin(sliderX, sliderY);
                     ImVec2 trackMax(sliderX + actualSliderWF, sliderY + sliderH);
                     float trackRounding = sliderH * 0.5f;
+
+                    ImVec2 interactMin(sliderX - grabRadius, sliderY - grabRadius);
+                    ImVec2 interactMax(sliderX + actualSliderWF + grabRadius, sliderY + sliderH + grabRadius);
+                    ImGui::SetCursorScreenPos(interactMin);
+                    ImGui::InvisibleButton(optId, ImVec2(interactMax.x - interactMin.x, interactMax.y - interactMin.y));
+                    if (opt.floatValue < opt.floatMin) opt.floatValue = opt.floatMin;
+                    if (opt.floatValue > opt.floatMax) opt.floatValue = opt.floatMax;
+                    if (ImGui::IsItemActive()) {
+                        float mouseX = ImGui::GetIO().MousePos.x;
+                        float newT = (mouseX - sliderX) / actualSliderWF;
+                        if (newT < 0.0f) newT = 0.0f; if (newT > 1.0f) newT = 1.0f;
+                        const float newValue = opt.floatMin + newT * (opt.floatMax - opt.floatMin);
+                        if (newValue != opt.floatValue) {
+                            opt.floatValue = newValue;
+                            mod->OnOptionEdited(optionIndex);
+                        }
+                    }
+                    if (opt.floatValue < opt.floatMin) opt.floatValue = opt.floatMin;
+                    if (opt.floatValue > opt.floatMax) opt.floatValue = opt.floatMax;
 
                     // Track background
                     dl->AddRectFilled(trackMin, trackMax, color::GetPanelActiveU32(0.92f), trackRounding);
@@ -3962,22 +3988,10 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     dl->AddCircleFilled(ImVec2(grabCX, grabCY), grabRadius, color::GetStrongTextU32());
                     dl->AddCircle(ImVec2(grabCX, grabCY), grabRadius, color::GetModuleAltTextU32(), 0, 1.2f);
 
-                    // Invisible button for interaction
-                    ImVec2 interactMin(sliderX - grabRadius, sliderY - grabRadius);
-                    ImVec2 interactMax(sliderX + actualSliderWF + grabRadius, sliderY + sliderH + grabRadius);
-                    ImGui::SetCursorScreenPos(interactMin);
-                    ImGui::InvisibleButton(optId, ImVec2(interactMax.x - interactMin.x, interactMax.y - interactMin.y));
-                    if (ImGui::IsItemActive()) {
-                        float mouseX = ImGui::GetIO().MousePos.x;
-                        float newT = (mouseX - sliderX) / actualSliderWF;
-                        if (newT < 0.0f) newT = 0.0f; if (newT > 1.0f) newT = 1.0f;
-                        opt.floatValue = opt.floatMin + newT * (opt.floatMax - opt.floatMin);
-                    }
-
                     // Value text
                     char valBuf[32];
                     snprintf(valBuf, sizeof(valBuf), "%.2f", opt.floatValue);
-                    dl->AddText(labelFont, labelFS, ImVec2(sliderX + actualSliderWF + 6.0f, optY + (optLineH - labelFS) * 0.5f), color::GetSecondaryTextU32(), valBuf);
+                    dl->AddText(labelFont, labelFS, ImVec2(sliderX + actualSliderWF + 7.0f, optY + (optLineH - labelFS) * 0.5f), color::GetSecondaryTextU32(), valBuf);
 
                     break;
                 }
