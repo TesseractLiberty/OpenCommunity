@@ -100,5 +100,3 @@ $RECYCLE.BIN/
 *.swp
 *.swo
 
-# Custom
-Blackbone-master/  # Se for dependência externa mantida separadamente

@@ -45,7 +45,6 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <NetFxSdkIncludeDirs Condition="'$(NETFXSDKDir)'!=''">$(NETFXSDKDir)Include\um;$(NETFXSDKDir)Include\shared</NetFxSdkIncludeDirs>
-    <BlackBoneThirdPartyIncludeDirs>$(SolutionDir)deps\blackbone\include\3rd_party</BlackBoneThirdPartyIncludeDirs>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)build\$(Configuration)\</OutDir>
@@ -65,14 +64,14 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(NetFxSdkIncludeDirs);$(BlackBoneThirdPartyIncludeDirs);$(ProjectDir);$(SolutionDir)deps;$(SolutionDir)deps\blackbone\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(NetFxSdkIncludeDirs);$(ProjectDir);$(SolutionDir)deps;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)deps\blackbone\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>BlackBone.lib;d3d11.lib;d3dcompiler.lib;dwmapi.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>d3d11.lib;d3dcompiler.lib;dwmapi.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -84,7 +83,7 @@
       <PreprocessorDefinitions>NDEBUG;_WINDOWS;IMGUI_DEFINE_MATH_OPERATORS;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <AdditionalIncludeDirectories>$(NetFxSdkIncludeDirs);$(BlackBoneThirdPartyIncludeDirs);$(ProjectDir);$(SolutionDir)deps;$(SolutionDir)deps\blackbone\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(NetFxSdkIncludeDirs);$(ProjectDir);$(SolutionDir)deps;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/FS %(AdditionalOptions)</AdditionalOptions>
       <DebugInformationFormat>None</DebugInformationFormat>
@@ -95,13 +94,10 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>false</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)deps\blackbone\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>BlackBone.lib;d3d11.lib;d3dcompiler.lib;dwmapi.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>d3d11.lib;d3dcompiler.lib;dwmapi.lib;shell32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
-  <Target Name="ValidateBlackBoneCorHeader" BeforeTargets="ClCompile" Condition="!Exists('$(BlackBoneThirdPartyIncludeDirs)\cor.h') and ('$(NETFXSDKDir)'=='' or !Exists('$(NETFXSDKDir)Include\um\cor.h'))">
-    <Error Text="Unable to find cor.h required by BlackBone. Either keep deps\blackbone\include\3rd_party\cor.h in the repo or install the .NET Framework SDK/targeting pack so $(NETFXSDKDir)Include\um\cor.h exists." />
-  </Target>
   <!-- Arquivos fonte -->
   <ItemGroup>
     <ClCompile Include="pch.cpp" />

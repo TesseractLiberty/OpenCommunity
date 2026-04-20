@@ -1,16 +1,24 @@
 #pragma once
 
-#include <BlackBone/Process/Process.h>
+#include <windows.h>
+#include <vector>
+#include <string>
 
 class Injector {
 public:
+    struct MappingData {
+        LPVOID BaseAddress;
+        HMODULE(WINAPI* LoadLibraryAFn)(LPCSTR);
+        FARPROC(WINAPI* GetProcAddressFn)(HMODULE, LPCSTR);
+    };
+
     Injector() = default;
     ~Injector() { Unload(); }
 
     bool InjectFromMemory(DWORD pid, const std::vector<uint8_t>& dllData);
     bool InjectFromFile(DWORD pid, const std::wstring& filePath);
     void Unload();
-    bool IsInjected() const { return !m_MappedModules.empty(); }
+    bool IsInjected() const { return m_BaseAddress != 0; }
 
     static Injector* Get() {
         static Injector instance;
@@ -18,16 +26,12 @@ public:
     }
 
 private:
-    bool InjectBuffer(DWORD pid, void* buffer, size_t size);
+    bool ManualMap(HANDLE hProcess, const std::vector<uint8_t>& dllData);
     void Obfuscate(std::vector<uint8_t>& data);
     void Deobfuscate(std::vector<uint8_t>& data);
 
-    blackbone::Process m_Process;
-
-    struct MappedModule {
-        uint64_t base;
-        size_t size;
-    };
-    std::vector<MappedModule> m_MappedModules;
+    HANDLE m_TargetProcess = nullptr;
+    uintptr_t m_BaseAddress = 0;
+    size_t m_ImageSize = 0;
     std::vector<uint8_t> m_StoredDll;
 };

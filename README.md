@@ -40,7 +40,6 @@ OpenCommunity/
 │       ├── RegisterModules.h
 │       └── Common.h
 ├── deps/              third party libs
-│   ├── blackbone/
 │   ├── imgui/
 │   └── minhook/
 └── tests/
@@ -254,7 +253,7 @@ The frontdoor writes module settings to `ModuleConfig` when you change things in
 ```
 Frontdoor starts
   → ProcessHelper finds javaw.exe (Minecraft)
-  → Injector uses BlackBone to manually map the backdoor DLL
+  → Injector uses custom manual mapping to inject the backdoor DLL
   → Bridge sets up shared memory
   → Backdoor DLL entry point runs
       → GameThreadHook hooks the game thread
@@ -282,7 +281,6 @@ The following runtimes and SDKs must be installed before building or running:
 
 | Library | Purpose |
 |---------|---------|
-| [BlackBone](https://github.com/DarthTon/Blackbone) | Manual DLL mapping / process memory manipulation |
 | [Dear ImGui](https://github.com/ocornut/imgui) | Overlay UI rendering |
 | [MinHook](https://github.com/TsudaKageworked/minhook) | Function hooking (x64) |
 
@@ -390,7 +388,6 @@ OpenCommunity/
 │       ├── ModuleConfig.h
 │       └── RegisterModules.h
 ├── deps/
-│   ├── blackbone/
 │   ├── imgui/
 │   └── minhook/
 └── tests/
