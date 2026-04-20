@@ -25,7 +25,9 @@ static void SafeTickSynchronousFallback(FeatureManager* fm) {
             return;
         }
 
+        GameThreadHook::SanitizeInteractionState(env);
         fm->TickSynchronousAll(env);
+        GameThreadHook::SanitizeInteractionState(env);
         if (env->ExceptionCheck()) {
             env->ExceptionClear();
         }

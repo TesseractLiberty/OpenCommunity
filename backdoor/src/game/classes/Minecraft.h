@@ -10,6 +10,7 @@ public:
     static jobject GetCurrentScreen(JNIEnv* env);
     static jobject GetPlayerController(JNIEnv* env);
     static jobject GetObjectMouseOver(JNIEnv* env);
+    static void SetObjectMouseOver(jobject movingObject, JNIEnv* env);
     static jobject GetRenderItem(JNIEnv* env);
     static jobject GetRenderManager(JNIEnv* env);
     static jobject GetNetHandler(JNIEnv* env);

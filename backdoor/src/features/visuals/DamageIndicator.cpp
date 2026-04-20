@@ -644,6 +644,11 @@ void DamageIndicator::RenderOverlay(ImDrawList* drawList, float screenW, float s
     }
 
     auto* target = reinterpret_cast<Player*>(entityObject);
+    if (target->HasZeroedBoundingBox(env)) {
+        env->PopLocalFrame(nullptr);
+        return;
+    }
+
     const std::string name = target->GetName(env, true);
     const float realHealth = target->GetRealHealth(env);
     if (name.empty() || realHealth < 0.0f) {

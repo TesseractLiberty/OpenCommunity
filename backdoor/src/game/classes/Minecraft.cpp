@@ -91,6 +91,36 @@ jobject Minecraft::GetObjectMouseOver(JNIEnv* env) {
     return GetMinecraftMember(env, Mapper::Get("objectMouseOver"), Mapper::Get("net/minecraft/util/MovingObjectPosition", 2));
 }
 
+void Minecraft::SetObjectMouseOver(jobject movingObject, JNIEnv* env) {
+    if (!env) {
+        return;
+    }
+
+    Class* minecraftClass = GetMinecraftClass();
+    if (!minecraftClass) {
+        return;
+    }
+
+    const std::string fieldName = Mapper::Get("objectMouseOver");
+    const std::string fieldSignature = Mapper::Get("net/minecraft/util/MovingObjectPosition", 2);
+    if (fieldName.empty() || fieldSignature.empty()) {
+        return;
+    }
+
+    Field* field = minecraftClass->GetField(env, fieldName.c_str(), fieldSignature.c_str());
+    if (!field) {
+        return;
+    }
+
+    jobject minecraft = GetTheMinecraft(env);
+    if (!minecraft) {
+        return;
+    }
+
+    field->SetObjectField(env, minecraft, movingObject);
+    env->DeleteLocalRef(minecraft);
+}
+
 jobject Minecraft::GetRenderItem(JNIEnv* env) {
     return GetMinecraftMember(env, Mapper::Get("renderItem"), Mapper::Get("net/minecraft/client/renderer/entity/RenderItem", 2));
 }

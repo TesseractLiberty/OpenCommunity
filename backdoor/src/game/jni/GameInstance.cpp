@@ -61,6 +61,11 @@ bool GameInstance::Attach()
 	if (m_Jvm->GetEnv(reinterpret_cast<void**>(&m_Jvmti), JVMTI_VERSION_1_1) != JNI_OK) {
 		m_Jvmti = nullptr;
 	}
+	else if (m_Jvmti) {
+		jvmtiCapabilities capabilities{};
+		capabilities.can_generate_breakpoint_events = 1;
+		m_Jvmti->AddCapabilities(&capabilities);
+	}
 
 	return true;
 }

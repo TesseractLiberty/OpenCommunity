@@ -2,7 +2,11 @@
 #include "GameThreadHook.h"
 #include "../../../deps/minhook/MinHook.h"
 #include "../../../shared/common/FeatureManager.h"
+#include "../game/classes/Minecraft.h"
+#include "../game/classes/MovingObjectPosition.h"
+#include "../game/classes/Player.h"
 #include "../game/jni/GameInstance.h"
+#include "../game/mapping/Mapper.h"
 #include <jni.h>
 #include <atomic>
 #include <chrono>
@@ -13,11 +17,142 @@ static void* g_HookedAddr = nullptr;
 static std::atomic<bool> g_Installed = false;
 static std::atomic<long long> g_LastHookTickMs = 0;
 static std::atomic<long long> g_LastFallbackTickMs = 0;
+static jvmtiEnv* g_Jvmti = nullptr;
+static jmethodID g_ClickMouseMethod = nullptr;
+static bool g_ClickMouseBreakpointInstalled = false;
 
 namespace {
     long long NowMs() {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    bool IsHiddenPlayerMouseOver(JNIEnv* env) {
+        if (!env || !g_Game || !g_Game->IsInitialized()) {
+            return false;
+        }
+
+        jobject mouseOverObject = Minecraft::GetObjectMouseOver(env);
+        if (!mouseOverObject) {
+            return false;
+        }
+
+        bool shouldClear = false;
+        auto* mouseOver = reinterpret_cast<MovingObjectPosition*>(mouseOverObject);
+        if (mouseOver->IsAimingEntity(env)) {
+            jobject entityObject = mouseOver->GetEntity(env);
+            if (entityObject) {
+                Class* playerClass = g_Game->FindClass(Mapper::Get("net/minecraft/entity/player/EntityPlayer"));
+                if (playerClass && env->IsInstanceOf(entityObject, reinterpret_cast<jclass>(playerClass))) {
+                    shouldClear = reinterpret_cast<Player*>(entityObject)->HasZeroedBoundingBox(env);
+                }
+                env->DeleteLocalRef(entityObject);
+            }
+        }
+
+        env->DeleteLocalRef(mouseOverObject);
+        return shouldClear;
+    }
+
+    void SanitizeHiddenObjectMouseOver(JNIEnv* env) {
+        if (!env) {
+            return;
+        }
+
+        if (IsHiddenPlayerMouseOver(env)) {
+            Minecraft::SetObjectMouseOver(nullptr, env);
+        }
+    }
+
+    void JNICALL BreakpointCallback(jvmtiEnv* jvmti, JNIEnv* env, jthread thread, jmethodID method, jlocation location) {
+        (void)jvmti;
+        (void)thread;
+        (void)location;
+
+        if (!env || method != g_ClickMouseMethod) {
+            return;
+        }
+
+        if (env->PushLocalFrame(64) == 0) {
+            SanitizeHiddenObjectMouseOver(env);
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
+            env->PopLocalFrame(nullptr);
+        }
+    }
+
+    bool InitializeClickMouseBreakpoint() {
+        if (!g_Game || !g_Game->IsInitialized()) {
+            return false;
+        }
+
+        JNIEnv* env = g_Game->GetCurrentEnv();
+        g_Jvmti = g_Game->GetJVMTI();
+        if (!env || !g_Jvmti) {
+            return false;
+        }
+
+        const std::string minecraftClassName = Mapper::Get("net/minecraft/client/Minecraft");
+        const std::string clickMouseName = Mapper::Get("clickMouse");
+        if (minecraftClassName.empty() || clickMouseName.empty()) {
+            return false;
+        }
+
+        Class* minecraftClass = g_Game->FindClass(minecraftClassName);
+        if (!minecraftClass) {
+            return false;
+        }
+
+        g_ClickMouseMethod = env->GetMethodID(reinterpret_cast<jclass>(minecraftClass), clickMouseName.c_str(), "()V");
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        if (!g_ClickMouseMethod) {
+            return false;
+        }
+
+        jvmtiEventCallbacks callbacks{};
+        callbacks.Breakpoint = &BreakpointCallback;
+
+        if (g_Jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks)) != JVMTI_ERROR_NONE) {
+            return false;
+        }
+
+        if (g_Jvmti->SetBreakpoint(g_ClickMouseMethod, 0) != JVMTI_ERROR_NONE) {
+            g_ClickMouseMethod = nullptr;
+            return false;
+        }
+
+        if (g_Jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_BREAKPOINT, nullptr) != JVMTI_ERROR_NONE) {
+            g_Jvmti->ClearBreakpoint(g_ClickMouseMethod, 0);
+            g_ClickMouseMethod = nullptr;
+            return false;
+        }
+
+        g_ClickMouseBreakpointInstalled = true;
+        return true;
+    }
+
+    void ShutdownClickMouseBreakpoint() {
+        if (!g_Jvmti) {
+            g_ClickMouseMethod = nullptr;
+            g_ClickMouseBreakpointInstalled = false;
+            return;
+        }
+
+        if (g_ClickMouseBreakpointInstalled && g_ClickMouseMethod) {
+            g_Jvmti->ClearBreakpoint(g_ClickMouseMethod, 0);
+        }
+
+        g_Jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_BREAKPOINT, nullptr);
+
+        jvmtiEventCallbacks callbacks{};
+        g_Jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks));
+
+        g_ClickMouseMethod = nullptr;
+        g_ClickMouseBreakpointInstalled = false;
+        g_Jvmti = nullptr;
     }
 }
 
@@ -26,7 +161,9 @@ double JNICALL StrictMathAtan2Hook(JNIEnv* env, jclass klass, double x, double y
     if (env && klass) {
         g_LastHookTickMs.store(NowMs(), std::memory_order_relaxed);
         if (env->PushLocalFrame(512) == 0) {
+            SanitizeHiddenObjectMouseOver(env);
             FeatureManager::Get()->TickSynchronousAll(env);
+            SanitizeHiddenObjectMouseOver(env);
             if (env->ExceptionCheck()) {
                 env->ExceptionClear();
             }
@@ -63,6 +200,7 @@ bool GameThreadHook::Initialize()
 
     g_HookedAddr = pAtan2;
     g_Installed.store(true, std::memory_order_relaxed);
+    InitializeClickMouseBreakpoint();
     return true;
 }
 
@@ -84,8 +222,20 @@ bool GameThreadHook::ShouldRunFallback()
     return true;
 }
 
+void GameThreadHook::SanitizeInteractionState(void* envPtr)
+{
+    auto* env = static_cast<JNIEnv*>(envPtr);
+    if (!env) {
+        return;
+    }
+
+    SanitizeHiddenObjectMouseOver(env);
+}
+
 void GameThreadHook::Shutdown()
 {
+    ShutdownClickMouseBreakpoint();
+
     if (g_HookedAddr) {
         MH_DisableHook(g_HookedAddr);
         MH_RemoveHook(g_HookedAddr);

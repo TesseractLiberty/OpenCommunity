@@ -20,10 +20,6 @@ struct OriginalEntityData {
     AxisAlignedBB_t bb;
     float width;
     float height;
-    double savedX{0};
-    double savedY{0};
-    double savedZ{0};
-    bool hasPosition{false};
 };
 static std::unordered_map<std::string, OriginalEntityData> originalData;
 static std::mutex originalDataMutex;
@@ -813,6 +809,13 @@ bool Player::HasZeroedBoundingBox(JNIEnv* env) {
         return false;
     }
 
+    if (width == 0.0f && height == 0.0f) {
+        if (bbObject) {
+            env->DeleteLocalRef(bbObject);
+        }
+        return true;
+    }
+
     if (!bbObject) {
         return false;
     }
@@ -820,9 +823,7 @@ bool Player::HasZeroedBoundingBox(JNIEnv* env) {
     const AxisAlignedBB_t boundingBox = reinterpret_cast<AxisAlignedBB*>(bbObject)->GetNativeBoundingBox(env);
     env->DeleteLocalRef(bbObject);
 
-    return width == 0.0f &&
-        height == 0.0f &&
-        boundingBox.minX == 0.0f &&
+    return boundingBox.minX == 0.0f &&
         boundingBox.minY == 0.0f &&
         boundingBox.minZ == 0.0f &&
         boundingBox.maxX == 0.0f &&
@@ -861,20 +862,12 @@ void Player::Zero(JNIEnv* env) {
             data.width = curWidth;
             data.height = curHeight;
 
-            auto pos = this->GetPos(env);
-            data.savedX = pos.x;
-            data.savedY = pos.y;
-            data.savedZ = pos.z;
-            data.hasPosition = true;
-
             AxisAlignedBB_t bb{};
             bb.minX = 0.0; bb.minY = 0.0; bb.minZ = 0.0;
             bb.maxX = 0.0; bb.maxY = 0.0; bb.maxZ = 0.0;
             ((AxisAlignedBB*)bbObj)->SetNativeBoundingBox(bb, env);
             this->SetWidth(0.0f, env);
             this->SetHeight(0.0f, env);
-
-            this->SetPosition(pos.x, -60.0, pos.z, env);
         } catch (...) {}
 
         env->DeleteLocalRef(bbObj);
@@ -894,14 +887,6 @@ void Player::Zero(JNIEnv* env) {
         ((AxisAlignedBB*)bbObj2)->SetNativeBoundingBox(bb, env);
         this->SetWidth(0.0f, env);
         this->SetHeight(0.0f, env);
-
-        auto it = originalData.find(name);
-        if (it != originalData.end() && it->second.hasPosition) {
-            Vec3D curPos = this->GetPos(env);
-            if (curPos.y > -50.0) {
-                this->SetPosition(it->second.savedX, -60.0, it->second.savedZ, env);
-            }
-        }
     } catch (...) {}
 
     env->DeleteLocalRef(bbObj2);
@@ -924,9 +909,6 @@ void Player::Restore(JNIEnv* env) {
     auto it = originalData.find(name);
     if (it != originalData.end()) {
         try {
-            if (it->second.hasPosition) {
-                this->SetPosition(it->second.savedX, it->second.savedY, it->second.savedZ, env);
-            }
             this->SetWidth(it->second.width, env);
             this->SetHeight(it->second.height, env);
             jobject bbObj = this->GetBoundingBox(env);

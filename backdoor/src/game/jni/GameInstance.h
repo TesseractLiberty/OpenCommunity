@@ -17,6 +17,7 @@ public:
 
 	auto GetJVM() const { return m_Jvm; }
 	auto GetENV() const { return m_Env; }
+	auto GetJVMTI() const { return m_Jvmti; }
 	auto GetGameVersion() const { return m_GameVersion; }
 	bool IsInitialized() const { return m_Initialized; }
 

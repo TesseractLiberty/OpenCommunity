@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "RenderHook.h"
+#include "GameThreadHook.h"
 #include "../features/render/HUD.h"
 #include "../features/visuals/DamageIndicator.h"
 #include "../features/visuals/Nametags.h"
@@ -404,6 +405,7 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
         ImGui::SetWindowPos(ImVec2(0, 0), ImGuiCond_Always);
         ImGui::SetWindowSize(ImVec2((float)viewport[2], (float)viewport[3]), ImGuiCond_Always);
 
+        GameThreadHook::SanitizeInteractionState(renderEnv);
         HUD::Get()->Render(config, (float)viewport[2], (float)viewport[3]);
         if (renderEnv && renderEnv->ExceptionCheck()) renderEnv->ExceptionClear();
         FeatureManager::Get()->RenderOverlayAll(ImGui::GetWindowDrawList(), (float)viewport[2], (float)viewport[3]);
