@@ -793,6 +793,43 @@ jobject Player::GetBoundingBox(JNIEnv* env) {
     return result;
 }
 
+bool Player::HasZeroedBoundingBox(JNIEnv* env) {
+    if (!env || this == nullptr) {
+        return false;
+    }
+
+    float width = 0.0f;
+    float height = 0.0f;
+    jobject bbObject = nullptr;
+
+    try {
+        width = GetWidth(env);
+        height = GetHeight(env);
+        bbObject = GetBoundingBox(env);
+    } catch (...) {
+        if (bbObject) {
+            env->DeleteLocalRef(bbObject);
+        }
+        return false;
+    }
+
+    if (!bbObject) {
+        return false;
+    }
+
+    const AxisAlignedBB_t boundingBox = reinterpret_cast<AxisAlignedBB*>(bbObject)->GetNativeBoundingBox(env);
+    env->DeleteLocalRef(bbObject);
+
+    return width == 0.0f &&
+        height == 0.0f &&
+        boundingBox.minX == 0.0f &&
+        boundingBox.minY == 0.0f &&
+        boundingBox.minZ == 0.0f &&
+        boundingBox.maxX == 0.0f &&
+        boundingBox.maxY == 0.0f &&
+        boundingBox.maxZ == 0.0f;
+}
+
 void Player::Zero(JNIEnv* env) {
     if (!env || this == nullptr) return;
 

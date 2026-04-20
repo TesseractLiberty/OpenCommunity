@@ -1,6 +1,8 @@
 #include "pch.h"
 #include "Nametags.h"
 
+#include "Target.h"
+#include "../../core/Bridge.h"
 #include "../../core/RenderHook.h"
 #include "../../game/classes/Minecraft.h"
 #include "../../game/classes/Scoreboard.h"
@@ -23,7 +25,7 @@
 #include <vector>
 
 namespace {
-    constexpr float kNametagVerticalOffset = 0.0f;
+    constexpr float kNametagAnchorVerticalOffset = 0.35f;
     constexpr float kNametagHorizontalPadding = 9.0f;
     constexpr float kNametagVerticalPadding = 6.0f;
     constexpr float kNametagCornerRounding = 7.0f;
@@ -39,7 +41,6 @@ namespace {
     constexpr float kScaleSmoothingStrength = 14.0f;
     constexpr auto kSmoothingResetDelay = std::chrono::milliseconds(450);
     constexpr auto kHealthCacheRefreshInterval = std::chrono::milliseconds(90);
-    constexpr auto kVanillaHideRefreshInterval = std::chrono::milliseconds(275);
 
     struct ScreenPoint {
         float x = 0.0f;
@@ -269,9 +270,8 @@ namespace {
         }
 
         const std::string enumClassName = Mapper::Get("net/minecraft/scoreboard/Team$EnumVisible");
-        const std::string methodName = Mapper::Get("getEnumVisibleByName");
         const std::string visibilitySignature = Mapper::Get("net/minecraft/scoreboard/Team$EnumVisible", 2);
-        if (enumClassName.empty() || methodName.empty() || visibilitySignature.empty()) {
+        if (enumClassName.empty() || visibilitySignature.empty()) {
             return nullptr;
         }
 
@@ -280,26 +280,98 @@ namespace {
             return nullptr;
         }
 
-        const std::string signature = "(Ljava/lang/String;)" + visibilitySignature;
-        jmethodID byNameMethod = env->GetStaticMethodID(enumClass, methodName.c_str(), signature.c_str());
-        if (!byNameMethod) {
+        const std::string methodName = Mapper::Get("getEnumVisibleByName");
+        if (!methodName.empty()) {
+            const std::string signature = "(Ljava/lang/String;)" + visibilitySignature;
+            jmethodID byNameMethod = env->GetStaticMethodID(enumClass, methodName.c_str(), signature.c_str());
+            if (byNameMethod) {
+                jstring neverString = env->NewStringUTF("never");
+                jobject visibility = neverString ? env->CallStaticObjectMethod(enumClass, byNameMethod, neverString) : nullptr;
+                if (neverString) {
+                    env->DeleteLocalRef(neverString);
+                }
+                if (env->ExceptionCheck()) {
+                    env->ExceptionClear();
+                } else if (visibility) {
+                    return visibility;
+                }
+            } else if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
+        }
+
+        const std::string valuesSignature = "()" + std::string("[") + visibilitySignature;
+        jmethodID valuesMethod = env->GetStaticMethodID(enumClass, "values", valuesSignature.c_str());
+        if (!valuesMethod) {
             if (env->ExceptionCheck()) {
                 env->ExceptionClear();
             }
             return nullptr;
         }
 
-        jstring neverString = env->NewStringUTF("never");
-        jobject visibility = neverString ? env->CallStaticObjectMethod(enumClass, byNameMethod, neverString) : nullptr;
-        if (neverString) {
-            env->DeleteLocalRef(neverString);
-        }
+        jobjectArray values = static_cast<jobjectArray>(env->CallStaticObjectMethod(enumClass, valuesMethod));
         if (env->ExceptionCheck()) {
             env->ExceptionClear();
+            if (values) {
+                env->DeleteLocalRef(values);
+            }
             return nullptr;
         }
 
-        return visibility;
+        if (!values) {
+            return nullptr;
+        }
+
+        jmethodID nameMethod = env->GetMethodID(enumClass, "name", "()Ljava/lang/String;");
+        if (!nameMethod) {
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+            }
+            env->DeleteLocalRef(values);
+            return nullptr;
+        }
+
+        const jsize enumCount = env->GetArrayLength(values);
+        for (jsize index = 0; index < enumCount; ++index) {
+            jobject value = env->GetObjectArrayElement(values, index);
+            if (!value) {
+                continue;
+            }
+
+            jstring nameObject = static_cast<jstring>(env->CallObjectMethod(value, nameMethod));
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                if (nameObject) {
+                    env->DeleteLocalRef(nameObject);
+                }
+                env->DeleteLocalRef(value);
+                continue;
+            }
+
+            std::string enumName;
+            if (nameObject) {
+                const char* chars = env->GetStringUTFChars(nameObject, nullptr);
+                if (chars) {
+                    enumName = chars;
+                    env->ReleaseStringUTFChars(nameObject, chars);
+                }
+                env->DeleteLocalRef(nameObject);
+            }
+
+            std::transform(enumName.begin(), enumName.end(), enumName.begin(), [](unsigned char ch) {
+                return static_cast<char>(std::tolower(ch));
+            });
+
+            if (enumName == "never") {
+                env->DeleteLocalRef(values);
+                return value;
+            }
+
+            env->DeleteLocalRef(value);
+        }
+
+        env->DeleteLocalRef(values);
+        return nullptr;
     }
 
     void DeleteStoredVisibilityRefs(JNIEnv* env) {
@@ -496,6 +568,65 @@ namespace {
         }
     }
 
+    std::string NormalizeTargetName(std::string name) {
+        const auto notSpace = [](unsigned char ch) {
+            return !std::isspace(ch);
+        };
+
+        const auto begin = std::find_if(name.begin(), name.end(), notSpace);
+        if (begin == name.end()) {
+            return {};
+        }
+
+        const auto end = std::find_if(name.rbegin(), name.rend(), notSpace).base();
+        std::string normalized(begin, end);
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        return normalized;
+    }
+
+    bool TargetNamesMatch(const std::string& left, const std::string& right) {
+        if (left.empty() || right.empty()) {
+            return false;
+        }
+
+        return NormalizeTargetName(left) == NormalizeTargetName(right);
+    }
+
+    std::string GetNametagTargetName() {
+        auto* bridge = Bridge::Get();
+        auto* config = bridge ? bridge->GetConfig() : nullptr;
+        if (!config || !config->Target.m_Enabled) {
+            return {};
+        }
+
+        if (config->Target.m_AutoTarget || config->Target.m_TargetSwitch) {
+            return Target::GetCurrentTargetName();
+        }
+
+        return config->Target.m_PlayerName;
+    }
+
+    bool ShouldRenderOnlyTargetNametag() {
+        auto* bridge = Bridge::Get();
+        auto* config = bridge ? bridge->GetConfig() : nullptr;
+        return config && config->Target.m_Enabled;
+    }
+
+    float ResolveNametagHealth(Player* player, JNIEnv* env) {
+        if (!player || !env) {
+            return -1.0f;
+        }
+
+        float realHealth = player->GetRealHealth(env);
+        if (!std::isfinite(realHealth) || realHealth < 0.0f) {
+            realHealth = player->GetHealth(env);
+        }
+
+        return std::isfinite(realHealth) ? realHealth : -1.0f;
+    }
+
     std::string FormatHealthText(float realHealth) {
         char buffer[32];
         std::snprintf(buffer, sizeof(buffer), "%.1f", realHealth);
@@ -579,15 +710,12 @@ void Nametags::TickSynchronous(void* envPtr) {
 
     const auto now = std::chrono::steady_clock::now();
     bool shouldRefreshHealthCache = false;
-    bool shouldRefreshVanillaHide = false;
+    const bool shouldRefreshVanillaHide = true;
     {
         std::lock_guard<std::mutex> lock(g_NametagStateMutex);
         shouldRefreshHealthCache =
             g_LastHealthCacheRefresh == std::chrono::steady_clock::time_point::min() ||
             (now - g_LastHealthCacheRefresh) >= kHealthCacheRefreshInterval;
-        shouldRefreshVanillaHide =
-            g_LastVanillaHideRefresh == std::chrono::steady_clock::time_point::min() ||
-            (now - g_LastVanillaHideRefresh) >= kVanillaHideRefreshInterval;
     }
 
     if (!shouldRefreshHealthCache && !shouldRefreshVanillaHide) {
@@ -625,8 +753,15 @@ void Nametags::TickSynchronous(void* envPtr) {
             continue;
         }
 
+        player->SetAlwaysRenderNameTag(false, env);
+
         const std::string playerName = player->GetName(env, true);
         if (playerName.empty()) {
+            env->DeleteLocalRef(playerObject);
+            continue;
+        }
+
+        if (player->HasZeroedBoundingBox(env)) {
             env->DeleteLocalRef(playerObject);
             continue;
         }
@@ -634,7 +769,12 @@ void Nametags::TickSynchronous(void* envPtr) {
         activePlayerNames.insert(playerName);
 
         if (shouldRefreshHealthCache) {
-            const float realHealth = player->GetRealHealth(env);
+            const float realHealth = ResolveNametagHealth(player, env);
+            if (!std::isfinite(realHealth) || realHealth < 0.0f) {
+                env->DeleteLocalRef(playerObject);
+                continue;
+            }
+
             float maxHealth = player->GetMaxHealth(env);
             if (maxHealth <= 0.0f) {
                 maxHealth = (std::max)(20.0f, realHealth);
@@ -733,6 +873,8 @@ void Nametags::RenderOverlay(ImDrawList* drawList, float screenW, float screenH)
     const float partialTicks = timer->GetRenderPartialTicks(env);
     std::vector<NametagRenderEntry> entries;
     entries.reserve(32);
+    const bool renderOnlyTarget = ShouldRenderOnlyTargetNametag();
+    const std::string targetName = renderOnlyTarget ? GetNametagTargetName() : std::string{};
 
     const auto players = world->GetPlayerEntities(env);
     for (auto* player : players) {
@@ -751,7 +893,19 @@ void Nametags::RenderOverlay(ImDrawList* drawList, float screenW, float screenH)
             continue;
         }
 
+        if (player->HasZeroedBoundingBox(env)) {
+            env->DeleteLocalRef(playerObject);
+            continue;
+        }
+
         const std::string playerName = player->GetName(env, true);
+        if (renderOnlyTarget && !TargetNamesMatch(playerName, targetName)) {
+            env->DeleteLocalRef(playerObject);
+            continue;
+        }
+
+        player->SetAlwaysRenderNameTag(false, env);
+
         float realHealth = 0.0f;
         float maxHealth = 20.0f;
         if (playerName.empty() || !GetCachedNametagStats(playerName, realHealth, maxHealth) || realHealth <= 0.0f) {
@@ -776,27 +930,22 @@ void Nametags::RenderOverlay(ImDrawList* drawList, float screenW, float screenH)
         const double interpolatedY = lastPosition.y + (position.y - lastPosition.y) * partialTicks;
         const double interpolatedZ = lastPosition.z + (position.z - lastPosition.z) * partialTicks;
 
-        float entityWidth = player->GetWidth(env);
-        if (entityWidth <= 0.05f) {
-            entityWidth = 0.6f;
-        }
-
-        ProjectedNametagBox projectedBox;
-        if (!TryBuildProjectedNametagBox(
-                interpolatedX,
-                interpolatedY + kNametagVerticalOffset,
-                interpolatedZ,
-                entityWidth,
-                entityHeight,
+        ScreenPoint projectedAnchor;
+        if (!TryProjectPoint(
+                {
+                    static_cast<float>(interpolatedX),
+                    static_cast<float>(interpolatedY + entityHeight + kNametagAnchorVerticalOffset),
+                    static_cast<float>(interpolatedZ)
+                },
                 renderSnapshot,
-                projectedBox)) {
+                projectedAnchor)) {
             env->DeleteLocalRef(playerObject);
             continue;
         }
 
         const ScreenPoint anchor {
-            std::round((projectedBox.minX + projectedBox.maxX) * 0.5f),
-            std::round(projectedBox.minY)
+            std::round(projectedAnchor.x),
+            std::round(projectedAnchor.y)
         };
 
         if (anchor.x < -64.0f || anchor.y < -64.0f || anchor.x > (screenW + 64.0f) || anchor.y > (screenH + 64.0f)) {

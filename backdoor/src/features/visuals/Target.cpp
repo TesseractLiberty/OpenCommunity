@@ -1153,6 +1153,7 @@ void Target::TickSynchronous(void* envPtr) {
         ManageHitboxes(env, localPlayer, world);
     } else {
         const std::string targetName = config->Target.m_PlayerName;
+        SetLockedTarget(targetName);
         const auto players = world->GetPlayerEntities(env);
         bool affectedPlayers = false;
         for (auto* player : players) {

@@ -101,21 +101,13 @@ namespace {
         out[3] = 0.0f;            out[7] = 0.0f;     out[11] = 0.0f;             out[15] = 1.0f;
     }
 
-    bool CaptureRenderMatricesFromGame(const GLint viewport[4]) {
-        if (!g_Game || !g_Game->IsInitialized()) {
+    bool TryCaptureMatricesFromActiveRenderInfo(JNIEnv* env, const GLint viewport[4]) {
+        if (!env || viewport[2] <= 0 || viewport[3] <= 0) {
             return false;
         }
-
-        JNIEnv* env = g_Game->GetCurrentEnv();
-        if (!env) {
-            return false;
-        }
-
-        if (env->ExceptionCheck()) env->ExceptionClear();
 
         const auto activeModelView = ActiveRenderInfo::GetModelView(env);
         const auto activeProjection = ActiveRenderInfo::GetProjection(env);
-
         if (env->ExceptionCheck()) env->ExceptionClear();
 
         if (activeModelView.size() == 16 && activeProjection.size() == 16 &&
@@ -126,6 +118,14 @@ namespace {
                 viewport[2],
                 viewport[3]);
             return true;
+        }
+
+        return false;
+    }
+
+    bool TryCaptureMatricesFromCameraState(JNIEnv* env, const GLint viewport[4]) {
+        if (!env || viewport[2] <= 0 || viewport[3] <= 0) {
+            return false;
         }
 
         jobject playerObject = Minecraft::GetThePlayer(env);
@@ -172,6 +172,36 @@ namespace {
         if (renderManagerObject) env->DeleteLocalRef(renderManagerObject);
 
         return captured;
+    }
+
+    bool CaptureRenderMatricesFromGame(const GLint viewport[4]) {
+        if (!g_Game || !g_Game->IsInitialized()) {
+            return false;
+        }
+
+        JNIEnv* env = g_Game->GetCurrentEnv();
+        if (!env) {
+            return false;
+        }
+
+        if (env->ExceptionCheck()) env->ExceptionClear();
+
+        const bool preferCameraState =
+            g_Game->GetGameVersion() == GameVersions::LUNAR;
+
+        if (preferCameraState) {
+            if (TryCaptureMatricesFromCameraState(env, viewport)) {
+                return true;
+            }
+
+            return TryCaptureMatricesFromActiveRenderInfo(env, viewport);
+        }
+
+        if (TryCaptureMatricesFromActiveRenderInfo(env, viewport)) {
+            return true;
+        }
+
+        return TryCaptureMatricesFromCameraState(env, viewport);
     }
 
     std::filesystem::path FindOverlayFontPath() {
@@ -232,11 +262,9 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
         RenderCache::viewportH = viewport[3];
     }
 
-    if (!RenderCache::captured) {
-        if (renderEnv && renderEnv->ExceptionCheck()) renderEnv->ExceptionClear();
-        CaptureRenderMatricesFromGame(viewport);
-        if (renderEnv && renderEnv->ExceptionCheck()) renderEnv->ExceptionClear();
-    }
+    if (renderEnv && renderEnv->ExceptionCheck()) renderEnv->ExceptionClear();
+    CaptureRenderMatricesFromGame(viewport);
+    if (renderEnv && renderEnv->ExceptionCheck()) renderEnv->ExceptionClear();
 
     if (renderEnv && renderEnv->ExceptionCheck()) renderEnv->ExceptionClear();
 

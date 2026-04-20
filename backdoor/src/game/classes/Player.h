@@ -40,6 +40,7 @@ public:
     int GetSwingProgressInt(JNIEnv* env);
     jobject GetActivePotionEffect(int potionId, JNIEnv* env);
     jobject GetBoundingBox(JNIEnv* env);
+    bool HasZeroedBoundingBox(JNIEnv* env);
     void Zero(JNIEnv* env);
     void Restore(JNIEnv* env);
     void SendPacket(jobject packet, JNIEnv* env);
