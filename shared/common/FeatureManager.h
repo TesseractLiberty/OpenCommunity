@@ -142,6 +142,7 @@ public:
     const std::string& GetDescription() const { return m_Description; }
     ModuleCategory GetCategory() const { return m_Category; }
     bool IsEnabled() const { return m_Enabled; }
+    bool IsBeta() const { return m_IsBeta; }
     void SetEnabled(bool enabled) {
         m_Enabled = enabled;
         if (!enabled) {
@@ -205,6 +206,10 @@ protected:
         m_ImagePath = path;
     }
 
+    void SetBeta(bool isBeta = true) {
+        m_IsBeta = isBeta;
+    }
+
     void MarkInUse(int holdMs = 150) {
         const long long durationMs = (holdMs < 0) ? 0 : holdMs;
         const long long target = GetUsageNowMs() + durationMs;
@@ -228,6 +233,7 @@ protected:
     const unsigned char* m_ImageData = nullptr;
     unsigned int m_ImageSize = 0;
     std::string m_ImagePath;
+    bool m_IsBeta = false;
 
 private:
     static long long GetUsageNowMs() {

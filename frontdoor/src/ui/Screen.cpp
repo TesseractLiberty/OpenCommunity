@@ -3714,10 +3714,6 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
             }
         }
 
-        ImFont* nf = fontBold ? fontBold : ImGui::GetFont();
-        float nameFS = nf->FontSize;
-        dl->AddText(nf, nameFS, ImVec2(cx + cardPadX + nameOffsetX, cy + (headerH - nameFS) * 0.5f), color::GetStrongTextU32(), mod->GetName().c_str());
-
         float rightX = cx + colW - cardPadX;
         ImFont* bf = fontBody ? fontBody : ImGui::GetFont();
         float bfs = bf->FontSize;
@@ -3793,6 +3789,32 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
         float toggleY = cy + (headerH - toggleSize) * 0.5f;
         ImVec2 toggleMin(toggleX, toggleY);
         ImVec2 toggleMax(toggleX + toggleSize, toggleY + toggleSize);
+
+        ImFont* nf = fontBold ? fontBold : ImGui::GetFont();
+        float nameFS = nf->FontSize;
+        const ImVec2 namePos(cx + cardPadX + nameOffsetX, cy + (headerH - nameFS) * 0.5f);
+        dl->AddText(nf, nameFS, namePos, color::GetStrongTextU32(), mod->GetName().c_str());
+
+        if (mod->IsBeta()) {
+            const char* betaLabel = "Beta";
+            const ImVec2 betaTextSize = bf->CalcTextSizeA(bfs, FLT_MAX, 0.0f, betaLabel);
+            const float betaBadgeHeight = 18.0f;
+            const float betaBadgeWidth = betaTextSize.x + 14.0f;
+            const float betaBadgeX = namePos.x + nf->CalcTextSizeA(nameFS, FLT_MAX, 0.0f, mod->GetName().c_str()).x + 8.0f;
+            const float betaBadgeY = cy + (headerH - betaBadgeHeight) * 0.5f;
+
+            if (betaBadgeX + betaBadgeWidth <= toggleX - 8.0f) {
+                const ImVec2 betaMin(betaBadgeX, betaBadgeY);
+                const ImVec2 betaMax(betaBadgeX + betaBadgeWidth, betaBadgeY + betaBadgeHeight);
+                dl->AddRectFilled(betaMin, betaMax, color::GetDangerU32(), 5.0f);
+                dl->AddText(
+                    bf,
+                    bfs,
+                    ImVec2(betaMin.x + (betaBadgeWidth - betaTextSize.x) * 0.5f, betaMin.y + (betaBadgeHeight - betaTextSize.y) * 0.5f),
+                    IM_COL32(255, 255, 255, 255),
+                    betaLabel);
+            }
+        }
 
         bool enabled = mod->IsEnabled();
         ImU32 toggleBg = enabled ? color::GetStrongTextU32() : color::GetPanelActiveU32(0.88f);
