@@ -1,6 +1,6 @@
 #pragma once
 
-// common headers for both frontdoor and backdoor
+// common headers for both launcher and runtime
 #include <windows.h>
 #include <cstdint>
 #include <cstring>

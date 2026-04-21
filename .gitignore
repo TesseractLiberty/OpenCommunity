@@ -95,7 +95,7 @@ $RECYCLE.BIN/
 *~
 
 # IDE specific
-*.idea/
+.idea/
 .vscode/
 *.swp
 *.swo

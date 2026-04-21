@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
+
 enum class ArrayListMode {
     Default = 0,
     Rise = 1,
@@ -13,6 +16,14 @@ enum class DamageIndicatorMode {
 };
 
 struct ModuleConfig {
+    static constexpr std::uint32_t kMagic = 0x4746434F; // OCFG
+    static constexpr std::uint32_t kVersion = 1;
+
+    std::uint32_t m_Magic = kMagic;
+    std::uint32_t m_Version = kVersion;
+    std::uint32_t m_Size = 0;
+    std::uint32_t m_Reserved = 0;
+
     bool m_Destruct = false;
     bool m_FullDestruct = false;
     char m_Username[64] = {};
@@ -139,8 +150,26 @@ struct ModuleConfig {
         bool m_BackTrack = false;
     } Modules;
 
+    bool IsCompatible() const {
+        return m_Magic == kMagic && m_Version == kVersion && m_Size == sizeof(ModuleConfig);
+    }
+
+    void StampSchema() {
+        m_Magic = kMagic;
+        m_Version = kVersion;
+        m_Size = static_cast<std::uint32_t>(sizeof(ModuleConfig));
+        m_Reserved = 0;
+    }
+
     void Reset() {
         *this = ModuleConfig{};
+        StampSchema();
+    }
+
+    static ModuleConfig CreateDefault() {
+        ModuleConfig config;
+        config.StampSchema();
+        return config;
     }
 };
 
