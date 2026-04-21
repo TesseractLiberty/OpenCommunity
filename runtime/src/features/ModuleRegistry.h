@@ -11,6 +11,7 @@
 #include "visuals/ArrayList.h"
 #include "visuals/DamageIndicator.h"
 #include "visuals/Nametags.h"
+#include "visuals/Notifications.h"
 #include "visuals/Target.h"
 #include "visuals/HideClans.h"
 
@@ -29,6 +30,7 @@ namespace ModuleRegistry {
         modules.RegisterModule(std::make_shared<ArrayList>());
         modules.RegisterModule(std::make_shared<DamageIndicator>());
         modules.RegisterModule(std::make_shared<Nametags>());
+        modules.RegisterModule(std::make_shared<Notifications>());
     }
 
     inline void RegisterAll() {

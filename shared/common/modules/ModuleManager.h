@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <utility>
 #include <unordered_map>
 #include <vector>
@@ -11,6 +12,7 @@
 class ModuleManager {
 public:
     using KeybindProcessPredicate = std::function<bool(DWORD)>;
+    using ModuleToggleCallback = std::function<void(const Module& module, bool enabled)>;
 
     static ModuleManager* Get() {
         static ModuleManager instance;
@@ -19,6 +21,10 @@ public:
 
     void SetKeybindProcessPredicate(KeybindProcessPredicate predicate) {
         m_KeybindProcessPredicate = std::move(predicate);
+    }
+
+    void SetModuleToggleCallback(ModuleToggleCallback callback) {
+        m_ModuleToggleCallback = std::move(callback);
     }
 
     void RegisterModule(std::shared_ptr<Module> module) {
@@ -33,6 +39,7 @@ public:
             }
         }
 
+        m_KnownEnabledStates[BuildModuleKey(*module)] = module->IsEnabled();
         categoryModules.push_back(std::move(module));
     }
 
@@ -67,7 +74,9 @@ public:
 
                 const int key = module->GetKeybind();
                 if (key != 0 && (GetAsyncKeyState(key) & 1)) {
+                    const bool wasEnabled = module->IsEnabled();
                     module->Toggle();
+                    NotifyEnabledChangeIfNeeded(*module, wasEnabled, module->IsEnabled());
                 }
             }
         }
@@ -88,9 +97,21 @@ public:
             return;
         }
 
-        ForEachModule([configPtr](Module& module) {
+        const bool primeOnly = !m_EnableStatePrimed;
+        ForEachModule([this, configPtr](Module& module) {
+            const bool wasEnabled = module.IsEnabled();
             module.SyncFromConfig(configPtr);
+            if (!m_EnableStatePrimed) {
+                m_KnownEnabledStates[BuildModuleKey(module)] = module.IsEnabled();
+                return;
+            }
+
+            NotifyEnabledChangeIfNeeded(module, wasEnabled, module.IsEnabled());
         });
+
+        if (primeOnly) {
+            m_EnableStatePrimed = true;
+        }
     }
 
     void TickAll() {
@@ -152,6 +173,28 @@ private:
         }
     }
 
+    static std::string BuildModuleKey(const Module& module) {
+        return std::to_string(static_cast<int>(module.GetCategory())) + ":" + module.GetName();
+    }
+
+    void NotifyEnabledChangeIfNeeded(const Module& module, bool wasEnabled, bool isEnabled) {
+        const std::string key = BuildModuleKey(module);
+        auto stateIt = m_KnownEnabledStates.find(key);
+        if (stateIt == m_KnownEnabledStates.end()) {
+            m_KnownEnabledStates.emplace(key, isEnabled);
+            return;
+        }
+
+        if (wasEnabled == isEnabled && stateIt->second == isEnabled) {
+            return;
+        }
+
+        stateIt->second = isEnabled;
+        if (m_ModuleToggleCallback) {
+            m_ModuleToggleCallback(module, isEnabled);
+        }
+    }
+
     bool IsKeybindInputAllowed() const {
         HWND foregroundWindow = GetForegroundWindow();
         if (!foregroundWindow || !IsWindow(foregroundWindow)) {
@@ -176,5 +219,8 @@ private:
     }
 
     std::unordered_map<ModuleCategory, std::vector<std::shared_ptr<Module>>> m_Modules;
+    std::unordered_map<std::string, bool> m_KnownEnabledStates;
     KeybindProcessPredicate m_KeybindProcessPredicate;
+    ModuleToggleCallback m_ModuleToggleCallback;
+    bool m_EnableStatePrimed = false;
 };

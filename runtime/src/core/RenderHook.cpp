@@ -4,6 +4,7 @@
 #include "../features/render/HUD.h"
 #include "../features/visuals/DamageIndicator.h"
 #include "../features/visuals/Nametags.h"
+#include "../features/visuals/Notifications.h"
 #include "Bridge.h"
 #include "../game/classes/ActiveRenderInfo.h"
 #include "../game/classes/Minecraft.h"
@@ -21,6 +22,8 @@
 #include "../../../deps/imgui/imgui.h"
 #include "../../../deps/imgui/imgui_impl_opengl2.hpp"
 #include "../../../deps/imgui/fonts/fonts.hpp"
+#include "../../../deps/imgui/fonts/inter_bold_font.h"
+#include "../../../deps/imgui/fonts/inter_regular_font.h"
 #include "../../../deps/imgui/fonts/open_sans_bold_font.h"
 #include "../../../deps/imgui/fonts/open_sans_regular_font.h"
 #include "../../../deps/imgui/fonts/play_bold_font.h"
@@ -40,6 +43,8 @@ static ImFont* g_overlayVapeFont = nullptr;
 static ImFont* g_overlayOpenSansRegularFont = nullptr;
 static ImFont* g_overlayOpenSansBoldFont = nullptr;
 static ImFont* g_overlaySanFranciscoBoldFont = nullptr;
+static ImFont* g_overlayInterRegularFont = nullptr;
+static ImFont* g_overlayInterBoldFont = nullptr;
 
 namespace RenderCache {
     std::vector<float> modelView(16, 0.0f);
@@ -453,6 +458,22 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
             &fontCfg
         );
 
+        fontCfg.FontDataOwnedByAtlas = false;
+        g_overlayInterRegularFont = io.Fonts->AddFontFromMemoryTTF(
+            const_cast<unsigned char*>(fonts::inter_regular_data),
+            fonts::inter_regular_size,
+            12.0f,
+            &fontCfg
+        );
+
+        fontCfg.FontDataOwnedByAtlas = false;
+        g_overlayInterBoldFont = io.Fonts->AddFontFromMemoryTTF(
+            const_cast<unsigned char*>(fonts::inter_bold_data),
+            fonts::inter_bold_size,
+            14.0f,
+            &fontCfg
+        );
+
         if (g_overlaySanFranciscoBoldFont) {
             static const ImWchar iconRanges[] = { static_cast<ImWchar>(ICON_MIN_MD), static_cast<ImWchar>(ICON_MAX_16_MD), 0 };
             ImFontConfig iconCfg;
@@ -499,10 +520,17 @@ bool __stdcall wglSwapBuffersHook(HDC hdc)
         if (!g_overlaySanFranciscoBoldFont) {
             g_overlaySanFranciscoBoldFont = g_overlayRegularFont;
         }
+        if (!g_overlayInterRegularFont) {
+            g_overlayInterRegularFont = g_overlayRegularFont;
+        }
+        if (!g_overlayInterBoldFont) {
+            g_overlayInterBoldFont = g_overlayInterRegularFont;
+        }
 
         HUD::Get()->SetFonts(g_overlayRegularFont, g_overlayBoldFont, g_overlayVapeFont);
         DamageIndicator::SetFonts(g_overlayOpenSansRegularFont, g_overlayOpenSansBoldFont);
         Nametags::SetFont(g_overlaySanFranciscoBoldFont);
+        Notifications::SetFonts(g_overlayInterRegularFont, g_overlayInterBoldFont);
         ImGui_ImplOpenGL2_Init();
         g_fontsInitialized = true;
     });
@@ -584,7 +612,10 @@ void RenderHook::Shutdown() {
         g_overlayOpenSansRegularFont = nullptr;
         g_overlayOpenSansBoldFont = nullptr;
         g_overlaySanFranciscoBoldFont = nullptr;
+        g_overlayInterRegularFont = nullptr;
+        g_overlayInterBoldFont = nullptr;
         Nametags::SetFont(nullptr);
+        Notifications::SetFonts(nullptr, nullptr);
         g_fontsInitialized = false;
     }
 

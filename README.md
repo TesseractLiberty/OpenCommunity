@@ -100,7 +100,7 @@ All available modules organized by category.
 
 **Movement** - NoJumpDelay
 
-**Visuals** - ArrayList, DamageIndicator, Target, HideClans, Nametags
+**Visuals** - ArrayList, DamageIndicator, Target, HideClans, Nametags, Notifications
 
 **Render** - HUD
 
@@ -130,6 +130,7 @@ All concrete module registration happens in `runtime/src/features/ModuleRegistry
 #include "visuals/ArrayList.h"
 #include "visuals/DamageIndicator.h"
 #include "visuals/Nametags.h"
+#include "visuals/Notifications.h"
 #include "visuals/Target.h"
 #include "visuals/HideClans.h"
 
@@ -148,6 +149,7 @@ namespace ModuleRegistry {
         modules.RegisterModule(std::make_shared<ArrayList>());
         modules.RegisterModule(std::make_shared<DamageIndicator>());
         modules.RegisterModule(std::make_shared<Nametags>());
+        modules.RegisterModule(std::make_shared<Notifications>());
     }
 
     inline void RegisterAll() {
@@ -215,6 +217,22 @@ modules.RegisterModule(std::make_shared<Sprint>());
 ```
 
 The `ModuleManager` singleton handles the rest: ticking, config sync, keybinds, UI rendering, and overlay rendering.
+
+### Sending Notifications
+
+The `Notifications` module exposes a static API that runtime code can call from any feature:
+
+```cpp
+#include "../visuals/Notifications.h"
+
+Notifications::SendNotifications::ERROR(
+    "ArmorSwap did not find armor in your inventory");
+
+Notifications::SendNotifications::INFO("Target selected");
+Notifications::SendNotifications::SUCCESS("Config saved");
+Notifications::SendNotifications::ENABLED("AutoClicker");
+Notifications::SendNotifications::DISABLED("AutoClicker");
+```
 
 ### Module API
 
@@ -444,6 +462,7 @@ OpenCommunity/
 |       |       |-- DamageIndicator.h / .cpp
 |       |       |-- HideClans.h / .cpp
 |       |       |-- Nametags.h / .cpp
+|       |       |-- Notifications.h / .cpp
 |       |       `-- Target.h / .cpp
 |       `-- game/
 |           |-- classes/

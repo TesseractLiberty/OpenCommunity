@@ -12,7 +12,7 @@
 
 class Nametags : public Module {
 public:
-    MODULE_INFO(Nametags, "Nametags", "Renders LiquidBounce-inspired name tags with real health and distance.", ModuleCategory::Visuals) {
+    MODULE_INFO(Nametags, "Nametags", "Renders name tags with real health and distance.", ModuleCategory::Visuals) {
         SetBeta();
         SetImagePrefix(module_icons::tag_icon_data, module_icons::tag_icon_size);
     }

@@ -17,7 +17,7 @@ enum class DamageIndicatorMode {
 
 struct ModuleConfig {
     static constexpr std::uint32_t kMagic = 0x4746434F; // OCFG
-    static constexpr std::uint32_t kVersion = 1;
+    static constexpr std::uint32_t kVersion = 2;
 
     std::uint32_t m_Magic = kMagic;
     std::uint32_t m_Version = kVersion;
@@ -117,6 +117,10 @@ struct ModuleConfig {
     } Nametags;
 
     struct {
+        bool m_Enabled = true;
+    } Notifications;
+
+    struct {
         bool m_Enabled = false;
     } NoHitDelay;
 
@@ -144,6 +148,7 @@ struct ModuleConfig {
         bool m_Target = false;
         bool m_HideClans = false;
         bool m_Nametags = false;
+        bool m_Notifications = true;
         bool m_RightClicker = false;
         bool m_WTap = false;
         bool m_AimAssist = false;

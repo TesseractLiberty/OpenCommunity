@@ -4,6 +4,7 @@
 #include "core/RenderHook.h"
 #include "core/GameThreadHook.h"
 #include "features/ModuleRegistry.h"
+#include "features/visuals/Notifications.h"
 #include "game/jni/GameInstance.h"
 #include "game/jni/JniRefs.h"
 #include "../../deps/minhook/MinHook.h"
@@ -68,6 +69,13 @@ static DWORD MainThreadImpl() {
     
     auto* config = Bridge::Get()->GetConfig();
     auto* modules = ModuleManager::Get();
+    modules->SetModuleToggleCallback([](const Module& module, bool enabled) {
+        if (enabled) {
+            Notifications::SendNotifications::ENABLED(module.GetName());
+        } else {
+            Notifications::SendNotifications::DISABLED(module.GetName());
+        }
+    });
 
     while (config && !config->m_Destruct) {
         SafeUpdateModules(modules, config);
