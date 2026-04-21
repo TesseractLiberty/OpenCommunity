@@ -611,11 +611,8 @@ void DamageIndicator::RenderOverlay(ImDrawList* drawList, float screenW, float s
 
     jobject currentScreenObject = Minecraft::GetCurrentScreen(env);
     if (currentScreenObject) {
-        auto* screen = reinterpret_cast<GuiScreen*>(currentScreenObject);
-        if (screen->IsInventory(env)) {
-            env->PopLocalFrame(nullptr);
-            return;
-        }
+        env->PopLocalFrame(nullptr);
+        return;
     }
 
     jobject mouseOverObject = Minecraft::GetObjectMouseOver(env);

@@ -3,6 +3,8 @@
 
 #include "../../core/Bridge.h"
 #include "../../core/RenderHook.h"
+#include "../../game/classes/ItemArmor.h"
+#include "../../game/classes/ItemStack.h"
 #include "../../game/classes/Minecraft.h"
 #include "../../game/classes/MovingObjectPosition.h"
 #include "../../game/classes/RenderManager.h"
@@ -11,6 +13,7 @@
 #include "../../game/classes/Timer.h"
 #include "../../game/classes/World.h"
 #include "../../game/jni/GameInstance.h"
+#include "../../game/mapping/Mapper.h"
 
 #include <array>
 #include <cmath>
@@ -18,6 +21,7 @@
 #include <cfloat>
 #include <cstring>
 #include <limits>
+#include <unordered_set>
 
 namespace {
     constexpr int kOnlineTargetPlayerLimit = 100;
@@ -472,6 +476,28 @@ namespace {
     std::mutex g_BrowseMutex;
     BrowseCacheState g_BrowseCache;
 
+    std::string StripMinecraftFormatting(std::string text) {
+        std::string clean;
+        clean.reserve(text.size());
+
+        for (size_t index = 0; index < text.size(); ++index) {
+            const unsigned char current = static_cast<unsigned char>(text[index]);
+            if (current == 0xA7 || current == 0xC2) {
+                if (current == 0xC2 && index + 1 < text.size() && static_cast<unsigned char>(text[index + 1]) == 0xA7) {
+                    ++index;
+                }
+                if (index + 1 < text.size()) {
+                    ++index;
+                }
+                continue;
+            }
+
+            clean.push_back(text[index]);
+        }
+
+        return clean;
+    }
+
     std::string NormalizeBrowseTag(const std::string& tag) {
         std::string normalized;
         normalized.reserve(tag.size());
@@ -777,6 +803,220 @@ namespace {
         return collectedAny;
     }
 
+    std::string GetNetworkPlayerInfoName(JNIEnv* env, jobject playerInfoObject, jclass playerInfoClass) {
+        if (!env || !playerInfoObject || !playerInfoClass) {
+            return {};
+        }
+
+        jmethodID getGameProfileMethod = GetMappedMethodId(
+            env,
+            playerInfoClass,
+            "getNetworkPlayerInfoGameProfile",
+            "()Lcom/mojang/authlib/GameProfile;");
+
+        jobject gameProfileObject = getGameProfileMethod
+            ? env->CallObjectMethod(playerInfoObject, getGameProfileMethod)
+            : nullptr;
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            gameProfileObject = nullptr;
+        }
+        if (!gameProfileObject) {
+            return {};
+        }
+
+        jclass gameProfileClass = env->GetObjectClass(gameProfileObject);
+        jmethodID getNameMethod = gameProfileClass
+            ? env->GetMethodID(gameProfileClass, "getName", "()Ljava/lang/String;")
+            : nullptr;
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            getNameMethod = nullptr;
+        }
+
+        jstring playerNameObject = getNameMethod
+            ? static_cast<jstring>(env->CallObjectMethod(gameProfileObject, getNameMethod))
+            : nullptr;
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            playerNameObject = nullptr;
+        }
+
+        const std::string playerName = ReadJavaString(env, playerNameObject);
+        if (playerNameObject) {
+            env->DeleteLocalRef(playerNameObject);
+        }
+        if (gameProfileClass) {
+            env->DeleteLocalRef(gameProfileClass);
+        }
+        env->DeleteLocalRef(gameProfileObject);
+        return playerName;
+    }
+
+    bool IsSurvivalNetworkPlayer(JNIEnv* env, jobject playerInfoObject, jclass playerInfoClass) {
+        if (!env || !playerInfoObject || !playerInfoClass) {
+            return false;
+        }
+
+        const std::string gameTypeSignature = Mapper::Get("net/minecraft/world/WorldSettings$GameType", 2);
+        if (gameTypeSignature.empty()) {
+            return false;
+        }
+
+        jmethodID getGameTypeMethod = GetMappedMethodId(
+            env,
+            playerInfoClass,
+            "getNetworkPlayerInfoGameType",
+            ("()" + gameTypeSignature).c_str());
+        jobject gameTypeObject = getGameTypeMethod
+            ? env->CallObjectMethod(playerInfoObject, getGameTypeMethod)
+            : nullptr;
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            gameTypeObject = nullptr;
+        }
+        if (!gameTypeObject) {
+            return false;
+        }
+
+        jclass gameTypeClass = env->GetObjectClass(gameTypeObject);
+        jmethodID getIdMethod = gameTypeClass
+            ? GetMappedMethodId(env, gameTypeClass, "getGameTypeId", "()I")
+            : nullptr;
+        const int gameTypeId = getIdMethod ? env->CallIntMethod(gameTypeObject, getIdMethod) : -1;
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+
+        if (gameTypeClass) {
+            env->DeleteLocalRef(gameTypeClass);
+        }
+        env->DeleteLocalRef(gameTypeObject);
+        return gameTypeId == 0;
+    }
+
+    bool BrowseTeamMatches(JNIEnv* env, Team* team, const BrowseCacheState& cache) {
+        if (!env || !team || !cache.active) {
+            return false;
+        }
+
+        const std::string registeredName = team->GetRegisteredName(env);
+        if (!registeredName.empty() && !cache.registeredTeamName.empty() && registeredName == cache.registeredTeamName) {
+            return true;
+        }
+
+        if (cache.normalizedClanTag.empty()) {
+            return false;
+        }
+
+        const std::string normalizedPrefix = NormalizeBrowseTag(StripMinecraftFormatting(team->GetColorPrefix(env)));
+        const std::string normalizedSuffix = NormalizeBrowseTag(StripMinecraftFormatting(team->GetColorSuffix(env)));
+        return (!normalizedPrefix.empty() && normalizedPrefix.find(cache.normalizedClanTag) != std::string::npos) ||
+            (!normalizedSuffix.empty() && normalizedSuffix.find(cache.normalizedClanTag) != std::string::npos);
+    }
+
+    void CollectBrowseMembersFromNetHandler(JNIEnv* env, const BrowseCacheState& cache, std::unordered_set<std::string>& members) {
+        if (!env || !cache.active) {
+            return;
+        }
+
+        jobject netHandlerObject = Minecraft::GetNetHandler(env);
+        if (!netHandlerObject) {
+            return;
+        }
+
+        jclass netHandlerClass = env->GetObjectClass(netHandlerObject);
+        jmethodID getPlayerInfoMapMethod = GetMappedMethodId(env, netHandlerClass, "getPlayerInfoMap", "()Ljava/util/Collection;");
+        jobject playerInfoCollection = getPlayerInfoMapMethod
+            ? env->CallObjectMethod(netHandlerObject, getPlayerInfoMapMethod)
+            : nullptr;
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            playerInfoCollection = nullptr;
+        }
+
+        if (playerInfoCollection) {
+            jclass collectionClass = env->GetObjectClass(playerInfoCollection);
+            jmethodID toArrayMethod = collectionClass
+                ? env->GetMethodID(collectionClass, "toArray", "()[Ljava/lang/Object;")
+                : nullptr;
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                toArrayMethod = nullptr;
+            }
+
+            jobjectArray playerInfoArray = toArrayMethod
+                ? static_cast<jobjectArray>(env->CallObjectMethod(playerInfoCollection, toArrayMethod))
+                : nullptr;
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                playerInfoArray = nullptr;
+            }
+
+            if (playerInfoArray) {
+                const std::string teamSignature = Mapper::Get("net/minecraft/scoreboard/ScorePlayerTeam", 2);
+                const jsize playerCount = env->GetArrayLength(playerInfoArray);
+                for (jsize index = 0; index < playerCount; ++index) {
+                    jobject playerInfoObject = env->GetObjectArrayElement(playerInfoArray, index);
+                    if (!playerInfoObject) {
+                        continue;
+                    }
+
+                    jclass playerInfoClass = env->GetObjectClass(playerInfoObject);
+                    if (!playerInfoClass || !IsSurvivalNetworkPlayer(env, playerInfoObject, playerInfoClass)) {
+                        if (playerInfoClass) {
+                            env->DeleteLocalRef(playerInfoClass);
+                        }
+                        env->DeleteLocalRef(playerInfoObject);
+                        continue;
+                    }
+
+                    const std::string playerName = GetNetworkPlayerInfoName(env, playerInfoObject, playerInfoClass);
+                    jobject playerTeamObject = nullptr;
+                    if (!teamSignature.empty()) {
+                        jmethodID getPlayerTeamMethod = GetMappedMethodId(
+                            env,
+                            playerInfoClass,
+                            "getNetworkPlayerInfoPlayerTeam",
+                            ("()" + teamSignature).c_str());
+                        playerTeamObject = getPlayerTeamMethod
+                            ? env->CallObjectMethod(playerInfoObject, getPlayerTeamMethod)
+                            : nullptr;
+                        if (env->ExceptionCheck()) {
+                            env->ExceptionClear();
+                            playerTeamObject = nullptr;
+                        }
+                    }
+
+                    if (!playerName.empty() && playerTeamObject &&
+                        BrowseTeamMatches(env, reinterpret_cast<Team*>(playerTeamObject), cache)) {
+                        members.insert(playerName);
+                    }
+
+                    if (playerTeamObject) {
+                        env->DeleteLocalRef(playerTeamObject);
+                    }
+                    if (playerInfoClass) {
+                        env->DeleteLocalRef(playerInfoClass);
+                    }
+                    env->DeleteLocalRef(playerInfoObject);
+                }
+
+                env->DeleteLocalRef(playerInfoArray);
+            }
+
+            if (collectionClass) {
+                env->DeleteLocalRef(collectionClass);
+            }
+            env->DeleteLocalRef(playerInfoCollection);
+        }
+
+        if (netHandlerClass) {
+            env->DeleteLocalRef(netHandlerClass);
+        }
+        env->DeleteLocalRef(netHandlerObject);
+    }
+
     void SyncOnlinePlayersToConfig(JNIEnv* env, World* world, jobject localPlayerObject, ModuleConfig* config) {
         if (!config) {
             return;
@@ -937,6 +1177,15 @@ namespace {
         return matches;
     }
 
+    bool IsRenderableBrowseCandidate(JNIEnv* env, Player* player) {
+        if (!env || !player) {
+            return false;
+        }
+
+        const float health = player->GetRealHealth(env);
+        return health > 0.0f && !player->IsInvisible(env);
+    }
+
     void RefreshBrowseMembers(JNIEnv* env, World* world, Scoreboard* scoreboard) {
         if (!env || !world || !scoreboard) {
             return;
@@ -977,6 +1226,8 @@ namespace {
         if (localPlayerObject) {
             env->DeleteLocalRef(localPlayerObject);
         }
+
+        CollectBrowseMembersFromNetHandler(env, cacheSnapshot, discoveredMembers);
 
         if (discoveredMembers.empty()) {
             return;
@@ -1176,7 +1427,6 @@ void Target::TickSynchronous(void* envPtr) {
             ClearLockedTarget();
             m_WasEnabled = false;
         }
-        m_HitCount = 0;
         m_PreviousSwingProgressInt = 0;
         m_PreviousPhysicalClick = false;
         ClearInUse();
@@ -1199,28 +1449,33 @@ void Target::TickSynchronous(void* envPtr) {
 
     auto* localPlayer = reinterpret_cast<Player*>(localPlayerObject);
     SyncTargetHealthCache(env, world, localPlayerObject);
-    const auto now = std::chrono::steady_clock::now();
     const bool isClicking = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
     const int swingProgress = localPlayer->GetSwingProgressInt(env);
     const bool newObservedHit = (swingProgress == 1 && m_PreviousSwingProgressInt != 1) || (isClicking && !m_PreviousPhysicalClick);
 
-    auto tryRegisterObservedHit = [&]() -> bool {
+    struct ObservedHitInfo {
+        bool browseActivated = false;
+        std::string playerName;
+    };
+
+    auto observeHit = [&]() -> ObservedHitInfo {
+        ObservedHitInfo info;
         if (!newObservedHit) {
-            return false;
+            return info;
         }
 
         jobject mouseOverObject = Minecraft::GetObjectMouseOver(env);
         if (!mouseOverObject) {
-            return false;
+            return info;
         }
 
-        bool browseActivated = false;
         auto* mouseOver = reinterpret_cast<MovingObjectPosition*>(mouseOverObject);
         if (mouseOver->IsAimingEntity(env)) {
             jobject attackedObject = mouseOver->GetEntity(env);
             if (attackedObject && !env->IsSameObject(attackedObject, localPlayerObject)) {
+                info.playerName = reinterpret_cast<Player*>(attackedObject)->GetName(env, true);
                 OnEntityAttacked(env, reinterpret_cast<Player*>(attackedObject));
-                browseActivated = GetBrowseDisplayInfo().active;
+                info.browseActivated = GetBrowseDisplayInfo().active;
             }
             if (attackedObject) {
                 env->DeleteLocalRef(attackedObject);
@@ -1228,15 +1483,80 @@ void Target::TickSynchronous(void* envPtr) {
         }
 
         env->DeleteLocalRef(mouseOverObject);
-        return browseActivated;
+        return info;
     };
 
-    if (config->Target.m_AutoTarget) {
-        if (GetLockedTarget().empty()) {
+    const bool automaticEnabled = config->Target.m_AutoTarget || config->Target.m_TargetSwitch;
+    if (automaticEnabled) {
+        auto selectBestAutomaticTarget = [&]() {
             AutoSelectTarget(env);
-        }
-        ManageHitboxes(env, localPlayer, world);
-    } else if (config->Target.m_TargetSwitch) {
+        };
+
+        auto selectBestBrowseTarget = [&]() -> bool {
+            auto* scoreboard = reinterpret_cast<Scoreboard*>(world->GetScoreboard(env));
+            const std::string previousTarget = GetLockedTarget();
+            std::string nextTarget;
+            const bool selected = TrySelectBrowseTarget(env, localPlayer, world, scoreboard, previousTarget, nextTarget);
+            if (scoreboard) {
+                env->DeleteLocalRef(reinterpret_cast<jobject>(scoreboard));
+            }
+
+            if (!selected || nextTarget.empty()) {
+                return false;
+            }
+
+            SetLockedTarget(nextTarget);
+            m_BrowseHitCount = 0;
+            m_LastBrowseSwitchTime = std::chrono::steady_clock::now();
+            return true;
+        };
+
+        auto isLockedBrowseTargetRendered = [&]() -> bool {
+            const std::string lockedTarget = GetLockedTarget();
+            if (lockedTarget.empty()) {
+                return false;
+            }
+
+            BrowseCacheState cacheSnapshot;
+            {
+                std::lock_guard<std::mutex> lock(g_BrowseMutex);
+                cacheSnapshot = g_BrowseCache;
+            }
+            if (!cacheSnapshot.active) {
+                return false;
+            }
+
+            auto* scoreboard = reinterpret_cast<Scoreboard*>(world->GetScoreboard(env));
+            const auto players = world->GetPlayerEntities(env);
+            bool found = false;
+            for (auto* player : players) {
+                if (!player) {
+                    continue;
+                }
+
+                if (env->IsSameObject(reinterpret_cast<jobject>(player), localPlayerObject)) {
+                    env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+                    continue;
+                }
+
+                const std::string playerName = player->GetName(env, true);
+                if (TargetNamesMatch(playerName, lockedTarget) &&
+                    MatchesBrowseCache(env, player, scoreboard, cacheSnapshot) &&
+                    IsRenderableBrowseCandidate(env, player)) {
+                    found = true;
+                    env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+                    break;
+                }
+
+                env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+            }
+
+            if (scoreboard) {
+                env->DeleteLocalRef(reinterpret_cast<jobject>(scoreboard));
+            }
+            return found;
+        };
+
         bool browseActive = false;
         if (config->Target.m_BrowseAllPlayers) {
             std::lock_guard<std::mutex> lock(g_BrowseMutex);
@@ -1247,66 +1567,54 @@ void Target::TickSynchronous(void* envPtr) {
             ClearLockedTarget();
         }
 
-        if (config->Target.m_BrowseAllPlayers && !browseActive && tryRegisterObservedHit()) {
-            browseActive = true;
-            if (!HasLockedTarget()) {
-                SwitchToNextTarget(env);
-                m_LastSwitchTime = now;
-                m_TargetLockedTime = now;
-                m_HitCount = 0;
+        ObservedHitInfo observedHit;
+        if (config->Target.m_BrowseAllPlayers && newObservedHit) {
+            observedHit = observeHit();
+            if (observedHit.browseActivated) {
+                browseActive = true;
+            }
+            if (!observedHit.playerName.empty() && TargetNamesMatch(observedHit.playerName, GetLockedTarget())) {
+                ++m_BrowseHitCount;
             }
         }
 
-        if (!HasLockedTarget()) {
-            if (!config->Target.m_BrowseAllPlayers || browseActive) {
-                SwitchToNextTarget(env);
-                m_LastSwitchTime = now;
-                m_TargetLockedTime = now;
-                m_HitCount = 0;
+        if (config->Target.m_BrowseAllPlayers) {
+            if (browseActive) {
+                const bool currentRendered = isLockedBrowseTargetRendered();
+                bool shouldSwitch = !currentRendered;
+                if (!shouldSwitch) {
+                    if (config->Target.m_SwitchMode == 0) {
+                        shouldSwitch = m_BrowseHitCount >= config->Target.m_SwitchHits;
+                    } else {
+                        if (m_LastBrowseSwitchTime.time_since_epoch().count() == 0) {
+                            m_LastBrowseSwitchTime = std::chrono::steady_clock::now();
+                        }
+                        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - m_LastBrowseSwitchTime).count();
+                        shouldSwitch = elapsedMs >= config->Target.m_SwitchTimeMs;
+                    }
+                }
+
+                if (shouldSwitch) {
+                    if (currentRendered) {
+                        MarkBrowsePlayerProcessed(GetLockedTarget());
+                    }
+
+                    const bool selected = selectBestBrowseTarget();
+                    if (!selected) {
+                        ClearLockedTarget();
+                        m_BrowseHitCount = 0;
+                    }
+                }
             } else {
-                m_HitCount = 0;
+                if (HasLockedTarget()) {
+                    ClearLockedTarget();
+                }
+                m_BrowseHitCount = 0;
             }
         } else {
-            if (newObservedHit) {
-                jobject mouseOverObject = Minecraft::GetObjectMouseOver(env);
-                if (mouseOverObject) {
-                    auto* mouseOver = reinterpret_cast<MovingObjectPosition*>(mouseOverObject);
-                    if (mouseOver->IsAimingEntity(env)) {
-                        jobject attackedObject = mouseOver->GetEntity(env);
-                        if (attackedObject && !env->IsSameObject(attackedObject, localPlayerObject)) {
-                            OnEntityAttacked(env, reinterpret_cast<Player*>(attackedObject));
-                        }
-                        if (attackedObject) {
-                            env->DeleteLocalRef(attackedObject);
-                        }
-                    }
-                    env->DeleteLocalRef(mouseOverObject);
-                }
-
-                if (config->Target.m_SwitchMode == 0) {
-                    ++m_HitCount;
-                }
-            }
-
-            bool shouldSwitch = IsCurrentTargetInvalid(env, localPlayer);
-            if (!shouldSwitch) {
-                if (config->Target.m_SwitchMode == 0) {
-                    shouldSwitch = m_HitCount >= config->Target.m_SwitchHits;
-                } else {
-                    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_TargetLockedTime).count();
-                    shouldSwitch = elapsedMs >= config->Target.m_SwitchTimeMs;
-                }
-            }
-
-            if (shouldSwitch) {
-                const auto cooldownMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_LastSwitchTime).count();
-                if (cooldownMs >= kSwitchCooldownMs) {
-                    SwitchToNextTarget(env);
-                    m_LastSwitchTime = now;
-                    m_TargetLockedTime = now;
-                    m_HitCount = 0;
-                }
-            }
+            selectBestAutomaticTarget();
+            m_BrowseHitCount = 0;
         }
 
         ManageHitboxes(env, localPlayer, world);
@@ -1343,7 +1651,7 @@ void Target::TickSynchronous(void* envPtr) {
         }
     }
 
-    if (config->Target.m_AutoTarget || config->Target.m_TargetSwitch) {
+    if (automaticEnabled) {
         bool browseActiveNow = false;
         {
             std::lock_guard<std::mutex> lock(g_BrowseMutex);
@@ -1385,8 +1693,15 @@ void Target::RenderOverlay(ImDrawList* drawList, float screenW, float screenH) {
         return;
     }
 
+    jobject currentScreenObject = Minecraft::GetCurrentScreen(env);
+    if (currentScreenObject) {
+        env->DeleteLocalRef(currentScreenObject);
+        return;
+    }
+
+    const bool automaticEnabled = config->Target.m_AutoTarget || config->Target.m_TargetSwitch;
     std::string targetName;
-    if (config->Target.m_AutoTarget || config->Target.m_TargetSwitch) {
+    if (automaticEnabled) {
         targetName = GetLockedTarget();
     } else {
         targetName = config->Target.m_PlayerName;
@@ -1643,7 +1958,8 @@ bool Target::IsTargetActivelyManaging() {
 void Target::ManageHitboxes(JNIEnv* env, Player* localPlayer, World* world) {
     auto* config = Bridge::Get()->GetConfig();
     const std::string lockedTarget = GetLockedTarget();
-    const bool browseWaitingMode = config && config->Target.m_TargetSwitch && config->Target.m_BrowseAllPlayers;
+    const bool automaticEnabled = config && (config->Target.m_AutoTarget || config->Target.m_TargetSwitch);
+    const bool browseWaitingMode = automaticEnabled && config->Target.m_BrowseAllPlayers;
 
     bool browseActive = false;
     if (browseWaitingMode) {
@@ -1698,6 +2014,7 @@ void Target::AutoSelectTarget(JNIEnv* env) {
     auto* localPlayer = reinterpret_cast<Player*>(localPlayerObject);
     auto* scoreboard = reinterpret_cast<Scoreboard*>(world->GetScoreboard(env));
     const auto players = world->GetPlayerEntities(env);
+    const std::string currentTarget = GetLockedTarget();
 
     Player* bestTarget = nullptr;
     float bestScore = std::numeric_limits<float>::max();
@@ -1722,7 +2039,9 @@ void Target::AutoSelectTarget(JNIEnv* env) {
         }
 
         const float score = CalculatePriorityScore(env, player, localPlayer, scoreboard);
-        if (score < bestScore) {
+        const std::string playerName = player->GetName(env, true);
+        const bool keepCurrentTie = score == bestScore && !currentTarget.empty() && TargetNamesMatch(playerName, currentTarget);
+        if (score < bestScore || keepCurrentTie) {
             bestScore = score;
             if (bestTarget) {
                 env->DeleteLocalRef(reinterpret_cast<jobject>(bestTarget));
@@ -1736,6 +2055,8 @@ void Target::AutoSelectTarget(JNIEnv* env) {
     if (bestTarget) {
         SetLockedTarget(bestTarget->GetName(env, true));
         env->DeleteLocalRef(reinterpret_cast<jobject>(bestTarget));
+    } else {
+        ClearLockedTarget();
     }
 
     if (scoreboard) {
@@ -1778,9 +2099,9 @@ bool Target::TrySelectBrowseTarget(JNIEnv* env, Player* localPlayer, World* worl
     }
 
     Player* bestTarget = nullptr;
-    Player* previousFallback = nullptr;
-    float bestDistance = std::numeric_limits<float>::max();
-    float fallbackDistance = std::numeric_limits<float>::max();
+    Player* processedFallbackTarget = nullptr;
+    float bestScore = std::numeric_limits<float>::max();
+    float processedFallbackScore = std::numeric_limits<float>::max();
     const auto players = world->GetPlayerEntities(env);
 
     for (auto* player : players) {
@@ -1793,184 +2114,75 @@ bool Target::TrySelectBrowseTarget(JNIEnv* env, Player* localPlayer, World* worl
             continue;
         }
 
-        if (!MatchesBrowseCache(env, player, scoreboard, cacheSnapshot) || !IsValidCombatTarget(env, player, localPlayer)) {
+        if (!MatchesBrowseCache(env, player, scoreboard, cacheSnapshot) || !IsRenderableBrowseCandidate(env, player)) {
             env->DeleteLocalRef(reinterpret_cast<jobject>(player));
             continue;
         }
 
         const std::string playerName = player->GetName(env, true);
-        if (playerName.empty() || cacheSnapshot.processed.count(playerName) > 0) {
+        if (playerName.empty()) {
             env->DeleteLocalRef(reinterpret_cast<jobject>(player));
             continue;
         }
 
-        const float distance = localPlayer->GetDistanceToEntity(reinterpret_cast<jobject>(player), env);
-        if (!previousTarget.empty() && TargetNamesMatch(playerName, previousTarget)) {
-            if (distance < fallbackDistance) {
-                if (previousFallback) {
-                    env->DeleteLocalRef(reinterpret_cast<jobject>(previousFallback));
+        const float score = localPlayer->GetDistanceToEntity(reinterpret_cast<jobject>(player), env);
+        if (cacheSnapshot.processed.count(playerName) > 0) {
+            if (score < processedFallbackScore ||
+                (score == processedFallbackScore && !previousTarget.empty() && TargetNamesMatch(playerName, previousTarget))) {
+                if (processedFallbackTarget) {
+                    env->DeleteLocalRef(reinterpret_cast<jobject>(processedFallbackTarget));
                 }
-                previousFallback = player;
-                fallbackDistance = distance;
+                processedFallbackTarget = player;
+                processedFallbackScore = score;
             } else {
                 env->DeleteLocalRef(reinterpret_cast<jobject>(player));
             }
             continue;
         }
 
-        if (distance < bestDistance) {
+        if (score < bestScore ||
+            (score == bestScore && !previousTarget.empty() && TargetNamesMatch(playerName, previousTarget))) {
             if (bestTarget) {
                 env->DeleteLocalRef(reinterpret_cast<jobject>(bestTarget));
             }
             bestTarget = player;
-            bestDistance = distance;
+            bestScore = score;
         } else {
             env->DeleteLocalRef(reinterpret_cast<jobject>(player));
         }
     }
 
-    Player* selectedTarget = bestTarget ? bestTarget : previousFallback;
-    if (!selectedTarget) {
+    if (!bestTarget && processedFallbackTarget) {
+        BrowseCacheState snapshot;
+        {
+            std::lock_guard<std::mutex> lock(g_BrowseMutex);
+            if (g_BrowseCache.active &&
+                g_BrowseCache.normalizedClanTag == cacheSnapshot.normalizedClanTag &&
+                g_BrowseCache.registeredTeamName == cacheSnapshot.registeredTeamName) {
+                g_BrowseCache.processed.clear();
+                snapshot = g_BrowseCache;
+            }
+        }
+
+        if (snapshot.active) {
+            SyncBrowseCacheToConfig(snapshot);
+        }
+
+        bestTarget = processedFallbackTarget;
+        processedFallbackTarget = nullptr;
+    }
+
+    if (processedFallbackTarget) {
+        env->DeleteLocalRef(reinterpret_cast<jobject>(processedFallbackTarget));
+    }
+
+    if (!bestTarget) {
         return false;
     }
 
-    nextTarget = selectedTarget->GetName(env, true);
-    if (selectedTarget != bestTarget && bestTarget) {
-        env->DeleteLocalRef(reinterpret_cast<jobject>(bestTarget));
-    }
-    if (selectedTarget != previousFallback && previousFallback) {
-        env->DeleteLocalRef(reinterpret_cast<jobject>(previousFallback));
-    }
-    env->DeleteLocalRef(reinterpret_cast<jobject>(selectedTarget));
+    nextTarget = bestTarget->GetName(env, true);
+    env->DeleteLocalRef(reinterpret_cast<jobject>(bestTarget));
     return !nextTarget.empty();
-}
-
-void Target::SwitchToNextTarget(JNIEnv* env) {
-    auto* config = Bridge::Get()->GetConfig();
-    const std::string previousTarget = GetLockedTarget();
-    if (config && config->Target.m_BrowseAllPlayers) {
-        MarkBrowsePlayerProcessed(previousTarget);
-    }
-    ClearLockedTarget();
-
-    jobject worldObject = Minecraft::GetTheWorld(env);
-    jobject localPlayerObject = Minecraft::GetThePlayer(env);
-    if (!worldObject || !localPlayerObject) {
-        if (localPlayerObject) {
-            env->DeleteLocalRef(localPlayerObject);
-        }
-        if (worldObject) {
-            env->DeleteLocalRef(worldObject);
-        }
-        return;
-    }
-
-    auto* world = reinterpret_cast<World*>(worldObject);
-    auto* localPlayer = reinterpret_cast<Player*>(localPlayerObject);
-    auto* scoreboard = reinterpret_cast<Scoreboard*>(world->GetScoreboard(env));
-
-    const BrowseDisplayInfo browseInfo = GetBrowseDisplayInfo();
-    if (config && config->Target.m_BrowseAllPlayers && browseInfo.active) {
-        std::string nextBrowseTarget;
-        if (TrySelectBrowseTarget(env, localPlayer, world, scoreboard, previousTarget, nextBrowseTarget) && !nextBrowseTarget.empty()) {
-            SetLockedTarget(nextBrowseTarget);
-        }
-        if (scoreboard) {
-            env->DeleteLocalRef(reinterpret_cast<jobject>(scoreboard));
-        }
-        env->DeleteLocalRef(localPlayerObject);
-        env->DeleteLocalRef(worldObject);
-        return;
-    }
-
-    const auto players = world->GetPlayerEntities(env);
-    Player* bestTarget = nullptr;
-    float bestDistance = std::numeric_limits<float>::max();
-
-    for (auto* player : players) {
-        if (!player) {
-            continue;
-        }
-
-        if (env->IsSameObject(reinterpret_cast<jobject>(player), localPlayerObject)) {
-            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
-            continue;
-        }
-
-        if (!IsValidCombatTarget(env, player, localPlayer) || IsSameClanLikeHideClans(env, player, localPlayer, scoreboard)) {
-            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
-            continue;
-        }
-
-        const std::string playerName = player->GetName(env, true);
-        if (!previousTarget.empty() && TargetNamesMatch(playerName, previousTarget)) {
-            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
-            continue;
-        }
-
-        const float distance = localPlayer->GetDistanceToEntity(reinterpret_cast<jobject>(player), env);
-        if (distance < bestDistance) {
-            if (bestTarget) {
-                env->DeleteLocalRef(reinterpret_cast<jobject>(bestTarget));
-            }
-            bestTarget = player;
-            bestDistance = distance;
-        } else {
-            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
-        }
-    }
-
-    if (bestTarget) {
-        SetLockedTarget(bestTarget->GetName(env, true));
-        env->DeleteLocalRef(reinterpret_cast<jobject>(bestTarget));
-    } else if (!previousTarget.empty()) {
-        SetLockedTarget(previousTarget);
-    }
-
-    if (scoreboard) {
-        env->DeleteLocalRef(reinterpret_cast<jobject>(scoreboard));
-    }
-    env->DeleteLocalRef(localPlayerObject);
-    env->DeleteLocalRef(worldObject);
-}
-
-bool Target::IsCurrentTargetInvalid(JNIEnv* env, Player* localPlayer) {
-    const std::string currentTarget = GetLockedTarget();
-    if (currentTarget.empty()) {
-        return true;
-    }
-
-    jobject worldObject = Minecraft::GetTheWorld(env);
-    if (!worldObject) {
-        return true;
-    }
-
-    auto* world = reinterpret_cast<World*>(worldObject);
-    const auto players = world->GetPlayerEntities(env);
-    bool found = false;
-
-    for (auto* player : players) {
-        if (!player) {
-            continue;
-        }
-
-        if (env->IsSameObject(reinterpret_cast<jobject>(player), reinterpret_cast<jobject>(localPlayer))) {
-            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
-            continue;
-        }
-
-        const std::string playerName = player->GetName(env, true);
-        if (TargetNamesMatch(playerName, currentTarget)) {
-            found = IsValidCombatTarget(env, player, localPlayer);
-            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
-            break;
-        }
-
-        env->DeleteLocalRef(reinterpret_cast<jobject>(player));
-    }
-
-    env->DeleteLocalRef(worldObject);
-    return !found;
 }
 
 bool Target::IsValidCombatTarget(JNIEnv* env, Player* player, Player* localPlayer) {
@@ -1995,44 +2207,101 @@ float Target::CalculatePriorityScore(JNIEnv* env, Player* player, Player* localP
     }
 
     const float health = player->GetRealHealth(env);
-    const float armorVulnerability = GetArmorVulnerability(env, player);
+    const float breakArmorVulnerability = GetBreakArmorVulnerability(env, player);
+    const float lowArmorScore = GetLowArmorScore(env, player);
     const float distance = localPlayer->GetDistanceToEntity(reinterpret_cast<jobject>(player), env);
 
     switch (config->Target.m_PriorityMode) {
-    case 1:
-        return (distance * 0.5f) - (armorVulnerability * 2.0f);
-    case 2:
+    case kModeBreakArmor:
+        return -breakArmorVulnerability + (distance * 0.001f);
+    case kModeHealth:
+        return health + (distance * 0.001f);
+    case kModeBoth:
         return (health * config->Target.m_BothHealthWeight) +
-            (distance * 0.5f) -
-            (armorVulnerability * config->Target.m_BothArmorWeight * 2.0f);
-    case 0:
+            (distance * 0.001f) -
+            (breakArmorVulnerability * config->Target.m_BothArmorWeight);
+    case kModeBrowseAllPlayers:
+        return distance;
+    case kModeLowArmor:
     default:
-        return health + (distance * 0.5f);
+        return lowArmorScore + (distance * 0.001f);
     }
 }
 
-float Target::GetArmorVulnerability(JNIEnv* env, Player* player) {
+float Target::GetBreakArmorVulnerability(JNIEnv* env, Player* player) {
     auto* config = Bridge::Get()->GetConfig();
     if (!config) {
         return 0.0f;
     }
 
     float vulnerability = 0.0f;
-    int missingPieces = 0;
     for (int slot = 0; slot < 4; ++slot) {
         jobject armorObject = player->GetCurrentArmor(slot, env);
         if (armorObject) {
-            vulnerability += 5.0f;
+            auto* armorStack = reinterpret_cast<ItemStack*>(armorObject);
+            jobject itemObject = armorStack->GetItem(env);
+            int armorValue = itemObject ? ItemArmor::GetDamageReduceAmount(itemObject, env) : 0;
+            if (itemObject) {
+                env->DeleteLocalRef(itemObject);
+            }
+
+            if (armorValue <= 0) {
+                armorValue = 1;
+            }
+
+            float pieceVulnerability = static_cast<float>(armorValue);
+            if (config->Target.m_ConsiderDurability) {
+                const int maxDamage = armorStack->GetMaxDamage(env);
+                const int itemDamage = armorStack->GetItemDamage(env);
+                if (maxDamage > 0) {
+                    const float rawDamageRatio = static_cast<float>(itemDamage) / static_cast<float>(maxDamage);
+                    const float damageRatio = (std::max)(0.0f, (std::min)(1.0f, rawDamageRatio));
+                    const float durabilityWeight = 1.0f + (config->Target.m_BrokenArmorPriority * 0.25f);
+                    pieceVulnerability = (static_cast<float>(armorValue) * 0.35f) +
+                        (static_cast<float>(armorValue) * damageRatio * durabilityWeight);
+
+                    if (damageRatio >= 0.85f) {
+                        pieceVulnerability += config->Target.m_BrokenArmorPriority;
+                    }
+                }
+            }
+
+            vulnerability += pieceVulnerability;
             env->DeleteLocalRef(armorObject);
-        } else {
-            ++missingPieces;
-            vulnerability += 5.0f;
+        }
+
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
         }
     }
 
-    vulnerability *= (1.0f + (config->Target.m_BrokenArmorPriority * 0.1f));
-    vulnerability += missingPieces * 3.0f;
     return vulnerability;
+}
+
+float Target::GetLowArmorScore(JNIEnv* env, Player* player) {
+    float remainingDurability = 0.0f;
+    for (int slot = 0; slot < 4; ++slot) {
+        jobject armorObject = player->GetCurrentArmor(slot, env);
+        if (!armorObject) {
+            continue;
+        }
+
+        auto* armorStack = reinterpret_cast<ItemStack*>(armorObject);
+        const int maxDamage = armorStack->GetMaxDamage(env);
+        const int itemDamage = armorStack->GetItemDamage(env);
+        if (maxDamage > 0) {
+            const int safeDamage = (std::max)(0, (std::min)(maxDamage, itemDamage));
+            remainingDurability += static_cast<float>(maxDamage - safeDamage);
+        }
+
+        env->DeleteLocalRef(armorObject);
+
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+    }
+
+    return remainingDurability;
 }
 
 bool Target::IsSameClan(JNIEnv* env, Player* player, Player* localPlayer, Scoreboard* scoreboard) {
