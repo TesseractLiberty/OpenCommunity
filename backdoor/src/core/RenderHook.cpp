@@ -10,7 +10,11 @@
 #include "../game/classes/Player.h"
 #include "../game\classes\RenderManager.h"
 #include "../game\classes\Timer.h"
+#include "../game/jni/Class.h"
+#include "../game/jni/Field.h"
 #include "../game/jni/GameInstance.h"
+#include "../game/jni/Method.h"
+#include "../game/mapping/Mapper.h"
 #include "../../../shared/common/FeatureManager.h"
 
 #include "../../../deps/minhook/MinHook.h"
@@ -102,6 +106,95 @@ namespace {
         out[3] = 0.0f;            out[7] = 0.0f;     out[11] = 0.0f;             out[15] = 1.0f;
     }
 
+    Vec3D ComputeThirdPersonCameraPosition(const Vec3D& eyePos, float yawDegrees, float pitchDegrees, float distance) {
+        constexpr float kDegreesToRadians = 3.14159265358979f / 180.0f;
+        const float yaw = (yawDegrees + 90.0f) * kDegreesToRadians;
+        const float pitch = pitchDegrees * kDegreesToRadians;
+        const float cosPitch = cosf(pitch);
+
+        return {
+            eyePos.x - static_cast<double>(cosf(yaw) * distance * cosPitch),
+            eyePos.y + static_cast<double>(distance * sinf(pitch)),
+            eyePos.z - static_cast<double>(sinf(yaw) * distance * cosPitch)
+        };
+    }
+
+    float ReadEntityRendererFloatField(JNIEnv* env, jobject entityRendererObject, const char* fieldKey, float fallback) {
+        if (!env || !entityRendererObject || !fieldKey || !g_Game || !g_Game->IsInitialized()) {
+            return fallback;
+        }
+
+        const std::string className = Mapper::Get("net/minecraft/client/renderer/EntityRenderer");
+        const std::string fieldName = Mapper::Get(fieldKey);
+        if (className.empty() || fieldName.empty()) {
+            return fallback;
+        }
+
+        Class* entityRendererClass = g_Game->FindClass(className);
+        Field* field = entityRendererClass ? entityRendererClass->GetField(env, fieldName.c_str(), "F") : nullptr;
+        const float value = field ? field->GetFloatField(env, entityRendererObject) : fallback;
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return fallback;
+        }
+
+        return std::isfinite(value) ? value : fallback;
+    }
+
+    float ReadThirdPersonDistance(JNIEnv* env, float partialTicks, float fallback) {
+        jobject entityRendererObject = Minecraft::GetEntityRenderer(env);
+        if (env && env->ExceptionCheck()) {
+            env->ExceptionClear();
+            entityRendererObject = nullptr;
+        }
+        if (!entityRendererObject) {
+            return fallback;
+        }
+
+        const float current = ReadEntityRendererFloatField(env, entityRendererObject, "thirdPersonDistance", fallback);
+        const float previous = ReadEntityRendererFloatField(env, entityRendererObject, "thirdPersonDistanceTemp", current);
+        env->DeleteLocalRef(entityRendererObject);
+
+        const float distance = previous + (current - previous) * partialTicks;
+        if (!std::isfinite(distance) || distance <= 0.05f || distance > 32.0f) {
+            return fallback;
+        }
+        return distance;
+    }
+
+    float ReadCameraFov(JNIEnv* env, float partialTicks, float fallback) {
+        if (!env || !g_Game || !g_Game->IsInitialized()) {
+            return fallback;
+        }
+
+        jobject entityRendererObject = Minecraft::GetEntityRenderer(env);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            entityRendererObject = nullptr;
+        }
+        if (!entityRendererObject) {
+            return fallback;
+        }
+
+        const std::string className = Mapper::Get("net/minecraft/client/renderer/EntityRenderer");
+        const std::string methodName = Mapper::Get("getFOVModifier");
+        Class* entityRendererClass = className.empty() ? nullptr : g_Game->FindClass(className);
+        Method* method = (entityRendererClass && !methodName.empty())
+            ? entityRendererClass->GetMethod(env, methodName.c_str(), "(FZ)F")
+            : nullptr;
+
+        const float fov = method
+            ? method->CallFloatMethod(env, entityRendererObject, false, partialTicks, static_cast<jboolean>(JNI_TRUE))
+            : fallback;
+        env->DeleteLocalRef(entityRendererObject);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return fallback;
+        }
+
+        return std::isfinite(fov) && fov >= 10.0f && fov <= 170.0f ? fov : fallback;
+    }
+
     bool TryCaptureMatricesFromActiveRenderInfo(JNIEnv* env, const GLint viewport[4]) {
         if (!env || viewport[2] <= 0 || viewport[3] <= 0) {
             return false;
@@ -129,37 +222,64 @@ namespace {
             return false;
         }
 
-        jobject playerObject = Minecraft::GetThePlayer(env);
-        if (env->ExceptionCheck()) { env->ExceptionClear(); playerObject = nullptr; }
+        jobject viewEntityObject = Minecraft::GetRenderViewEntity(env);
+        if (env->ExceptionCheck()) { env->ExceptionClear(); viewEntityObject = nullptr; }
+        if (!viewEntityObject) {
+            viewEntityObject = Minecraft::GetThePlayer(env);
+            if (env->ExceptionCheck()) { env->ExceptionClear(); viewEntityObject = nullptr; }
+        }
         jobject timerObject = Minecraft::GetTimer(env);
         if (env->ExceptionCheck()) { env->ExceptionClear(); timerObject = nullptr; }
-        jobject renderManagerObject = Minecraft::GetRenderManager(env);
-        if (env->ExceptionCheck()) { env->ExceptionClear(); renderManagerObject = nullptr; }
 
         bool captured = false;
-        if (playerObject && timerObject && renderManagerObject && viewport[2] > 0 && viewport[3] > 0) {
-            auto* player = reinterpret_cast<Player*>(playerObject);
+        if (viewEntityObject && timerObject && viewport[2] > 0 && viewport[3] > 0) {
+            auto* viewEntity = reinterpret_cast<Player*>(viewEntityObject);
             auto* timer = reinterpret_cast<Timer*>(timerObject);
-            auto* renderManager = reinterpret_cast<RenderManager*>(renderManagerObject);
 
             float partialTicks = timer->GetRenderPartialTicks(env);
             if (env->ExceptionCheck()) { env->ExceptionClear(); partialTicks = 0.0f; }
-            const float prevPitch = player->GetPrevRotationPitch(env);
-            const float currentPitch = player->GetRotationPitch(env);
-            const float prevYaw = player->GetPrevRotationYaw(env);
-            const float currentYaw = player->GetRotationYaw(env);
+            const float prevPitch = viewEntity->GetPrevRotationPitch(env);
+            const float currentPitch = viewEntity->GetRotationPitch(env);
+            const float prevYaw = viewEntity->GetPrevRotationYaw(env);
+            const float currentYaw = viewEntity->GetRotationYaw(env);
             if (env->ExceptionCheck()) env->ExceptionClear();
             const float pitch = prevPitch + (currentPitch - prevPitch) * partialTicks;
             const float yaw = prevYaw + (currentYaw - prevYaw) * partialTicks;
 
-            const Vec3D renderPos = renderManager->GetRenderPos(env);
+            const Vec3D position = viewEntity->GetPos(env);
+            const Vec3D lastPosition = viewEntity->GetLastTickPos(env);
             if (env->ExceptionCheck()) env->ExceptionClear();
+            const float eyeHeight = viewEntity->GetEyeHeight(env);
+            if (env->ExceptionCheck()) env->ExceptionClear();
+
+            Vec3D cameraPos{
+                lastPosition.x + (position.x - lastPosition.x) * partialTicks,
+                lastPosition.y + (position.y - lastPosition.y) * partialTicks + static_cast<double>(eyeHeight),
+                lastPosition.z + (position.z - lastPosition.z) * partialTicks
+            };
+
+            float cameraYaw = yaw;
+            float cameraPitch = pitch;
+            const int thirdPersonView = Minecraft::GetThirdPersonView(env);
+            if (env->ExceptionCheck()) env->ExceptionClear();
+            if (thirdPersonView != 0) {
+                const float distance = ReadThirdPersonDistance(env, partialTicks, 4.0f);
+                const float signedDistance = thirdPersonView == 2 ? -distance : distance;
+                cameraPos = ComputeThirdPersonCameraPosition(cameraPos, yaw, pitch, signedDistance);
+
+                if (thirdPersonView == 2) {
+                    cameraYaw = yaw + 180.0f;
+                    cameraPitch = -pitch;
+                }
+            }
+
             const float aspect = static_cast<float>(viewport[2]) / static_cast<float>(viewport[3]);
+            const float fov = ReadCameraFov(env, partialTicks, 70.0f);
 
             std::vector<float> computedModelView;
             std::vector<float> computedProjection;
-            BuildViewMatrix(pitch, yaw, renderPos.x, renderPos.y + 1.62, renderPos.z, computedModelView);
-            BuildPerspective(70.0f, aspect, 0.05f, 512.0f, computedProjection);
+            BuildViewMatrix(cameraPitch, cameraYaw, cameraPos.x, cameraPos.y, cameraPos.z, computedModelView);
+            BuildPerspective(fov, aspect, 0.05f, 512.0f, computedProjection);
             StoreRenderMatrices(
                 computedModelView,
                 computedProjection,
@@ -168,9 +288,8 @@ namespace {
             captured = true;
         }
 
-        if (playerObject) env->DeleteLocalRef(playerObject);
+        if (viewEntityObject) env->DeleteLocalRef(viewEntityObject);
         if (timerObject) env->DeleteLocalRef(timerObject);
-        if (renderManagerObject) env->DeleteLocalRef(renderManagerObject);
 
         return captured;
     }
@@ -190,9 +309,10 @@ namespace {
         const bool thirdPersonActive = Minecraft::GetThirdPersonView(env) != 0;
         if (env->ExceptionCheck()) env->ExceptionClear();
 
+        const auto gameVersion = g_Game->GetGameVersion();
         const bool preferCameraState =
-            g_Game->GetGameVersion() == GameVersions::LUNAR &&
-            !thirdPersonActive;
+            (gameVersion == GameVersions::LUNAR && !thirdPersonActive) ||
+            (gameVersion == GameVersions::BADLION && thirdPersonActive);
 
         if (preferCameraState) {
             if (TryCaptureMatricesFromCameraState(env, viewport)) {

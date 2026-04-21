@@ -13,6 +13,7 @@
 #include "../jni/Method.h"
 #include "../mapping/Mapper.h"
 
+#include <cmath>
 #include <cctype>
 #include <unordered_map>
 
@@ -536,6 +537,22 @@ float Player::GetDistanceToEntity(jobject entity, JNIEnv* env) {
     const std::string entitySignature = Mapper::Get("net/minecraft/entity/Entity", 2);
     Method* method = entitySignature.empty() ? nullptr : GetMappedMethod(env, entityClass, "getDistanceToEntity", ("(" + entitySignature + ")F").c_str());
     return method ? method->CallFloatMethod(env, this, false, entity) : 1000.0f;
+}
+
+float Player::GetEyeHeight(JNIEnv* env) {
+    if (!env || !this) {
+        return 1.62f;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return 1.62f;
+    }
+
+    Method* method = GetMappedMethod(env, playerClass, "getEyeHeight", "()F");
+    const float value = method ? method->CallFloatMethod(env, this) : 1.62f;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return std::isfinite(value) && value > 0.0f ? value : 1.62f;
 }
 
 float Player::GetWidth(JNIEnv* env) {

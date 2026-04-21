@@ -125,6 +125,40 @@ jobject Minecraft::GetRenderItem(JNIEnv* env) {
     return GetMinecraftMember(env, Mapper::Get("renderItem"), Mapper::Get("net/minecraft/client/renderer/entity/RenderItem", 2));
 }
 
+jobject Minecraft::GetEntityRenderer(JNIEnv* env) {
+    return GetMinecraftMember(env, Mapper::Get("entityRenderer"), Mapper::Get("net/minecraft/client/renderer/EntityRenderer", 2));
+}
+
+jobject Minecraft::GetRenderViewEntity(JNIEnv* env) {
+    if (!env) {
+        return nullptr;
+    }
+
+    Class* minecraftClass = GetMinecraftClass();
+    if (!minecraftClass) {
+        return nullptr;
+    }
+
+    const std::string methodName = Mapper::Get("getRenderViewEntity");
+    const std::string methodSignature = Mapper::Get("net/minecraft/entity/Entity", 3);
+    if (!methodName.empty() && !methodSignature.empty()) {
+        Method* method = minecraftClass->GetMethod(env, methodName.c_str(), methodSignature.c_str());
+        if (method) {
+            jobject minecraft = GetTheMinecraft(env);
+            if (minecraft) {
+                jobject value = method->CallObjectMethod(env, minecraft);
+                env->DeleteLocalRef(minecraft);
+                if (value) {
+                    return value;
+                }
+            }
+        }
+    }
+
+    jobject value = GetMinecraftMember(env, Mapper::Get("renderViewEntity"), Mapper::Get("net/minecraft/entity/Entity", 2));
+    return value ? value : GetThePlayer(env);
+}
+
 jobject Minecraft::GetRenderManager(JNIEnv* env) {
     if (!env) {
         return nullptr;

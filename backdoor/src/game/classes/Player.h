@@ -28,6 +28,7 @@ public:
     jobject GetInventoryContainer(JNIEnv* env);
     jobject GetCurrentArmor(int slot, JNIEnv* env);
     float GetDistanceToEntity(jobject entity, JNIEnv* env);
+    float GetEyeHeight(JNIEnv* env);
     float GetWidth(JNIEnv* env);
     float GetHeight(JNIEnv* env);
     void SetWidth(float value, JNIEnv* env);

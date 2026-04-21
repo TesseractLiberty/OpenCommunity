@@ -445,19 +445,6 @@ namespace {
             0.0f);
     }
 
-    bool ShouldSkipTargetEspForBadlionThirdPerson(JNIEnv* env) {
-        if (!env || !g_Game || !g_Game->IsInitialized() ||
-            g_Game->GetGameVersion() != GameVersions::BADLION) {
-            return false;
-        }
-
-        const bool shouldSkip = Minecraft::GetThirdPersonView(env) != 0;
-        if (env->ExceptionCheck()) {
-            env->ExceptionClear();
-        }
-        return shouldSkip;
-    }
-
     struct BrowseCacheState {
         bool active = false;
         std::string clanTagDisplay;
@@ -1707,10 +1694,6 @@ void Target::RenderOverlay(ImDrawList* drawList, float screenW, float screenH) {
         targetName = config->Target.m_PlayerName;
     }
 
-    if (ShouldSkipTargetEspForBadlionThirdPerson(env)) {
-        return;
-    }
-
     jobject timerObject = Minecraft::GetTimer(env);
     jobject worldObject = Minecraft::GetTheWorld(env);
     jobject localPlayerObject = Minecraft::GetThePlayer(env);
@@ -1747,6 +1730,9 @@ void Target::RenderOverlay(ImDrawList* drawList, float screenW, float screenH) {
     }
 
     const int thirdPersonView = Minecraft::GetThirdPersonView(env);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
     const auto gameVersion = g_Game->GetGameVersion();
     const bool allowLocalPlayerTargetEsp = thirdPersonView != 0;
     const bool useRelativeThirdPersonProjection =

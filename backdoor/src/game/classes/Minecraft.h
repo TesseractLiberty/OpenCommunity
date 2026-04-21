@@ -12,6 +12,8 @@ public:
     static jobject GetObjectMouseOver(JNIEnv* env);
     static void SetObjectMouseOver(jobject movingObject, JNIEnv* env);
     static jobject GetRenderItem(JNIEnv* env);
+    static jobject GetEntityRenderer(JNIEnv* env);
+    static jobject GetRenderViewEntity(JNIEnv* env);
     static jobject GetRenderManager(JNIEnv* env);
     static jobject GetNetHandler(JNIEnv* env);
     static jobject GetTimer(JNIEnv* env);
