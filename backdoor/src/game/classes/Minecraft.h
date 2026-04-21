@@ -15,6 +15,7 @@ public:
     static jobject GetRenderManager(JNIEnv* env);
     static jobject GetNetHandler(JNIEnv* env);
     static jobject GetTimer(JNIEnv* env);
+    static int GetThirdPersonView(JNIEnv* env);
     static jobject GetKeyBindUseItem(JNIEnv* env);
     static void DisplayGuiScreen(jobject guiScreen, JNIEnv* env);
     static jobject CreateGuiInventory(jobject player, JNIEnv* env);

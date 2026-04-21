@@ -187,8 +187,12 @@ namespace {
 
         if (env->ExceptionCheck()) env->ExceptionClear();
 
+        const bool thirdPersonActive = Minecraft::GetThirdPersonView(env) != 0;
+        if (env->ExceptionCheck()) env->ExceptionClear();
+
         const bool preferCameraState =
-            g_Game->GetGameVersion() == GameVersions::LUNAR;
+            g_Game->GetGameVersion() == GameVersions::LUNAR &&
+            !thirdPersonActive;
 
         if (preferCameraState) {
             if (TryCaptureMatricesFromCameraState(env, viewport)) {

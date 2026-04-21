@@ -191,6 +191,30 @@ jobject Minecraft::GetTimer(JNIEnv* env) {
     return GetMinecraftMember(env, Mapper::Get("timer"), Mapper::Get("net/minecraft/util/Timer", 2));
 }
 
+int Minecraft::GetThirdPersonView(JNIEnv* env) {
+    if (!env) {
+        return 0;
+    }
+
+    jobject gameSettings = GetGameSettings(env);
+    if (!gameSettings) {
+        return 0;
+    }
+
+    const std::string className = Mapper::Get("net/minecraft/client/settings/GameSettings");
+    const std::string fieldName = Mapper::Get("thirdPersonView");
+    if (className.empty() || fieldName.empty()) {
+        env->DeleteLocalRef(gameSettings);
+        return 0;
+    }
+
+    Class* settingsClass = g_Game->FindClass(className);
+    Field* field = settingsClass ? settingsClass->GetField(env, fieldName.c_str(), "I") : nullptr;
+    const int value = field ? field->GetIntField(env, gameSettings) : 0;
+    env->DeleteLocalRef(gameSettings);
+    return value;
+}
+
 jobject Minecraft::GetKeyBindUseItem(JNIEnv* env) {
     if (!env) {
         return nullptr;

@@ -19,6 +19,8 @@ static std::atomic<long long> g_LastHookTickMs = 0;
 static std::atomic<long long> g_LastFallbackTickMs = 0;
 static jvmtiEnv* g_Jvmti = nullptr;
 static jmethodID g_ClickMouseMethod = nullptr;
+static jlocation g_ClickMouseBreakpointLocation = 0;
+static bool g_BreakpointCallbacksInstalled = false;
 static bool g_ClickMouseBreakpointInstalled = false;
 
 namespace {
@@ -64,22 +66,63 @@ namespace {
         }
     }
 
+    bool SetBreakpointAtMethodStart(jmethodID method, jlocation& breakpointLocation) {
+        if (!g_Jvmti || !method) {
+            return false;
+        }
+
+        jlocation startLocation = 0;
+        jlocation endLocation = 0;
+        if (g_Jvmti->GetMethodLocation(method, &startLocation, &endLocation) != JVMTI_ERROR_NONE) {
+            startLocation = 0;
+        }
+
+        if (g_Jvmti->SetBreakpoint(method, startLocation) != JVMTI_ERROR_NONE) {
+            return false;
+        }
+
+        breakpointLocation = startLocation;
+        return true;
+    }
+
     void JNICALL BreakpointCallback(jvmtiEnv* jvmti, JNIEnv* env, jthread thread, jmethodID method, jlocation location) {
+        (void)location;
         (void)jvmti;
         (void)thread;
-        (void)location;
 
-        if (!env || method != g_ClickMouseMethod) {
+        if (!env) {
             return;
         }
 
-        if (env->PushLocalFrame(64) == 0) {
-            SanitizeHiddenObjectMouseOver(env);
-            if (env->ExceptionCheck()) {
-                env->ExceptionClear();
+        if (method == g_ClickMouseMethod) {
+            if (env->PushLocalFrame(64) == 0) {
+                SanitizeHiddenObjectMouseOver(env);
+                if (env->ExceptionCheck()) {
+                    env->ExceptionClear();
+                }
+                env->PopLocalFrame(nullptr);
             }
-            env->PopLocalFrame(nullptr);
+            return;
         }
+    }
+
+    bool EnsureBreakpointCallbacks() {
+        if (!g_Jvmti) {
+            return false;
+        }
+
+        if (!g_BreakpointCallbacksInstalled) {
+            jvmtiEventCallbacks callbacks{};
+            callbacks.Breakpoint = &BreakpointCallback;
+
+            if (g_Jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks)) != JVMTI_ERROR_NONE) {
+                return false;
+            }
+
+            g_BreakpointCallbacksInstalled = true;
+        }
+
+        return g_Jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_BREAKPOINT, nullptr) == JVMTI_ERROR_NONE;
     }
 
     bool InitializeClickMouseBreakpoint() {
@@ -90,6 +133,10 @@ namespace {
         JNIEnv* env = g_Game->GetCurrentEnv();
         g_Jvmti = g_Game->GetJVMTI();
         if (!env || !g_Jvmti) {
+            return false;
+        }
+
+        if (!EnsureBreakpointCallbacks()) {
             return false;
         }
 
@@ -112,20 +159,7 @@ namespace {
             return false;
         }
 
-        jvmtiEventCallbacks callbacks{};
-        callbacks.Breakpoint = &BreakpointCallback;
-
-        if (g_Jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks)) != JVMTI_ERROR_NONE) {
-            return false;
-        }
-
-        if (g_Jvmti->SetBreakpoint(g_ClickMouseMethod, 0) != JVMTI_ERROR_NONE) {
-            g_ClickMouseMethod = nullptr;
-            return false;
-        }
-
-        if (g_Jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_BREAKPOINT, nullptr) != JVMTI_ERROR_NONE) {
-            g_Jvmti->ClearBreakpoint(g_ClickMouseMethod, 0);
+        if (!SetBreakpointAtMethodStart(g_ClickMouseMethod, g_ClickMouseBreakpointLocation)) {
             g_ClickMouseMethod = nullptr;
             return false;
         }
@@ -134,15 +168,16 @@ namespace {
         return true;
     }
 
-    void ShutdownClickMouseBreakpoint() {
+    void ShutdownBreakpoints() {
         if (!g_Jvmti) {
             g_ClickMouseMethod = nullptr;
+            g_BreakpointCallbacksInstalled = false;
             g_ClickMouseBreakpointInstalled = false;
             return;
         }
 
         if (g_ClickMouseBreakpointInstalled && g_ClickMouseMethod) {
-            g_Jvmti->ClearBreakpoint(g_ClickMouseMethod, 0);
+            g_Jvmti->ClearBreakpoint(g_ClickMouseMethod, g_ClickMouseBreakpointLocation);
         }
 
         g_Jvmti->SetEventNotificationMode(JVMTI_DISABLE, JVMTI_EVENT_BREAKPOINT, nullptr);
@@ -151,6 +186,7 @@ namespace {
         g_Jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks));
 
         g_ClickMouseMethod = nullptr;
+        g_BreakpointCallbacksInstalled = false;
         g_ClickMouseBreakpointInstalled = false;
         g_Jvmti = nullptr;
     }
@@ -234,7 +270,7 @@ void GameThreadHook::SanitizeInteractionState(void* envPtr)
 
 void GameThreadHook::Shutdown()
 {
-    ShutdownClickMouseBreakpoint();
+    ShutdownBreakpoints();
 
     if (g_HookedAddr) {
         MH_DisableHook(g_HookedAddr);

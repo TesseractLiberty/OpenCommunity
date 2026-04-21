@@ -5,6 +5,7 @@
 #include "../../core/RenderHook.h"
 #include "../../game/classes/Minecraft.h"
 #include "../../game/classes/MovingObjectPosition.h"
+#include "../../game/classes/RenderManager.h"
 #include "../../game/classes/Scoreboard.h"
 #include "../../game/classes/Team.h"
 #include "../../game/classes/Timer.h"
@@ -24,6 +25,9 @@ namespace {
     constexpr float kTargetEspOutlineThickness = 3.4f;
     constexpr float kTargetHealthBarOffset = 8.0f;
     constexpr float kTargetHealthBarWidth = 6.0f;
+    constexpr float kThirdPersonCameraDistance = 8.0f;
+    constexpr float kRelativeProjectionDepthMax = 1.15f;
+    constexpr float kThirdPersonRenderYOffset = 3.4f;
 
     struct ScreenPoint {
         float x = 0.0f;
@@ -87,7 +91,11 @@ namespace {
         };
     }
 
-    bool TryProjectPoint(const WorldPoint& worldPoint, const RenderMatrixSnapshot& snapshot, ScreenPoint& screenPoint) {
+    bool TryProjectPointInternal(
+        const WorldPoint& worldPoint,
+        const RenderMatrixSnapshot& snapshot,
+        ScreenPoint& screenPoint,
+        bool allowRelativeDepthRange) {
         if (!snapshot.IsValid()) {
             return false;
         }
@@ -111,13 +119,24 @@ namespace {
             return false;
         }
 
-        if (ndcZ < -1.0f || ndcZ > 1.0f) {
+        const bool visibleDepth = allowRelativeDepthRange
+            ? (ndcZ > 1.0f && ndcZ < kRelativeProjectionDepthMax)
+            : (ndcZ >= -1.0f && ndcZ <= 1.0f);
+        if (!visibleDepth) {
             return false;
         }
 
         screenPoint.x = snapshot.viewportWidth * ((ndcX + 1.0f) * 0.5f);
         screenPoint.y = snapshot.viewportHeight * ((1.0f - ndcY) * 0.5f);
         return std::isfinite(screenPoint.x) && std::isfinite(screenPoint.y);
+    }
+
+    bool TryProjectPoint(const WorldPoint& worldPoint, const RenderMatrixSnapshot& snapshot, ScreenPoint& screenPoint) {
+        return TryProjectPointInternal(worldPoint, snapshot, screenPoint, false);
+    }
+
+    bool TryProjectRelativePoint(const WorldPoint& worldPoint, const RenderMatrixSnapshot& snapshot, ScreenPoint& screenPoint) {
+        return TryProjectPointInternal(worldPoint, snapshot, screenPoint, true);
     }
 
     bool TryBuildProjectedTargetBox(
@@ -171,6 +190,133 @@ namespace {
 
         if (visibleCorners == 0 ||
             !std::isfinite(minX) || !std::isfinite(minY) ||
+            !std::isfinite(maxX) || !std::isfinite(maxY) ||
+            maxX <= minX || maxY <= minY) {
+            return false;
+        }
+
+        projectedBox.minX = minX;
+        projectedBox.minY = minY;
+        projectedBox.maxX = maxX;
+        projectedBox.maxY = maxY;
+        return true;
+    }
+
+    bool TryComputeThirdPersonCameraPosition(
+        JNIEnv* env,
+        Player* localPlayer,
+        RenderManager* renderManager,
+        float partialTicks,
+        int thirdPersonView,
+        GameVersions gameVersion,
+        Vec3D& cameraPos) {
+        if (!env || !localPlayer || !renderManager || thirdPersonView == 0) {
+            return false;
+        }
+
+        cameraPos = renderManager->GetRenderPos(env);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return false;
+        }
+        if (gameVersion == GameVersions::LUNAR) {
+            cameraPos.y += kThirdPersonRenderYOffset;
+        }
+
+        const float prevPitch = localPlayer->GetPrevRotationPitch(env);
+        const float currentPitch = localPlayer->GetRotationPitch(env);
+        const float prevYaw = localPlayer->GetPrevRotationYaw(env);
+        const float currentYaw = localPlayer->GetRotationYaw(env);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return false;
+        }
+
+        constexpr float kDegreesToRadians = 3.14159265358979f / 180.0f;
+        const float pitch = prevPitch + (currentPitch - prevPitch) * partialTicks;
+        const float yaw = prevYaw + (currentYaw - prevYaw) * partialTicks;
+        float distance = kThirdPersonCameraDistance;
+        if (thirdPersonView == 2) {
+            distance = -distance;
+        }
+
+        const float cosYaw = cosf((yaw + 90.0f) * kDegreesToRadians);
+        const float sinYaw = sinf((yaw + 90.0f) * kDegreesToRadians);
+        const float cosPitch = cosf(pitch * kDegreesToRadians);
+        const float sinPitch = sinf(pitch * kDegreesToRadians);
+
+        cameraPos.x -= static_cast<double>(cosYaw * distance * cosPitch);
+        cameraPos.y += static_cast<double>(distance * sinPitch);
+        cameraPos.z -= static_cast<double>(sinYaw * distance * cosPitch);
+
+        return std::isfinite(cameraPos.x) &&
+            std::isfinite(cameraPos.y) &&
+            std::isfinite(cameraPos.z);
+    }
+
+    bool TryBuildProjectedThirdPersonTargetBox(
+        const Vec3D& cameraPos,
+        const Vec3D& entityPos,
+        const Vec3D& entityLastPos,
+        float entityWidth,
+        float entityHeight,
+        float partialTicks,
+        const RenderMatrixSnapshot& snapshot,
+        ProjectedTargetBox& projectedBox) {
+        if (!snapshot.IsValid()) {
+            return false;
+        }
+
+        if (!std::isfinite(cameraPos.x) || !std::isfinite(cameraPos.y) || !std::isfinite(cameraPos.z) ||
+            !std::isfinite(entityPos.x) || !std::isfinite(entityPos.y) || !std::isfinite(entityPos.z) ||
+            !std::isfinite(entityLastPos.x) || !std::isfinite(entityLastPos.y) || !std::isfinite(entityLastPos.z) ||
+            !std::isfinite(entityWidth) || !std::isfinite(entityHeight)) {
+            return false;
+        }
+
+        const float boxWidth = (std::max)(0.7f, entityWidth);
+        const float boxMidHeight = (std::max)(0.9f, entityHeight * 0.5f + 0.2f);
+        const float diagonalWidth = boxWidth / 1.388888f;
+
+        const auto buildRelativePoint = [&](float offsetX, float offsetY, float offsetZ) -> WorldPoint {
+            return {
+                static_cast<float>((cameraPos.x - offsetX) - entityLastPos.x + (entityLastPos.x - entityPos.x) * partialTicks),
+                static_cast<float>((cameraPos.y - offsetY) - entityLastPos.y + (entityLastPos.y - entityPos.y) * partialTicks),
+                static_cast<float>((cameraPos.z - offsetZ) - entityLastPos.z + (entityLastPos.z - entityPos.z) * partialTicks)
+            };
+        };
+
+        const std::array<WorldPoint, 10> points = {{
+            buildRelativePoint(0.0f, 0.0f, 0.0f),
+            buildRelativePoint(0.0f, boxMidHeight * 2.0f, 0.0f),
+            buildRelativePoint(boxWidth, boxMidHeight, 0.0f),
+            buildRelativePoint(-boxWidth, boxMidHeight, 0.0f),
+            buildRelativePoint(0.0f, boxMidHeight, boxWidth),
+            buildRelativePoint(0.0f, boxMidHeight, -boxWidth),
+            buildRelativePoint(diagonalWidth, boxMidHeight, diagonalWidth),
+            buildRelativePoint(-diagonalWidth, boxMidHeight, -diagonalWidth),
+            buildRelativePoint(-diagonalWidth, boxMidHeight, diagonalWidth),
+            buildRelativePoint(diagonalWidth, boxMidHeight, -diagonalWidth)
+        }};
+
+        float minX = FLT_MAX;
+        float minY = FLT_MAX;
+        float maxX = -FLT_MAX;
+        float maxY = -FLT_MAX;
+
+        for (const auto& point : points) {
+            ScreenPoint projectedPoint;
+            if (!TryProjectRelativePoint(point, snapshot, projectedPoint)) {
+                return false;
+            }
+
+            minX = (std::min)(minX, projectedPoint.x);
+            minY = (std::min)(minY, projectedPoint.y);
+            maxX = (std::max)(maxX, projectedPoint.x);
+            maxY = (std::max)(maxY, projectedPoint.y);
+        }
+
+        if (!std::isfinite(minX) || !std::isfinite(minY) ||
             !std::isfinite(maxX) || !std::isfinite(maxY) ||
             maxX <= minX || maxY <= minY) {
             return false;
@@ -293,6 +439,19 @@ namespace {
             ImVec2(fillMaxX, fillMaxY),
             color,
             0.0f);
+    }
+
+    bool ShouldSkipTargetEspForBadlionThirdPerson(JNIEnv* env) {
+        if (!env || !g_Game || !g_Game->IsInitialized() ||
+            g_Game->GetGameVersion() != GameVersions::BADLION) {
+            return false;
+        }
+
+        const bool shouldSkip = Minecraft::GetThirdPersonView(env) != 0;
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+        return shouldSkip;
     }
 
     struct BrowseCacheState {
@@ -1226,6 +1385,17 @@ void Target::RenderOverlay(ImDrawList* drawList, float screenW, float screenH) {
         return;
     }
 
+    std::string targetName;
+    if (config->Target.m_AutoTarget || config->Target.m_TargetSwitch) {
+        targetName = GetLockedTarget();
+    } else {
+        targetName = config->Target.m_PlayerName;
+    }
+
+    if (ShouldSkipTargetEspForBadlionThirdPerson(env)) {
+        return;
+    }
+
     jobject timerObject = Minecraft::GetTimer(env);
     jobject worldObject = Minecraft::GetTheWorld(env);
     jobject localPlayerObject = Minecraft::GetThePlayer(env);
@@ -1261,14 +1431,33 @@ void Target::RenderOverlay(ImDrawList* drawList, float screenW, float screenH) {
         return;
     }
 
-    std::string targetName;
-    if (config->Target.m_AutoTarget || config->Target.m_TargetSwitch) {
-        targetName = GetLockedTarget();
-    } else {
-        targetName = config->Target.m_PlayerName;
+    const int thirdPersonView = Minecraft::GetThirdPersonView(env);
+    const auto gameVersion = g_Game->GetGameVersion();
+    const bool allowLocalPlayerTargetEsp = thirdPersonView != 0;
+    const bool useRelativeThirdPersonProjection =
+        thirdPersonView != 0 &&
+        gameVersion == GameVersions::LUNAR;
+    Vec3D thirdPersonCameraPos{};
+    bool hasThirdPersonCameraPos = false;
+    jobject renderManagerObject = nullptr;
+    if (useRelativeThirdPersonProjection) {
+        renderManagerObject = Minecraft::GetRenderManager(env);
+        if (renderManagerObject) {
+            hasThirdPersonCameraPos = TryComputeThirdPersonCameraPosition(
+                env,
+                localPlayer,
+                reinterpret_cast<RenderManager*>(renderManagerObject),
+                partialTicks,
+                thirdPersonView,
+                gameVersion,
+                thirdPersonCameraPos);
+        }
     }
 
     if (targetName.empty()) {
+        if (renderManagerObject) {
+            env->DeleteLocalRef(renderManagerObject);
+        }
         env->DeleteLocalRef(localPlayerObject);
         env->DeleteLocalRef(worldObject);
         return;
@@ -1286,7 +1475,8 @@ void Target::RenderOverlay(ImDrawList* drawList, float screenW, float screenH) {
             continue;
         }
 
-        if (env->IsSameObject(reinterpret_cast<jobject>(player), localPlayerObject)) {
+        const bool isLocalPlayer = env->IsSameObject(reinterpret_cast<jobject>(player), localPlayerObject);
+        if (isLocalPlayer && !allowLocalPlayerTargetEsp) {
             env->DeleteLocalRef(reinterpret_cast<jobject>(player));
             continue;
         }
@@ -1341,14 +1531,31 @@ void Target::RenderOverlay(ImDrawList* drawList, float screenW, float screenH) {
         }
 
         ProjectedTargetBox projectedBox;
-        if (!TryBuildProjectedTargetBox(
+        bool hasProjectedBox = false;
+        if (hasThirdPersonCameraPos) {
+            hasProjectedBox = TryBuildProjectedThirdPersonTargetBox(
+                thirdPersonCameraPos,
+                playerPos,
+                playerLastPos,
+                width,
+                height,
+                partialTicks,
+                renderSnapshot,
+                projectedBox);
+        }
+
+        if (!hasProjectedBox && !useRelativeThirdPersonProjection) {
+            hasProjectedBox = TryBuildProjectedTargetBox(
                 playerViewX,
                 playerViewY,
                 playerViewZ,
                 width,
                 height,
                 renderSnapshot,
-                projectedBox)) {
+                projectedBox);
+        }
+
+        if (!hasProjectedBox) {
             env->DeleteLocalRef(reinterpret_cast<jobject>(player));
             continue;
         }
@@ -1368,6 +1575,9 @@ void Target::RenderOverlay(ImDrawList* drawList, float screenW, float screenH) {
         MarkInUse(120);
     }
 
+    if (renderManagerObject) {
+        env->DeleteLocalRef(renderManagerObject);
+    }
     env->DeleteLocalRef(localPlayerObject);
     env->DeleteLocalRef(worldObject);
 }

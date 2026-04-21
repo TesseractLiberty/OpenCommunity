@@ -111,7 +111,6 @@
     </ClCompile>
     <ClCompile Include="src\Main.cpp" />
     <ClCompile Include="src\core\Bridge.cpp" />
-    <ClCompile Include="src\core\GL11Hook.cpp" />
     <ClCompile Include="src\core\RenderHook.cpp" />
     <ClCompile Include="src\core\GameThreadHook.cpp" />
     <ClCompile Include="src\features\render\HUD.cpp" />
@@ -156,7 +155,6 @@
   <ItemGroup>
     <ClInclude Include="pch.h" />
     <ClInclude Include="src\core\Bridge.h" />
-    <ClInclude Include="src\core\GL11Hook.h" />
     <ClInclude Include="src\core\RenderHook.h" />
     <ClInclude Include="src\core\GameThreadHook.h" />
     <ClInclude Include="src\features\render\HUD.h" />
