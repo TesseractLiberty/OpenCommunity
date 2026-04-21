@@ -3,6 +3,7 @@
 #include "../../../../shared/common/FeatureManager.h"
 #include "../../../../shared/common/ModuleConfig.h"
 #include "../../../../deps/imgui/images/modules/target_icon.h"
+#include <algorithm>
 #include <cctype>
 
 #ifdef _BACKDOOR
@@ -26,7 +27,7 @@ public:
         AddOption(ModuleOption::Combo("Mode", { "Low Armor", "Break Armor", "Health", "Both", "Browse All Players" }, 0));
         AddOption(ModuleOption::Combo("Browse Mode", { "Hits", "Time" }, 0));
         AddOption(ModuleOption::SliderInt("Browse Hits", 5, 1, 20));
-        AddOption(ModuleOption::SliderInt("Browse Time Ms", 3000, 250, 10000));
+        AddOption(ModuleOption::SliderInt("Browse Time Ms", 3000, 1, 10000));
         AddOption(ModuleOption::Button("Browse Cache", "Clear Cache"));
         AddOption(ModuleOption::Toggle("Show Browsed Players", false));
         AddOption(ModuleOption::SliderFloat("Both Health Weight", 1.0f, 0.1f, 5.0f));
@@ -121,7 +122,7 @@ public:
         config->Target.m_PriorityMode = mode;
         config->Target.m_SwitchMode = ClampBrowseMode(m_Options[kBrowseModeOption].comboIndex);
         config->Target.m_SwitchHits = m_Options[kBrowseHitsOption].intValue;
-        config->Target.m_SwitchTimeMs = m_Options[kBrowseTimeOption].intValue;
+        config->Target.m_SwitchTimeMs = (std::max)(1, m_Options[kBrowseTimeOption].intValue);
         config->Target.m_BothHealthWeight = m_Options[kBothHealthWeightOption].floatValue;
         config->Target.m_BothArmorWeight = m_Options[kBothArmorWeightOption].floatValue;
         config->Target.m_ConsiderDurability = mode == kModeLowArmor ? true : m_Options[kConsiderDurabilityOption].boolValue;
@@ -150,7 +151,7 @@ public:
         m_Options[kModeOption].comboIndex = config->Target.m_BrowseAllPlayers ? kModeBrowseAllPlayers : mode;
         m_Options[kBrowseModeOption].comboIndex = ClampBrowseMode(config->Target.m_SwitchMode);
         m_Options[kBrowseHitsOption].intValue = config->Target.m_SwitchHits;
-        m_Options[kBrowseTimeOption].intValue = config->Target.m_SwitchTimeMs;
+        m_Options[kBrowseTimeOption].intValue = (std::max)(1, config->Target.m_SwitchTimeMs);
         m_Options[kShowBrowsedPlayersOption].boolValue = config->Target.m_ShowBrowsedPlayers;
         m_Options[kBothHealthWeightOption].floatValue = config->Target.m_BothHealthWeight;
         m_Options[kBothArmorWeightOption].floatValue = config->Target.m_BothArmorWeight;
@@ -173,6 +174,7 @@ public:
     void RenderOverlay(ImDrawList* drawList, float screenW, float screenH) override;
 
     static void OnEntityAttacked(JNIEnv* env, Player* attackedPlayer);
+    static void OnLocalAttack(JNIEnv* env, Player* attackedPlayer);
     static std::string GetCurrentTargetName();
     static BrowseDisplayInfo GetBrowseDisplayInfo();
     static void ClearBrowseCache();
@@ -257,8 +259,6 @@ private:
     std::string m_LockedTargetName;
     std::chrono::steady_clock::time_point m_LastBrowseSwitchTime{};
     int m_BrowseHitCount = 0;
-    int m_PreviousSwingProgressInt = 0;
-    bool m_PreviousPhysicalClick = false;
     bool m_WasEnabled = false;
 
     static constexpr double kMaxTargetDistance = 6.0;

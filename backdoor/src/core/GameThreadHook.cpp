@@ -5,8 +5,10 @@
 #include "../game/classes/Minecraft.h"
 #include "../game/classes/MovingObjectPosition.h"
 #include "../game/classes/Player.h"
+#include "../game/jni/Field.h"
 #include "../game/jni/GameInstance.h"
 #include "../game/mapping/Mapper.h"
+#include "../features/visuals/Target.h"
 #include <jni.h>
 #include <atomic>
 #include <chrono>
@@ -66,6 +68,67 @@ namespace {
         }
     }
 
+    bool IsLeftClickReady(JNIEnv* env) {
+        if (!env || !g_Game || !g_Game->IsInitialized()) {
+            return false;
+        }
+
+        Class* minecraftClass = g_Game->FindClass(Mapper::Get("net/minecraft/client/Minecraft"));
+        const std::string fieldName = Mapper::Get("leftClickCounter");
+        if (!minecraftClass || fieldName.empty()) {
+            return true;
+        }
+
+        Field* field = minecraftClass->GetField(env, fieldName.c_str(), "I");
+        if (!field) {
+            return true;
+        }
+
+        jobject minecraft = Minecraft::GetTheMinecraft(env);
+        if (!minecraft) {
+            return true;
+        }
+
+        const int leftClickCounter = field->GetIntField(env, minecraft);
+        env->DeleteLocalRef(minecraft);
+        return leftClickCounter <= 0;
+    }
+
+    void NotifyTargetLocalAttack(JNIEnv* env) {
+        if (!env || !g_Game || !g_Game->IsInitialized()) {
+            return;
+        }
+
+        if (!IsLeftClickReady(env)) {
+            return;
+        }
+
+        jobject mouseOverObject = Minecraft::GetObjectMouseOver(env);
+        if (!mouseOverObject) {
+            return;
+        }
+
+        auto* mouseOver = reinterpret_cast<MovingObjectPosition*>(mouseOverObject);
+        if (mouseOver->IsAimingEntity(env)) {
+            jobject entityObject = mouseOver->GetEntity(env);
+            if (entityObject) {
+                Class* playerClass = g_Game->FindClass(Mapper::Get("net/minecraft/entity/player/EntityPlayer"));
+                if (playerClass && env->IsInstanceOf(entityObject, reinterpret_cast<jclass>(playerClass))) {
+                    jobject localPlayerObject = Minecraft::GetThePlayer(env);
+                    if (!localPlayerObject || !env->IsSameObject(entityObject, localPlayerObject)) {
+                        Target::OnLocalAttack(env, reinterpret_cast<Player*>(entityObject));
+                    }
+                    if (localPlayerObject) {
+                        env->DeleteLocalRef(localPlayerObject);
+                    }
+                }
+                env->DeleteLocalRef(entityObject);
+            }
+        }
+
+        env->DeleteLocalRef(mouseOverObject);
+    }
+
     bool SetBreakpointAtMethodStart(jmethodID method, jlocation& breakpointLocation) {
         if (!g_Jvmti || !method) {
             return false;
@@ -95,8 +158,9 @@ namespace {
         }
 
         if (method == g_ClickMouseMethod) {
-            if (env->PushLocalFrame(64) == 0) {
+            if (env->PushLocalFrame(512) == 0) {
                 SanitizeHiddenObjectMouseOver(env);
+                NotifyTargetLocalAttack(env);
                 if (env->ExceptionCheck()) {
                     env->ExceptionClear();
                 }

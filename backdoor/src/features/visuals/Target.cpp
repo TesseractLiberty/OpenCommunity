@@ -22,6 +22,7 @@
 #include <cstring>
 #include <limits>
 #include <unordered_set>
+#include <vector>
 
 namespace {
     constexpr int kOnlineTargetPlayerLimit = 100;
@@ -462,6 +463,27 @@ namespace {
 
     std::mutex g_BrowseMutex;
     BrowseCacheState g_BrowseCache;
+    std::mutex g_LocalAttackMutex;
+    std::vector<std::string> g_LocalAttackEvents;
+
+    void RecordLocalAttackEvent(const std::string& playerName) {
+        if (playerName.empty()) {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(g_LocalAttackMutex);
+        g_LocalAttackEvents.push_back(playerName);
+        if (g_LocalAttackEvents.size() > 32) {
+            g_LocalAttackEvents.erase(g_LocalAttackEvents.begin(), g_LocalAttackEvents.end() - 32);
+        }
+    }
+
+    std::vector<std::string> DrainLocalAttackEvents() {
+        std::vector<std::string> events;
+        std::lock_guard<std::mutex> lock(g_LocalAttackMutex);
+        events.swap(g_LocalAttackEvents);
+        return events;
+    }
 
     std::string StripMinecraftFormatting(std::string text) {
         std::string clean;
@@ -1373,6 +1395,37 @@ void Target::OnEntityAttacked(JNIEnv* env, Player* attackedPlayer) {
     env->DeleteLocalRef(worldObject);
 }
 
+void Target::OnLocalAttack(JNIEnv* env, Player* attackedPlayer) {
+    if (!env || !attackedPlayer) {
+        return;
+    }
+
+    auto* config = Bridge::Get()->GetConfig();
+    if (!config ||
+        !config->Target.m_Enabled ||
+        (!config->Target.m_AutoTarget && !config->Target.m_TargetSwitch) ||
+        !config->Target.m_BrowseAllPlayers) {
+        return;
+    }
+
+    const std::string attackedName = attackedPlayer->GetName(env, true);
+    if (attackedName.empty()) {
+        return;
+    }
+
+    OnEntityAttacked(env, attackedPlayer);
+
+    bool isBrowseMember = false;
+    {
+        std::lock_guard<std::mutex> lock(g_BrowseMutex);
+        isBrowseMember = g_BrowseCache.active && g_BrowseCache.members.find(attackedName) != g_BrowseCache.members.end();
+    }
+
+    if (isBrowseMember) {
+        RecordLocalAttackEvent(attackedName);
+    }
+}
+
 void Target::TickSynchronous(void* envPtr) {
     auto* env = static_cast<JNIEnv*>(envPtr);
     auto* config = Bridge::Get()->GetConfig();
@@ -1414,8 +1467,7 @@ void Target::TickSynchronous(void* envPtr) {
             ClearLockedTarget();
             m_WasEnabled = false;
         }
-        m_PreviousSwingProgressInt = 0;
-        m_PreviousPhysicalClick = false;
+        DrainLocalAttackEvents();
         ClearInUse();
         ClearTargetHealthCache();
         SyncOnlinePlayersToConfigSafe(env, world, localPlayerObject, config);
@@ -1436,42 +1488,7 @@ void Target::TickSynchronous(void* envPtr) {
 
     auto* localPlayer = reinterpret_cast<Player*>(localPlayerObject);
     SyncTargetHealthCache(env, world, localPlayerObject);
-    const bool isClicking = (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0;
-    const int swingProgress = localPlayer->GetSwingProgressInt(env);
-    const bool newObservedHit = (swingProgress == 1 && m_PreviousSwingProgressInt != 1) || (isClicking && !m_PreviousPhysicalClick);
-
-    struct ObservedHitInfo {
-        bool browseActivated = false;
-        std::string playerName;
-    };
-
-    auto observeHit = [&]() -> ObservedHitInfo {
-        ObservedHitInfo info;
-        if (!newObservedHit) {
-            return info;
-        }
-
-        jobject mouseOverObject = Minecraft::GetObjectMouseOver(env);
-        if (!mouseOverObject) {
-            return info;
-        }
-
-        auto* mouseOver = reinterpret_cast<MovingObjectPosition*>(mouseOverObject);
-        if (mouseOver->IsAimingEntity(env)) {
-            jobject attackedObject = mouseOver->GetEntity(env);
-            if (attackedObject && !env->IsSameObject(attackedObject, localPlayerObject)) {
-                info.playerName = reinterpret_cast<Player*>(attackedObject)->GetName(env, true);
-                OnEntityAttacked(env, reinterpret_cast<Player*>(attackedObject));
-                info.browseActivated = GetBrowseDisplayInfo().active;
-            }
-            if (attackedObject) {
-                env->DeleteLocalRef(attackedObject);
-            }
-        }
-
-        env->DeleteLocalRef(mouseOverObject);
-        return info;
-    };
+    const std::vector<std::string> localAttackEvents = DrainLocalAttackEvents();
 
     const bool automaticEnabled = config->Target.m_AutoTarget || config->Target.m_TargetSwitch;
     if (automaticEnabled) {
@@ -1554,14 +1571,17 @@ void Target::TickSynchronous(void* envPtr) {
             ClearLockedTarget();
         }
 
-        ObservedHitInfo observedHit;
-        if (config->Target.m_BrowseAllPlayers && newObservedHit) {
-            observedHit = observeHit();
-            if (observedHit.browseActivated) {
-                browseActive = true;
+        if (config->Target.m_BrowseAllPlayers && !localAttackEvents.empty()) {
+            {
+                std::lock_guard<std::mutex> lock(g_BrowseMutex);
+                browseActive = browseActive || g_BrowseCache.active;
             }
-            if (!observedHit.playerName.empty() && TargetNamesMatch(observedHit.playerName, GetLockedTarget())) {
-                ++m_BrowseHitCount;
+
+            const std::string lockedTarget = GetLockedTarget();
+            for (const auto& attackedName : localAttackEvents) {
+                if (!attackedName.empty() && TargetNamesMatch(attackedName, lockedTarget)) {
+                    ++m_BrowseHitCount;
+                }
             }
         }
 
@@ -1656,8 +1676,6 @@ void Target::TickSynchronous(void* envPtr) {
         env->ExceptionClear();
     }
 
-    m_PreviousPhysicalClick = isClicking;
-    m_PreviousSwingProgressInt = swingProgress;
     env->DeleteLocalRef(localPlayerObject);
     env->DeleteLocalRef(worldObject);
 }
