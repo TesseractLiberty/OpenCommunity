@@ -4,6 +4,7 @@
 #include "../core/Injector.h"
 #include "../utils/ProcessHelper.h"
 #include "../config/ClientInfo.h"
+#include "../config/BuildVersion.h"
 #include "../../../shared/common/Common.h"
 #include "../../../shared/common/ModuleConfig.h"
 #include "../../../deps/imgui/colors.h"
@@ -70,6 +71,8 @@ namespace
         std::string currentLabel = "local build";
         std::string latestTag;
         std::string latestUrl = kProjectReleasesUrl;
+        std::string latestAuthor = "Unknown";
+        std::string downloadUrl = kProjectReleasesUrl;
         std::string message = "Use Verify updates to compare this build with the latest GitHub release.";
     };
 
@@ -585,6 +588,11 @@ namespace
     LocalBuildInfo BuildLocalBuildInfo()
     {
         LocalBuildInfo info;
+        if (BuildVersion::kPublicReleaseTag[0] != '\0') {
+            info.label = BuildVersion::kPublicReleaseTag;
+            info.releaseTag = BuildVersion::kPublicReleaseTag;
+            info.isReleaseTag = true;
+        }
 
         const auto repositoryRoot = ResolveRepositoryRoot();
         if (repositoryRoot.empty()) {
@@ -857,8 +865,16 @@ namespace
             } else {
                 nextStatus.latestTag = ExtractJsonStringValue(responseBody, "tag_name");
                 nextStatus.latestUrl = ExtractJsonStringValue(responseBody, "html_url");
+                nextStatus.latestAuthor = ExtractJsonStringValue(responseBody, "login");
+                nextStatus.downloadUrl = ExtractJsonStringValue(responseBody, "browser_download_url");
                 if (nextStatus.latestUrl.empty()) {
                     nextStatus.latestUrl = kProjectReleasesUrl;
+                }
+                if (nextStatus.downloadUrl.empty()) {
+                    nextStatus.downloadUrl = nextStatus.latestUrl;
+                }
+                if (nextStatus.latestAuthor.empty()) {
+                    nextStatus.latestAuthor = "Unknown";
                 }
 
                 if (nextStatus.latestTag.empty()) {
@@ -3203,6 +3219,7 @@ void Screen::RenderInstanceChooser() {
                         m_State = AppState::Injecting;
                         m_InjectionDone = false;
                         m_InjectionFailed = false;
+                        m_PostInjectionReleaseCheckStarted = false;
                         m_InjectionCompleteTime = -1.0f;
                         m_InjectionViewStartTime = -1.0f;
                         m_InterfaceTransitionStartTime = -1.0f;
@@ -3359,15 +3376,45 @@ void Screen::RenderInjecting() {
     }
 
     if (m_InjectionDone && !m_InjectionFailed) {
+        if (!m_PostInjectionReleaseCheckStarted) {
+            StartReleaseCheckAsync();
+            m_PostInjectionReleaseCheckStarted = true;
+        }
+
         if (m_InjectionCompleteTime < 0.0f) {
             m_InjectionCompleteTime = now;
         }
 
         const float successElapsed = now - m_InjectionCompleteTime;
         const float successTextDuration = (static_cast<float>(strlen(kInjectedHeadline)) / kInjectionTypewriterCharsPerSecond) + 0.7f;
-        RenderInjectingLayer("Injecting", 1.0f, 0.0f, 1.0f, kInjectedHeadline, successElapsed, true, true);
+        const bool waitingForUpdateCheck = successElapsed >= successTextDuration && g_ReleaseCheckInProgress.load();
+        RenderInjectingLayer(
+            "Injecting",
+            1.0f,
+            0.0f,
+            1.0f,
+            kInjectedHeadline,
+            successElapsed,
+            true,
+            true,
+            waitingForUpdateCheck ? "Checking for updates..." : nullptr);
 
         if (successElapsed >= successTextDuration) {
+            ReleaseCheckStatus releaseStatus;
+            {
+                std::lock_guard<std::mutex> lock(g_ReleaseCheckMutex);
+                releaseStatus = g_ReleaseCheckStatus;
+            }
+
+            if (g_ReleaseCheckInProgress.load()) {
+                return;
+            }
+
+            if (releaseStatus.state == ReleaseCheckState::UpdateAvailable) {
+                m_State = AppState::UpdatePrompt;
+                return;
+            }
+
             if (m_InterfaceTransitionStartTime < 0.0f) {
                 m_InterfaceTransitionStartTime = now;
             }
@@ -3381,6 +3428,136 @@ void Screen::RenderInjecting() {
 
     const float injectingElapsed = now - m_InjectionViewStartTime;
     RenderInjectingLayer("Injecting", 1.0f, 0.0f, 1.0f, kInjectingHeadline, injectingElapsed, true, false);
+}
+
+void Screen::RenderUpdatePrompt() {
+    ReleaseCheckStatus releaseStatus;
+    {
+        std::lock_guard<std::mutex> lock(g_ReleaseCheckMutex);
+        releaseStatus = g_ReleaseCheckStatus;
+    }
+
+    if (releaseStatus.state != ReleaseCheckState::UpdateAvailable) {
+        m_State = AppState::MainInterface;
+        return;
+    }
+
+    ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(m_Width, m_Height));
+
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                   ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                                   ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground;
+
+    if (!ImGui::Begin("UpdatePrompt", nullptr, flags)) {
+        ImGui::End();
+        return;
+    }
+
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const ImVec2 windowPos = ImGui::GetWindowPos();
+    DrawWindowBase(drawList, windowPos, m_Width, m_Height);
+    DrawTopographicBackground(drawList, windowPos, m_Width, m_Height, 0.0f, 0.78f);
+
+    const float cardWidth = 560.0f;
+    const float cardHeight = 330.0f;
+    const ImVec2 cardMin(
+        windowPos.x + (m_Width - cardWidth) * 0.5f,
+        windowPos.y + (m_Height - cardHeight) * 0.5f);
+    const ImVec2 cardMax(cardMin.x + cardWidth, cardMin.y + cardHeight);
+
+    drawList->AddRectFilled(cardMin, cardMax, color::GetPanelU32(0.97f), 24.0f);
+    drawList->AddRectFilled(
+        ImVec2(cardMin.x + 1.0f, cardMin.y + 1.0f),
+        ImVec2(cardMax.x - 1.0f, cardMax.y - 1.0f),
+        color::GetGlassHighlightU32(0.09f),
+        23.0f);
+    drawList->AddRect(cardMin, cardMax, color::GetBorderU32(0.95f), 24.0f, 0, 1.0f);
+
+    const float padding = 28.0f;
+    const float titleFontSize = 25.0f;
+    const float bodyFontSize = 18.0f;
+    const ImU32 titleColor = color::GetStrongTextU32();
+    const ImU32 bodyColor = color::GetModuleAltTextU32();
+    const ImU32 accentColor = color::GetWarningU32();
+
+    const char* title = "Your client is outdated, would you like to update now?";
+    drawList->AddText(
+        m_FontBold ? m_FontBold : ImGui::GetFont(),
+        titleFontSize,
+        ImVec2(cardMin.x + padding, cardMin.y + padding),
+        titleColor,
+        title);
+
+    const float infoStartY = cardMin.y + 108.0f;
+    const float lineGap = 42.0f;
+
+    const std::array<std::pair<const char*, std::string>, 3> infoLines = {{
+        { "Your version:", releaseStatus.currentLabel.empty() ? std::string("Unknown") : releaseStatus.currentLabel },
+        { "New version:", releaseStatus.latestTag.empty() ? std::string("Unknown") : releaseStatus.latestTag },
+        { "Released by:", releaseStatus.latestAuthor.empty() ? std::string("Unknown") : releaseStatus.latestAuthor }
+    }};
+
+    for (size_t index = 0; index < infoLines.size(); ++index) {
+        const float lineY = infoStartY + lineGap * static_cast<float>(index);
+        drawList->AddText(
+            m_FontBodyMed ? m_FontBodyMed : ImGui::GetFont(),
+            bodyFontSize,
+            ImVec2(cardMin.x + padding, lineY),
+            bodyColor,
+            infoLines[index].first);
+        drawList->AddText(
+            m_FontBoldMed ? m_FontBoldMed : ImGui::GetFont(),
+            bodyFontSize,
+            ImVec2(cardMin.x + padding + 152.0f, lineY),
+            accentColor,
+            infoLines[index].second.c_str());
+    }
+
+    const float buttonY = cardMax.y - 72.0f;
+    const ImVec2 downloadButtonSize(180.0f, 44.0f);
+    const ImVec2 laterButtonSize(180.0f, 44.0f);
+    const ImVec2 downloadButtonPos(cardMin.x + padding, buttonY);
+    const ImVec2 laterButtonPos(cardMax.x - padding - laterButtonSize.x, buttonY);
+
+    if (DrawRoundedActionButton(
+            drawList,
+            "##update_prompt_download",
+            "Download",
+            downloadButtonPos,
+            downloadButtonSize,
+            15.0f,
+            color::GetLinkU32(),
+            color::GetLinkHoverU32(),
+            color::GetLinkU32(0.90f),
+            color::GetLinkU32(0.82f),
+            SolidTextColorForBackground(color::GetLinkVec4()),
+            m_FontBoldMed,
+            17.0f,
+            true)) {
+        OpenExternalUrl(releaseStatus.downloadUrl.empty() ? releaseStatus.latestUrl.c_str() : releaseStatus.downloadUrl.c_str());
+        m_State = AppState::MainInterface;
+    }
+
+    if (DrawRoundedActionButton(
+            drawList,
+            "##update_prompt_later",
+            "No, later.",
+            laterButtonPos,
+            laterButtonSize,
+            15.0f,
+            color::GetPanelActiveU32(),
+            color::GetPanelHoverU32(),
+            color::GetPanelActiveU32(0.92f),
+            color::GetBorderU32(0.95f),
+            color::GetStrongTextU32(),
+            m_FontBoldMed,
+            17.0f,
+            true)) {
+        m_State = AppState::MainInterface;
+    }
+
+    ImGui::End();
 }
 
 void Screen::RenderHUDPreview() {
@@ -5197,6 +5374,9 @@ void Screen::Render() {
         break;
     case AppState::Injecting:
         RenderInjecting();
+        break;
+    case AppState::UpdatePrompt:
+        RenderUpdatePrompt();
         break;
     case AppState::TransitionToInterface:
         RenderTransitionToInterface();

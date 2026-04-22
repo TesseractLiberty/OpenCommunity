@@ -25,6 +25,7 @@ private:
     void RenderIntro();
     void RenderInstanceChooser();
     void RenderInjecting();
+    void RenderUpdatePrompt();
     void RenderTransitionToInterface();
     void RenderMainInterface();
     void RenderHUDPreview();
@@ -89,7 +90,7 @@ private:
     int m_CustomIconColorBytes[3] = { 0, 0, 0 };
     std::filesystem::path m_ImportedPaletteSource;
 
-    enum class AppState { Intro, InstanceChooser, Injecting, TransitionToInterface, MainInterface, Closing };
+    enum class AppState { Intro, InstanceChooser, Injecting, UpdatePrompt, TransitionToInterface, MainInterface, Closing };
     AppState m_State = AppState::Intro;
     float m_ClosingStartTime = -1.0f;
     float m_InjectionCompleteTime = -1.0f;
@@ -98,6 +99,7 @@ private:
 
     bool m_InjectionDone = false;
     bool m_InjectionFailed = false;
+    bool m_PostInjectionReleaseCheckStarted = false;
     std::string m_InjectionStatus;
 
     ImFont* m_FontBody = nullptr;
