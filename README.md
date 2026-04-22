@@ -100,7 +100,7 @@ All available modules organized by category.
 
 **Movement** - NoJumpDelay
 
-**Visuals** - ArrayList, DamageIndicator, Target, HideClans, Nametags, Notifications
+**Visuals** - ArrayList, DamageIndicator, Target, HideClans, Nametags, Notifications, NoRender
 
 **Render** - HUD
 
@@ -131,6 +131,7 @@ All concrete module registration happens in `runtime/src/features/ModuleRegistry
 #include "visuals/DamageIndicator.h"
 #include "visuals/Nametags.h"
 #include "visuals/Notifications.h"
+#include "visuals/NoRender.h"
 #include "visuals/Target.h"
 #include "visuals/HideClans.h"
 
@@ -150,6 +151,7 @@ namespace ModuleRegistry {
         modules.RegisterModule(std::make_shared<DamageIndicator>());
         modules.RegisterModule(std::make_shared<Nametags>());
         modules.RegisterModule(std::make_shared<Notifications>());
+        modules.RegisterModule(std::make_shared<NoRender>());
     }
 
     inline void RegisterAll() {
@@ -294,7 +296,7 @@ The runtime wraps important Minecraft classes through JNI:
 |-------|-------------|
 | `Minecraft` | Main game instance: player, world, timer |
 | `Player` | Player entities: name, health, position, bounding box, team/clan data |
-| `World` | World instance: player list and world state |
+| `World` | World instance: player/entity lists and scoreboard |
 | `Scoreboard` | Scoreboard system: teams, objectives, scores |
 | `Team` | Team data: prefix, suffix, registered name |
 | `AxisAlignedBB` | Bounding boxes and hitbox manipulation |
@@ -463,6 +465,7 @@ OpenCommunity/
 |       |       |-- HideClans.h / .cpp
 |       |       |-- Nametags.h / .cpp
 |       |       |-- Notifications.h / .cpp
+|       |       |-- NoRender.h / .cpp
 |       |       `-- Target.h / .cpp
 |       `-- game/
 |           |-- classes/

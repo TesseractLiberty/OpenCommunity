@@ -53,6 +53,50 @@ std::vector<Player*> World::GetPlayerEntities(JNIEnv* env) {
     return players;
 }
 
+std::vector<jobject> World::GetLoadedEntities(JNIEnv* env) {
+    if (!env || !this || !g_Game || !g_Game->IsInitialized()) {
+        return {};
+    }
+
+    auto* worldClass = reinterpret_cast<Class*>(env->GetObjectClass(reinterpret_cast<jobject>(this)));
+    if (!worldClass) {
+        return {};
+    }
+
+    Field* loadedEntitiesField = worldClass->GetField(env, Mapper::Get("loadedEntityList").c_str(), "Ljava/util/List;");
+    env->DeleteLocalRef(reinterpret_cast<jclass>(worldClass));
+    if (!loadedEntitiesField) {
+        return {};
+    }
+
+    jobject listObject = loadedEntitiesField->GetObjectField(env, this);
+    if (!listObject) {
+        return {};
+    }
+
+    Class* listClass = g_Game->FindClass("java/util/List");
+    Method* toArrayMethod = listClass ? listClass->GetMethod(env, "toArray", "()[Ljava/lang/Object;") : nullptr;
+    jobjectArray entityArray = toArrayMethod ? static_cast<jobjectArray>(toArrayMethod->CallObjectMethod(env, listObject)) : nullptr;
+    env->DeleteLocalRef(listObject);
+    if (!entityArray) {
+        return {};
+    }
+
+    const jsize length = env->GetArrayLength(entityArray);
+    std::vector<jobject> entities;
+    entities.reserve(length > 0 ? static_cast<size_t>(length) : 0);
+
+    for (jsize index = 0; index < length; ++index) {
+        jobject entityObject = env->GetObjectArrayElement(entityArray, index);
+        if (entityObject) {
+            entities.push_back(entityObject);
+        }
+    }
+
+    env->DeleteLocalRef(entityArray);
+    return entities;
+}
+
 jobject World::GetScoreboard(JNIEnv* env) {
     if (!env || !this) {
         return nullptr;

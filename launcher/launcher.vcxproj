@@ -115,6 +115,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\runtime\src\features\ModuleRegistry.h" />
+    <ClInclude Include="..\runtime\src\features\visuals\NoRender.h" />
     <ClInclude Include="..\shared\common\Common.h" />
     <ClInclude Include="..\shared\common\ModuleConfig.h" />
     <ClInclude Include="..\shared\common\modules\Module.h" />
@@ -122,6 +123,7 @@
     <ClInclude Include="..\shared\common\modules\ModuleOption.h" />
     <ClInclude Include="..\shared\common\logging\Logger.h" />
     <ClInclude Include="..\deps\imgui\imgui_custom.hpp" />
+    <ClInclude Include="..\deps\imgui\images\modules\no_render_icon.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="src\core\Bridge.h" />
     <ClInclude Include="src\core\Injector.h" />
