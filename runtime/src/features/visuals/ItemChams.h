@@ -17,6 +17,7 @@
 class ItemChams : public Module {
 public:
     MODULE_INFO(ItemChams, "Item Chams", "Highlights eligible armor items through walls.", ModuleCategory::Visuals) {
+        SetBeta();
         SetImagePrefix(module_icons::item_chams_icon_data, module_icons::item_chams_icon_data_size);
         AddOption(ModuleOption::SliderInt("Porcentagem", 0, 0, 100));
     }
