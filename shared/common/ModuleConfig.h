@@ -17,7 +17,7 @@ enum class DamageIndicatorMode {
 
 struct ModuleConfig {
     static constexpr std::uint32_t kMagic = 0x4746434F; // OCFG
-    static constexpr std::uint32_t kVersion = 3;
+    static constexpr std::uint32_t kVersion = 4;
 
     std::uint32_t m_Magic = kMagic;
     std::uint32_t m_Version = kVersion;
@@ -134,6 +134,11 @@ struct ModuleConfig {
 
     struct {
         bool m_Enabled = false;
+        int m_Percentage = 0;
+    } ItemChams;
+
+    struct {
+        bool m_Enabled = false;
     } NoHitDelay;
 
     struct {
@@ -162,6 +167,7 @@ struct ModuleConfig {
         bool m_Nametags = false;
         bool m_Notifications = true;
         bool m_NoRender = false;
+        bool m_ItemChams = false;
         bool m_RightClicker = false;
         bool m_WTap = false;
         bool m_AimAssist = false;

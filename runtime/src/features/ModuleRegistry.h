@@ -12,6 +12,7 @@
 #include "visuals/DamageIndicator.h"
 #include "visuals/Nametags.h"
 #include "visuals/Notifications.h"
+#include "visuals/ItemChams.h"
 #include "visuals/NoRender.h"
 #include "visuals/Target.h"
 #include "visuals/HideClans.h"
@@ -32,6 +33,7 @@ namespace ModuleRegistry {
         modules.RegisterModule(std::make_shared<DamageIndicator>());
         modules.RegisterModule(std::make_shared<Nametags>());
         modules.RegisterModule(std::make_shared<Notifications>());
+        modules.RegisterModule(std::make_shared<ItemChams>());
         modules.RegisterModule(std::make_shared<NoRender>());
     }
 
