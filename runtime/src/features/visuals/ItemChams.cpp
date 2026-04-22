@@ -6,8 +6,11 @@
 #include "../../game/classes/EntityItem.h"
 #include "../../game/classes/ItemStack.h"
 #include "../../game/classes/Minecraft.h"
+#include "../../game/classes/Player.h"
 #include "../../game/classes/RenderHelper.h"
 #include "../../game/classes/RenderItem.h"
+#include "../../game/classes/RenderManager.h"
+#include "../../game/classes/Timer.h"
 #include "../../game/classes/World.h"
 #include "../../game/jni/Class.h"
 #include "../../game/jni/Field.h"
@@ -25,6 +28,8 @@ namespace {
     constexpr float kMinProjectedSize = 2.0f;
     constexpr float kMinIconSize = 12.0f;
     constexpr float kMaxIconSize = 24.0f;
+    constexpr float kDrawWorldScale = 1.0f;
+    constexpr double kDrawWorldYOffset = 0.0;
 
     struct ScreenPoint {
         float x = 0.0f;
@@ -66,12 +71,17 @@ namespace {
     };
 
     struct ItemRenderEntry {
+        jobject entity = nullptr;
         jobject stack = nullptr;
         ProjectedItemBox projectedBox;
         ImU32 fillColor = IM_COL32_WHITE;
         ImU32 lineColor = IM_COL32_WHITE;
         ImVec2 iconPosition{};
         float iconScale = 1.0f;
+        double renderX = 0.0;
+        double renderY = 0.0;
+        double renderZ = 0.0;
+        float entityYaw = 0.0f;
     };
 
     void ClearJniException(JNIEnv* env) {
@@ -351,6 +361,76 @@ namespace {
     ImU32 BuildLineColor(int percentage) {
         return BuildDurabilityColor(percentage, 235);
     }
+
+    jobject GetEntityRenderObject(JNIEnv* env, jobject renderManagerObject, jobject entityObject) {
+        if (!env || !renderManagerObject || !entityObject || !g_Game || !g_Game->IsInitialized()) {
+            return nullptr;
+        }
+
+        const std::string entitySignature = Mapper::Get("net/minecraft/entity/Entity", 2);
+        const std::string renderSignature = Mapper::Get("net/minecraft/client/renderer/entity/Render", 2);
+        const std::string methodName = Mapper::Get("getEntityRenderObject");
+        if (entitySignature.empty() || renderSignature.empty() || methodName.empty()) {
+            return nullptr;
+        }
+
+        auto* renderManagerClass = reinterpret_cast<Class*>(env->GetObjectClass(renderManagerObject));
+        if (!renderManagerClass) {
+            return nullptr;
+        }
+
+        Method* method = renderManagerClass->GetMethod(
+            env,
+            methodName.c_str(),
+            ("(" + entitySignature + ")" + renderSignature).c_str());
+        jobject renderObject = method ? method->CallObjectMethod(env, renderManagerObject, false, entityObject) : nullptr;
+        env->DeleteLocalRef(reinterpret_cast<jclass>(renderManagerClass));
+        return renderObject;
+    }
+
+    void RenderEntityWithGameRenderer(
+        JNIEnv* env,
+        jobject renderObject,
+        jobject entityObject,
+        double renderX,
+        double renderY,
+        double renderZ,
+        float entityYaw,
+        float partialTicks) {
+        if (!env || !renderObject || !entityObject) {
+            return;
+        }
+
+        const std::string entitySignature = Mapper::Get("net/minecraft/entity/Entity", 2);
+        const std::string methodName = Mapper::Get("doRender");
+        if (entitySignature.empty() || methodName.empty()) {
+            return;
+        }
+
+        auto* renderClass = reinterpret_cast<Class*>(env->GetObjectClass(renderObject));
+        if (!renderClass) {
+            return;
+        }
+
+        Method* method = renderClass->GetMethod(
+            env,
+            methodName.c_str(),
+            ("(" + entitySignature + "DDDFF)V").c_str());
+        if (method) {
+            method->CallVoidMethod(
+                env,
+                renderObject,
+                false,
+                entityObject,
+                renderX,
+                renderY,
+                renderZ,
+                entityYaw,
+                partialTicks);
+        }
+
+        env->DeleteLocalRef(reinterpret_cast<jclass>(renderClass));
+    }
 }
 
 void ItemChams::TickSynchronous(void* envPtr) {
@@ -433,6 +513,27 @@ void ItemChams::RenderOverlay(ImDrawList* drawList, float screenW, float screenH
     std::vector<ItemRenderEntry> renderEntries;
     renderEntries.reserve(entities.size());
 
+    float partialTicks = 0.0f;
+    bool canRenderWorldDraw = false;
+
+    if (!renderEsp) {
+        jobject timerObject = Minecraft::GetTimer(env);
+
+        if (timerObject) {
+            partialTicks = reinterpret_cast<Timer*>(timerObject)->GetRenderPartialTicks(env);
+            canRenderWorldDraw = !env->ExceptionCheck();
+        }
+
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            canRenderWorldDraw = false;
+        }
+
+        if (timerObject) {
+            env->DeleteLocalRef(timerObject);
+        }
+    }
+
     for (jobject entity : entities) {
         if (!entity) {
             continue;
@@ -460,39 +561,79 @@ void ItemChams::RenderOverlay(ImDrawList* drawList, float screenW, float screenH
             continue;
         }
 
-        jobject boundingBoxObject = GetEntityBoundingBox(env, entity);
-        if (!boundingBoxObject) {
+        if (renderEsp) {
+            jobject boundingBoxObject = GetEntityBoundingBox(env, entity);
+            if (!boundingBoxObject) {
+                env->DeleteLocalRef(stackObject);
+                env->DeleteLocalRef(entity);
+                continue;
+            }
+
+            const AxisAlignedBB_t boundingBox = reinterpret_cast<AxisAlignedBB*>(boundingBoxObject)->GetNativeBoundingBox(env);
+            ProjectedItemBox projectedBox{};
+            const bool projected = TryBuildProjectedItemBox(boundingBox, snapshot, projectedBox);
+            env->DeleteLocalRef(boundingBoxObject);
+
+            if (!projected) {
+                env->DeleteLocalRef(stackObject);
+                env->DeleteLocalRef(entity);
+                continue;
+            }
+
+            const float boxWidth = projectedBox.maxX - projectedBox.minX;
+            const float boxHeight = projectedBox.maxY - projectedBox.minY;
+            const float iconSize = (std::clamp)((std::min)(boxWidth, boxHeight) * 0.9f, kMinIconSize, kMaxIconSize);
+            const ImVec2 iconPosition(
+                projectedBox.minX + ((boxWidth - iconSize) * 0.5f),
+                projectedBox.minY + ((boxHeight - iconSize) * 0.5f));
+
+            renderEntries.push_back({
+                entity,
+                stackObject,
+                projectedBox,
+                BuildFillColor(percentage),
+                BuildLineColor(percentage),
+                iconPosition,
+                iconSize / 16.0f
+            });
+            continue;
+        }
+
+        if (!canRenderWorldDraw) {
             env->DeleteLocalRef(stackObject);
             env->DeleteLocalRef(entity);
             continue;
         }
 
-        const AxisAlignedBB_t boundingBox = reinterpret_cast<AxisAlignedBB*>(boundingBoxObject)->GetNativeBoundingBox(env);
-        ProjectedItemBox projectedBox{};
-        const bool projected = TryBuildProjectedItemBox(boundingBox, snapshot, projectedBox);
+        auto* entityBase = reinterpret_cast<Player*>(entity);
+        const Vec3D currentPos = entityBase->GetPos(env);
+        const Vec3D previousPos = entityBase->GetLastTickPos(env);
+        const float previousYaw = entityBase->GetPrevRotationYaw(env);
+        const float currentYaw = entityBase->GetRotationYaw(env);
 
-        env->DeleteLocalRef(boundingBoxObject);
-        env->DeleteLocalRef(entity);
-
-        if (!projected) {
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
             env->DeleteLocalRef(stackObject);
+            env->DeleteLocalRef(entity);
             continue;
         }
 
-        const float boxWidth = projectedBox.maxX - projectedBox.minX;
-        const float boxHeight = projectedBox.maxY - projectedBox.minY;
-        const float iconSize = (std::clamp)((std::min)(boxWidth, boxHeight) * 0.9f, kMinIconSize, kMaxIconSize);
-        const ImVec2 iconPosition(
-            projectedBox.minX + ((boxWidth - iconSize) * 0.5f),
-            projectedBox.minY + ((boxHeight - iconSize) * 0.5f));
+        const double interpolatedX = previousPos.x + ((currentPos.x - previousPos.x) * partialTicks);
+        const double interpolatedY = previousPos.y + ((currentPos.y - previousPos.y) * partialTicks);
+        const double interpolatedZ = previousPos.z + ((currentPos.z - previousPos.z) * partialTicks);
 
         renderEntries.push_back({
+            entity,
             stackObject,
-            projectedBox,
+            {},
             BuildFillColor(percentage),
             BuildLineColor(percentage),
-            iconPosition,
-            iconSize / 16.0f
+            {},
+            1.0f,
+            interpolatedX,
+            interpolatedY,
+            interpolatedZ,
+            previousYaw + ((currentYaw - previousYaw) * partialTicks)
         });
     }
 
@@ -512,7 +653,7 @@ void ItemChams::RenderOverlay(ImDrawList* drawList, float screenW, float screenH
         }
     }
 
-    if (!renderEntries.empty()) {
+    if (!renderEntries.empty() && renderEsp) {
         jobject renderItemObject = Minecraft::GetRenderItem(env);
         if (renderItemObject) {
             auto* renderItem = reinterpret_cast<RenderItem*>(renderItemObject);
@@ -564,7 +705,72 @@ void ItemChams::RenderOverlay(ImDrawList* drawList, float screenW, float screenH
         }
     }
 
+    if (!renderEntries.empty() && !renderEsp) {
+        jobject renderManagerObject = Minecraft::GetRenderManager(env);
+        if (renderManagerObject) {
+            glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_LIGHTING_BIT | GL_POLYGON_BIT | GL_TRANSFORM_BIT);
+
+            glMatrixMode(GL_PROJECTION);
+            glPushMatrix();
+            glLoadMatrixf(snapshot.projection.data());
+
+            glMatrixMode(GL_MODELVIEW);
+            glPushMatrix();
+            glLoadMatrixf(snapshot.modelView.data());
+
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glDisable(GL_DEPTH_TEST);
+            glDepthMask(GL_FALSE);
+            glEnable(GL_POLYGON_OFFSET_FILL);
+            glPolygonOffset(1.0f, -1000000.0f);
+
+            for (const auto& entry : renderEntries) {
+                if (!entry.entity) {
+                    continue;
+                }
+
+                jobject renderObject = GetEntityRenderObject(env, renderManagerObject, entry.entity);
+                if (!renderObject) {
+                    continue;
+                }
+
+                glPushMatrix();
+                glTranslated(entry.renderX, entry.renderY + kDrawWorldYOffset, entry.renderZ);
+                glScalef(kDrawWorldScale, kDrawWorldScale, kDrawWorldScale);
+                RenderEntityWithGameRenderer(
+                    env,
+                    renderObject,
+                    entry.entity,
+                    0.0,
+                    0.0,
+                    0.0,
+                    entry.entityYaw,
+                    partialTicks);
+                glPopMatrix();
+                env->DeleteLocalRef(renderObject);
+            }
+
+            glPolygonOffset(1.0f, 1000000.0f);
+            glDisable(GL_POLYGON_OFFSET_FILL);
+            glDepthMask(GL_TRUE);
+            glEnable(GL_DEPTH_TEST);
+            glDisable(GL_BLEND);
+
+            glMatrixMode(GL_PROJECTION);
+            glPopMatrix();
+            glMatrixMode(GL_MODELVIEW);
+            glPopMatrix();
+            glPopAttrib();
+
+            env->DeleteLocalRef(renderManagerObject);
+        }
+    }
+
     for (const auto& entry : renderEntries) {
+        if (entry.entity) {
+            env->DeleteLocalRef(entry.entity);
+        }
         if (entry.stack) {
             env->DeleteLocalRef(entry.stack);
         }
