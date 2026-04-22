@@ -19,6 +19,7 @@ public:
     MODULE_INFO(ItemChams, "Item Chams", "Highlights eligible armor items through walls.", ModuleCategory::Visuals) {
         SetBeta();
         SetImagePrefix(module_icons::item_chams_icon_data, module_icons::item_chams_icon_data_size);
+        AddOption(ModuleOption::Combo("Mode", { "ESP", "Draw" }, 0));
         AddOption(ModuleOption::SliderInt("Porcentagem", 0, 0, 100));
     }
 
@@ -29,6 +30,7 @@ public:
         }
 
         config->ItemChams.m_Enabled = IsEnabled();
+        config->ItemChams.m_Mode = GetMode();
         config->ItemChams.m_Percentage = GetPercentageThreshold();
         config->Modules.m_ItemChams = IsEnabled();
     }
@@ -40,6 +42,7 @@ public:
         }
 
         SetEnabled(config->ItemChams.m_Enabled);
+        SetMode(config->ItemChams.m_Mode);
         SetPercentageThreshold(config->ItemChams.m_Percentage);
     }
 
@@ -65,10 +68,28 @@ private:
 #endif
 
 private:
-    static constexpr size_t kPercentageOption = 0;
+    static constexpr size_t kModeOption = 0;
+    static constexpr size_t kPercentageOption = 1;
+    static constexpr int kModeEsp = 0;
+    static constexpr int kModeDraw = 1;
+
+    int GetMode() const {
+        if (m_Options.size() <= kModeOption) {
+            return kModeEsp;
+        }
+
+        const int mode = m_Options[kModeOption].comboIndex;
+        return mode == kModeDraw ? kModeDraw : kModeEsp;
+    }
 
     int GetPercentageThreshold() const {
         return m_Options.size() > kPercentageOption ? (std::clamp)(m_Options[kPercentageOption].intValue, 0, 100) : 0;
+    }
+
+    void SetMode(int value) {
+        if (m_Options.size() > kModeOption) {
+            m_Options[kModeOption].comboIndex = value == kModeDraw ? kModeDraw : kModeEsp;
+        }
     }
 
     void SetPercentageThreshold(int value) {

@@ -17,7 +17,7 @@ enum class DamageIndicatorMode {
 
 struct ModuleConfig {
     static constexpr std::uint32_t kMagic = 0x4746434F; // OCFG
-    static constexpr std::uint32_t kVersion = 4;
+    static constexpr std::uint32_t kVersion = 5;
 
     std::uint32_t m_Magic = kMagic;
     std::uint32_t m_Version = kVersion;
@@ -134,6 +134,7 @@ struct ModuleConfig {
 
     struct {
         bool m_Enabled = false;
+        int m_Mode = 0;
         int m_Percentage = 0;
     } ItemChams;
 

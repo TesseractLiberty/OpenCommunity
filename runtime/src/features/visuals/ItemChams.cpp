@@ -429,6 +429,7 @@ void ItemChams::RenderOverlay(ImDrawList* drawList, float screenW, float screenH
     auto* world = reinterpret_cast<World*>(worldObject);
     const auto entities = world->GetLoadedEntities(env);
     const int threshold = GetPercentageThreshold();
+    const bool renderEsp = GetMode() == kModeEsp;
     std::vector<ItemRenderEntry> renderEntries;
     renderEntries.reserve(entities.size());
 
@@ -495,18 +496,20 @@ void ItemChams::RenderOverlay(ImDrawList* drawList, float screenW, float screenH
         });
     }
 
-    for (const auto& entry : renderEntries) {
-        const ImVec2 min(entry.projectedBox.minX, entry.projectedBox.minY);
-        const ImVec2 max(entry.projectedBox.maxX, entry.projectedBox.maxY);
-        drawList->AddRect(
-            ImVec2(min.x - 2.0f, min.y - 2.0f),
-            ImVec2(max.x + 2.0f, max.y + 2.0f),
-            IM_COL32(0, 0, 0, 110),
-            2.0f,
-            0,
-            3.0f);
-        drawList->AddRectFilled(min, max, entry.fillColor, 2.0f);
-        drawList->AddRect(min, max, entry.lineColor, 2.0f, 0, 1.6f);
+    if (renderEsp) {
+        for (const auto& entry : renderEntries) {
+            const ImVec2 min(entry.projectedBox.minX, entry.projectedBox.minY);
+            const ImVec2 max(entry.projectedBox.maxX, entry.projectedBox.maxY);
+            drawList->AddRect(
+                ImVec2(min.x - 2.0f, min.y - 2.0f),
+                ImVec2(max.x + 2.0f, max.y + 2.0f),
+                IM_COL32(0, 0, 0, 110),
+                2.0f,
+                0,
+                3.0f);
+            drawList->AddRectFilled(min, max, entry.fillColor, 2.0f);
+            drawList->AddRect(min, max, entry.lineColor, 2.0f, 0, 1.6f);
+        }
     }
 
     if (!renderEntries.empty()) {
@@ -597,6 +600,7 @@ void ItemChams::ApplyArmorFiltering(JNIEnv* env, jobject worldObject) {
     auto* world = reinterpret_cast<World*>(worldObject);
     const auto entities = world->GetLoadedEntities(env);
     const int threshold = GetPercentageThreshold();
+    const bool drawMode = GetMode() == kModeDraw;
 
     for (jobject entity : entities) {
         if (!entity) {
@@ -614,7 +618,7 @@ void ItemChams::ApplyArmorFiltering(JNIEnv* env, jobject worldObject) {
         const bool isArmor = stackObject && TryGetArmorPercentage(env, stackObject, percentage);
 
         if (isArmor) {
-            if (percentage < threshold) {
+            if (percentage < threshold || drawMode) {
                 SetRenderDistanceWeight(env, entity, 0.0);
                 RememberHiddenEntity(identityHash);
             } else if (ForgetHiddenEntity(identityHash)) {
