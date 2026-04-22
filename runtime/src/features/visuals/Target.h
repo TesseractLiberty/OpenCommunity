@@ -244,8 +244,12 @@ private:
 private:
     bool IsValidCombatTarget(JNIEnv* env, Player* player, Player* localPlayer);
     float CalculatePriorityScore(JNIEnv* env, Player* player, Player* localPlayer, Scoreboard* scoreboard);
-    float GetBreakArmorVulnerability(JNIEnv* env, Player* player);
+    float GetBreakArmorScore(JNIEnv* env, Player* player);
     float GetLowArmorScore(JNIEnv* env, Player* player);
+    int GetEquippedArmorMask(JNIEnv* env, Player* player);
+    bool ShouldKeepBreakArmorTarget(JNIEnv* env, Player* player, Player* localPlayer, Scoreboard* scoreboard, const std::string& playerName);
+    void TrackBreakArmorTarget(JNIEnv* env, Player* player, const std::string& playerName);
+    void ResetBreakArmorTracking();
     bool IsSameClan(JNIEnv* env, Player* player, Player* localPlayer, Scoreboard* scoreboard);
     void ManageHitboxes(JNIEnv* env, Player* localPlayer, World* world);
     void AutoSelectTarget(JNIEnv* env);
@@ -260,9 +264,12 @@ private:
     std::string m_LockedTargetName;
     std::chrono::steady_clock::time_point m_LastBrowseSwitchTime{};
     int m_BrowseHitCount = 0;
+    int m_PreviousSwingProgressInt = 0;
+    bool m_PreviousPhysicalClick = false;
+    std::string m_BreakArmorTargetName;
+    int m_BreakArmorArmorMask = 0;
     bool m_WasEnabled = false;
 
-    static constexpr double kMaxTargetDistance = 6.0;
     static constexpr int kMaxPlayersToProcess = 50;
 #endif
 };
