@@ -672,6 +672,26 @@ void Nametags::SetFont(ImFont* font) {
     s_SanFranciscoBoldFont = font;
 }
 
+void Nametags::ShutdownRuntime(void* envPtr) {
+    auto* env = static_cast<JNIEnv*>(envPtr);
+    if (!env || env->PushLocalFrame(64) != 0) {
+        return;
+    }
+
+    jobject worldObject = Minecraft::GetTheWorld(env);
+    jobject scoreboardObject = nullptr;
+    if (worldObject) {
+        scoreboardObject = reinterpret_cast<World*>(worldObject)->GetScoreboard(env);
+    }
+
+    RestoreVanillaNameTags(env, reinterpret_cast<Scoreboard*>(scoreboardObject));
+
+    if (scoreboardObject) {
+        env->DeleteLocalRef(scoreboardObject);
+    }
+    env->PopLocalFrame(nullptr);
+}
+
 void Nametags::TickSynchronous(void* envPtr) {
     auto* env = static_cast<JNIEnv*>(envPtr);
     if (!env) {

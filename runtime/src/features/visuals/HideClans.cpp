@@ -51,6 +51,39 @@ std::string HideClans::GetCachedClanTag() {
     return clanTag;
 }
 
+void HideClans::ShutdownRuntime(void* envPtr) {
+    auto* env = static_cast<JNIEnv*>(envPtr);
+    if (!env || env->PushLocalFrame(256) != 0) {
+        return;
+    }
+
+    jobject worldObject = Minecraft::GetTheWorld(env);
+    if (worldObject) {
+        auto* world = reinterpret_cast<World*>(worldObject);
+        const auto players = world->GetPlayerEntities(env);
+        for (auto* player : players) {
+            if (!player) {
+                continue;
+            }
+
+            try { player->Restore(env); } catch (...) {}
+            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(g_TagMutex);
+        g_CachedClanTag.clear();
+    }
+    g_SemiAutoLocked = false;
+    g_SemiAutoLockedPlayers.clear();
+    g_WasShowAlliesEnabled = false;
+    g_WasEnabled = false;
+    ClearInUse();
+
+    env->PopLocalFrame(nullptr);
+}
+
 void HideClans::TickSynchronous(void* envPtr) {
     auto* env = static_cast<JNIEnv*>(envPtr);
     auto* config = Bridge::Get()->GetConfig();

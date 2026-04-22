@@ -136,6 +136,12 @@ public:
         });
     }
 
+    void ShutdownRuntimeAll(void* env) {
+        ForEachModule([env](Module& module) {
+            module.ShutdownRuntime(env);
+        });
+    }
+
     void UpdateLauncher(void* configPtr = nullptr) {
         ProcessKeybinds();
         if (configPtr) {

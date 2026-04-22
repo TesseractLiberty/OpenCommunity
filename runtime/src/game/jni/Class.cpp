@@ -6,44 +6,66 @@
 #include <mutex>
 
 static std::mutex g_ClassMutex;
+static jclass g_JavaClassClass = nullptr;
+static jmethodID g_JavaClassGetName = nullptr;
 
 std::string Class::GetName(JNIEnv* env)
 {
 	if (this == NULL || env == NULL)
 		return "";
 
-	static jclass cls = nullptr;
-	static jmethodID mid_getName = nullptr;
-
 	{
 		std::lock_guard<std::mutex> lock(g_ClassMutex);
-		if (!cls) {
+		if (!g_JavaClassClass) {
 			jclass localCls = env->FindClass("java/lang/Class");
+			if (env->ExceptionCheck()) {
+				env->ExceptionClear();
+			}
 			if (localCls) {
-				cls = (jclass)env->NewGlobalRef(localCls);
-				mid_getName = env->GetMethodID(cls, "getName", "()Ljava/lang/String;");
+				g_JavaClassClass = (jclass)env->NewGlobalRef(localCls);
+				g_JavaClassGetName = env->GetMethodID(g_JavaClassClass, "getName", "()Ljava/lang/String;");
 				env->DeleteLocalRef(localCls);
 			}
 		}
 	}
 
-	if (!cls || !mid_getName)
+	if (!g_JavaClassClass || !g_JavaClassGetName)
 		return "";
 
-	const auto jname = (jstring)env->CallObjectMethod((jclass)this, mid_getName);
+	const auto jname = (jstring)env->CallObjectMethod((jclass)this, g_JavaClassGetName);
 	if (env->ExceptionCheck()) {
 		env->ExceptionClear();
+		if (jname) {
+			env->DeleteLocalRef(jname);
+		}
 		return "";
 	}
 
 	if (jname) {
 		const char* name = env->GetStringUTFChars(jname, 0);
+		if (!name) {
+			env->DeleteLocalRef(jname);
+			return "";
+		}
 		std::string result(name);
 		env->ReleaseStringUTFChars(jname, name);
 		env->DeleteLocalRef(jname);
 		return result;
 	}
 	return "";
+}
+
+void Class::ReleaseCachedRefs(JNIEnv* env)
+{
+	if (!env)
+		return;
+
+	std::lock_guard<std::mutex> lock(g_ClassMutex);
+	if (g_JavaClassClass) {
+		env->DeleteGlobalRef(g_JavaClassClass);
+		g_JavaClassClass = nullptr;
+		g_JavaClassGetName = nullptr;
+	}
 }
 
 Field* Class::GetField(JNIEnv* env, const char* name, const char* sig, bool staticField)

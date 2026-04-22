@@ -145,6 +145,8 @@ void NoRender::TickSynchronous(void* envPtr) {
     jobject worldObject = Minecraft::GetTheWorld(env);
     jobject localPlayer = Minecraft::GetThePlayer(env);
     if (!worldObject || !localPlayer) {
+        ReleaseWorldRef(env);
+        m_AppliedEntityOverrides = false;
         env->PopLocalFrame(nullptr);
         return;
     }
@@ -178,6 +180,24 @@ void NoRender::TickSynchronous(void* envPtr) {
     ApplyEntityRendering(env, worldObject, localPlayer);
     MarkInUse(120);
 
+    env->PopLocalFrame(nullptr);
+}
+
+void NoRender::ShutdownRuntime(void* envPtr) {
+    auto* env = static_cast<JNIEnv*>(envPtr);
+    if (!env || env->PushLocalFrame(64) != 0) {
+        return;
+    }
+
+    jobject worldObject = Minecraft::GetTheWorld(env);
+    jobject localPlayer = Minecraft::GetThePlayer(env);
+    if (worldObject && localPlayer && m_AppliedEntityOverrides) {
+        ResetEntityRendering(env, worldObject, localPlayer);
+    }
+
+    ReleaseWorldRef(env);
+    m_WasEnabled = false;
+    m_AppliedEntityOverrides = false;
     env->PopLocalFrame(nullptr);
 }
 
@@ -250,4 +270,11 @@ void NoRender::ResetEntityRendering(JNIEnv* env, jobject worldObject, jobject lo
     }
 
     m_AppliedEntityOverrides = false;
+}
+
+void NoRender::ReleaseWorldRef(JNIEnv* env) {
+    if (env && m_LastWorld) {
+        env->DeleteGlobalRef(m_LastWorld);
+    }
+    m_LastWorld = nullptr;
 }

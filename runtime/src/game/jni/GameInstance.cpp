@@ -81,6 +81,7 @@ void GameInstance::Detach()
 			}
 		}
 		m_CachedClass.clear();
+		Class::ReleaseCachedRefs(env);
 	}
 
 	if (m_Jvm) {
@@ -88,6 +89,9 @@ void GameInstance::Detach()
 		m_Env = nullptr;
 		m_Jvmti = nullptr;
 	}
+
+	m_Initialized = false;
+	m_GameVersion = UNKNOWN;
 }
 
 bool GameInstance::PopulateClassCache()
@@ -239,7 +243,11 @@ Class* GameInstance::FindClass(const std::string& className) const
 
 	{
 		std::lock_guard<std::mutex> lock(m_CacheMutex);
-		const_cast<GameInstance*>(this)->m_CachedClass[normalizedClassName] = klass;
+		auto [it, inserted] = const_cast<GameInstance*>(this)->m_CachedClass.emplace(normalizedClassName, klass);
+		if (!inserted) {
+			env->DeleteGlobalRef(reinterpret_cast<jobject>(klass));
+			return it->second;
+		}
 	}
 
 	return klass;

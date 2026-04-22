@@ -172,6 +172,7 @@ public:
     bool IsSynchronous() const override { return true; }
     void TickSynchronous(void* env) override;
     void RenderOverlay(ImDrawList* drawList, float screenW, float screenH) override;
+    void ShutdownRuntime(void* env) override;
 
     static void OnEntityAttacked(JNIEnv* env, Player* attackedPlayer);
     static void OnLocalAttack(JNIEnv* env, Player* attackedPlayer);

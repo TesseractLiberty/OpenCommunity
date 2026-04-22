@@ -71,11 +71,13 @@ public:
 #ifdef _RUNTIME
     bool IsSynchronous() const override { return true; }
     void TickSynchronous(void* envPtr) override;
+    void ShutdownRuntime(void* envPtr) override;
 
 private:
     bool ShouldStopRender(JNIEnv* env, jobject entity, jobject localPlayer) const;
     void ApplyEntityRendering(JNIEnv* env, jobject worldObject, jobject localPlayer);
     void ResetEntityRendering(JNIEnv* env, jobject worldObject, jobject localPlayer);
+    void ReleaseWorldRef(JNIEnv* env);
 
     bool m_WasEnabled = false;
     bool m_AppliedEntityOverrides = false;

@@ -1959,6 +1959,39 @@ bool Target::IsTargetActivelyManaging() {
     return g_TargetActiveManages.load();
 }
 
+void Target::ShutdownRuntime(void* envPtr) {
+    auto* env = static_cast<JNIEnv*>(envPtr);
+    if (!env || env->PushLocalFrame(256) != 0) {
+        return;
+    }
+
+    jobject worldObject = Minecraft::GetTheWorld(env);
+    if (worldObject) {
+        auto* world = reinterpret_cast<World*>(worldObject);
+        const auto players = world->GetPlayerEntities(env);
+        for (auto* player : players) {
+            if (!player) {
+                continue;
+            }
+
+            try { player->Restore(env); } catch (...) {}
+            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+        }
+    }
+
+    g_TargetActiveManages.store(false);
+    DrainLocalAttackEvents();
+    ClearTargetHealthCache();
+    ClearBrowseCache();
+    ClearLockedTarget();
+    ClearInUse();
+    m_BrowseHitCount = 0;
+    m_LastBrowseSwitchTime = {};
+    m_WasEnabled = false;
+
+    env->PopLocalFrame(nullptr);
+}
+
 void Target::ManageHitboxes(JNIEnv* env, Player* localPlayer, World* world) {
     auto* config = Bridge::Get()->GetConfig();
     const std::string lockedTarget = GetLockedTarget();

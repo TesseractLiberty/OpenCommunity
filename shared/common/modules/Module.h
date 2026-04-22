@@ -90,6 +90,10 @@ public:
         (void)screenH;
     }
 
+    virtual void ShutdownRuntime(void* env) {
+        (void)env;
+    }
+
     virtual std::string GetTag() const { return ""; }
 
     bool IsInUse() const {

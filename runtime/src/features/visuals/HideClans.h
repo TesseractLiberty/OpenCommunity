@@ -110,6 +110,7 @@ public:
 #ifdef _RUNTIME
     bool IsSynchronous() const override { return true; }
     void TickSynchronous(void* env) override;
+    void ShutdownRuntime(void* env) override;
     static std::string GetCachedClanTag();
 #endif
 

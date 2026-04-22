@@ -101,9 +101,16 @@ bool Injector::ManualMap(HANDLE hProcess, const std::vector<uint8_t>& dllData) {
     if (!m_BaseAddress) return false;
 
     m_ImageSize = ntHeaders->OptionalHeader.SizeOfImage;
+    auto releaseMappedImage = [&]() {
+        if (m_BaseAddress) {
+            VirtualFreeEx(hProcess, (LPVOID)m_BaseAddress, 0, MEM_RELEASE);
+            m_BaseAddress = 0;
+        }
+        m_ImageSize = 0;
+    };
 
     if (!WriteProcessMemory(hProcess, (LPVOID)m_BaseAddress, dllData.data(), ntHeaders->OptionalHeader.SizeOfHeaders, nullptr)) {
-        VirtualFreeEx(hProcess, (LPVOID)m_BaseAddress, 0, MEM_RELEASE);
+        releaseMappedImage();
         return false;
     }
 
@@ -111,7 +118,7 @@ bool Injector::ManualMap(HANDLE hProcess, const std::vector<uint8_t>& dllData) {
     for (int i = 0; i < ntHeaders->FileHeader.NumberOfSections; i++) {
         if (sectionHeader[i].SizeOfRawData) {
             if (!WriteProcessMemory(hProcess, (LPVOID)(m_BaseAddress + sectionHeader[i].VirtualAddress), (LPVOID)((uintptr_t)dllData.data() + sectionHeader[i].PointerToRawData), sectionHeader[i].SizeOfRawData, nullptr)) {
-                VirtualFreeEx(hProcess, (LPVOID)m_BaseAddress, 0, MEM_RELEASE);
+                releaseMappedImage();
                 return false;
             }
         }
@@ -124,27 +131,36 @@ bool Injector::ManualMap(HANDLE hProcess, const std::vector<uint8_t>& dllData) {
 
     LPVOID remoteData = VirtualAllocEx(hProcess, nullptr, sizeof(MappingData), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!remoteData) {
-        VirtualFreeEx(hProcess, (LPVOID)m_BaseAddress, 0, MEM_RELEASE);
+        releaseMappedImage();
         return false;
     }
 
-    WriteProcessMemory(hProcess, remoteData, &data, sizeof(MappingData), nullptr);
+    if (!WriteProcessMemory(hProcess, remoteData, &data, sizeof(MappingData), nullptr)) {
+        VirtualFreeEx(hProcess, remoteData, 0, MEM_RELEASE);
+        releaseMappedImage();
+        return false;
+    }
 
     size_t shellcodeSize = (uintptr_t)ShellcodeEnd - (uintptr_t)Shellcode;
     LPVOID remoteShellcode = VirtualAllocEx(hProcess, nullptr, shellcodeSize, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     if (!remoteShellcode) {
         VirtualFreeEx(hProcess, remoteData, 0, MEM_RELEASE);
-        VirtualFreeEx(hProcess, (LPVOID)m_BaseAddress, 0, MEM_RELEASE);
+        releaseMappedImage();
         return false;
     }
 
-    WriteProcessMemory(hProcess, remoteShellcode, Shellcode, shellcodeSize, nullptr);
+    if (!WriteProcessMemory(hProcess, remoteShellcode, Shellcode, shellcodeSize, nullptr)) {
+        VirtualFreeEx(hProcess, remoteShellcode, 0, MEM_RELEASE);
+        VirtualFreeEx(hProcess, remoteData, 0, MEM_RELEASE);
+        releaseMappedImage();
+        return false;
+    }
 
     HANDLE hThread = CreateRemoteThread(hProcess, nullptr, 0, (LPTHREAD_START_ROUTINE)remoteShellcode, remoteData, 0, nullptr);
     if (!hThread) {
         VirtualFreeEx(hProcess, remoteShellcode, 0, MEM_RELEASE);
         VirtualFreeEx(hProcess, remoteData, 0, MEM_RELEASE);
-        VirtualFreeEx(hProcess, (LPVOID)m_BaseAddress, 0, MEM_RELEASE);
+        releaseMappedImage();
         return false;
     }
 
@@ -163,6 +179,10 @@ bool Injector::ManualMap(HANDLE hProcess, const std::vector<uint8_t>& dllData) {
 
 bool Injector::InjectFromMemory(DWORD pid, const std::vector<uint8_t>& dllData) {
     if (dllData.empty()) return false;
+
+    if (IsInjected()) {
+        Unload();
+    }
 
     HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
     if (!hProcess) return false;

@@ -42,6 +42,13 @@ static void SafeTickSynchronousFallback(ModuleManager* modules) {
     }
 }
 
+static void SafeShutdownRuntimeAll(ModuleManager* modules, void* env) {
+    __try {
+        modules->ShutdownRuntimeAll(env);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
 static DWORD MainThreadImpl() {
     Sleep(3000);
     
@@ -83,6 +90,12 @@ static DWORD MainThreadImpl() {
             SafeTickSynchronousFallback(modules);
         }
         Sleep(1);
+    }
+
+    if (g_Game && g_Game->IsInitialized()) {
+        if (auto* env = g_Game->GetCurrentEnv()) {
+            SafeShutdownRuntimeAll(modules, env);
+        }
     }
     
     RenderHook::Get()->Shutdown();

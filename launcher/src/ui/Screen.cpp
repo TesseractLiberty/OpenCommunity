@@ -219,6 +219,8 @@ namespace
 
     std::mutex g_PlayerHeadCacheMutex;
     std::unordered_map<std::string, PlayerHeadTextureEntry> g_PlayerHeadCache;
+    std::unordered_map<const unsigned char*, ID3D11ShaderResourceView*> g_ModuleIconCache;
+    std::unordered_map<std::string, ID3D11ShaderResourceView*> g_ModulePathIconCache;
     std::mutex g_ReleaseCheckMutex;
     std::atomic<bool> g_ReleaseCheckInProgress = false;
 
@@ -649,6 +651,38 @@ namespace
         }
 
         ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
+    }
+
+    void ReleaseShaderResource(ID3D11ShaderResourceView*& texture)
+    {
+        if (texture) {
+            texture->Release();
+            texture = nullptr;
+        }
+    }
+
+    void ReleaseLauncherTextureCaches()
+    {
+        {
+            std::lock_guard<std::mutex> lock(g_PlayerHeadCacheMutex);
+            for (auto& [cacheKey, entry] : g_PlayerHeadCache) {
+                (void)cacheKey;
+                ReleaseShaderResource(entry.texture);
+            }
+            g_PlayerHeadCache.clear();
+        }
+
+        for (auto& [imageData, texture] : g_ModuleIconCache) {
+            (void)imageData;
+            ReleaseShaderResource(texture);
+        }
+        g_ModuleIconCache.clear();
+
+        for (auto& [imagePath, texture] : g_ModulePathIconCache) {
+            (void)imagePath;
+            ReleaseShaderResource(texture);
+        }
+        g_ModulePathIconCache.clear();
     }
 
     bool FetchLatestReleaseJson(std::string& outBody, DWORD& outStatusCode, std::string& outError)
@@ -1656,7 +1690,9 @@ namespace
 
         HRGN region = CreateRectRgn(0, 0, width + 1, height + 1);
         if (region) {
-            SetWindowRgn(hwnd, region, TRUE);
+            if (SetWindowRgn(hwnd, region, TRUE) == 0) {
+                DeleteObject(region);
+            }
         }
     }
 
@@ -2715,7 +2751,10 @@ bool Screen::LoadTextureFromMemory(const unsigned char* data, unsigned int dataS
 }
 
 void Screen::LoadIconTextures() {
-    int w, h;
+    ReleaseIconTextures();
+
+    int w = 0;
+    int h = 0;
     LoadTextureFromMemory(icons::sword_icon_data, icons::sword_icon_data_size, &m_IconCombat, &w, &h, true);
     LoadTextureFromMemory(icons::running_icon_data, icons::running_icon_data_size, &m_IconMovement, &w, &h, true);
     LoadTextureFromMemory(icons::eye_icon_data, icons::eye_icon_data_size, &m_IconVisuals, &w, &h, true);
@@ -2920,6 +2959,7 @@ void Screen::Shutdown() {
     if (!m_Initialized) return;
     
     ReleaseIconTextures();
+    ReleaseLauncherTextureCaches();
     
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
@@ -3561,9 +3601,6 @@ void Screen::RenderHUDPreview() {
 }
 
 static void RenderModulesForCategory(ModuleCategory category, float areaWidth, float areaHeight, ImFont* fontBold, ImFont* fontBody, ID3D11Device* device) {
-    // Cache for module prefix icon textures (keyed by image data pointer)
-    static std::unordered_map<const unsigned char*, ID3D11ShaderResourceView*> s_ModuleIconCache;
-    static std::unordered_map<std::string, ID3D11ShaderResourceView*> s_ModulePathIconCache;
     static float s_CategoryScroll[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     auto& modules = ModuleManager::Get()->GetModules(category);
     if (modules.empty()) return;
@@ -3660,8 +3697,8 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
             ID3D11ShaderResourceView* moduleIcon = nullptr;
 
             if (mod->GetImageData() && mod->GetImageSize() > 0) {
-                auto it = s_ModuleIconCache.find(mod->GetImageData());
-                if (it == s_ModuleIconCache.end()) {
+                auto it = g_ModuleIconCache.find(mod->GetImageData());
+                if (it == g_ModuleIconCache.end()) {
                     int tw = 0, th = 0, tc = 0;
                     unsigned char* pixels = stbi_load_from_memory(mod->GetImageData(), mod->GetImageSize(), &tw, &th, &tc, 4);
                     ID3D11ShaderResourceView* srv = nullptr;
@@ -3685,28 +3722,30 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                             device->CreateShaderResourceView(tex, &srvDesc, &srv);
                             tex->Release();
                         }
+                    }
+                    if (pixels) {
                         stbi_image_free(pixels);
                     }
-                    s_ModuleIconCache[mod->GetImageData()] = srv;
-                    it = s_ModuleIconCache.find(mod->GetImageData());
+                    g_ModuleIconCache[mod->GetImageData()] = srv;
+                    it = g_ModuleIconCache.find(mod->GetImageData());
                 }
 
-                if (it != s_ModuleIconCache.end()) {
+                if (it != g_ModuleIconCache.end()) {
                     moduleIcon = it->second;
                 }
             } else if (!mod->GetImagePath().empty()) {
-                auto it = s_ModulePathIconCache.find(mod->GetImagePath());
-                if (it == s_ModulePathIconCache.end()) {
+                auto it = g_ModulePathIconCache.find(mod->GetImagePath());
+                if (it == g_ModulePathIconCache.end()) {
                     ID3D11ShaderResourceView* srv = nullptr;
                     const auto resolvedPath = ResolveModuleImagePath(mod->GetImagePath());
                     if (!resolvedPath.empty()) {
                         srv = CreateTextureFromFile(device, resolvedPath, true);
                     }
-                    s_ModulePathIconCache[mod->GetImagePath()] = srv;
-                    it = s_ModulePathIconCache.find(mod->GetImagePath());
+                    g_ModulePathIconCache[mod->GetImagePath()] = srv;
+                    it = g_ModulePathIconCache.find(mod->GetImagePath());
                 }
 
-                if (it != s_ModulePathIconCache.end()) {
+                if (it != g_ModulePathIconCache.end()) {
                     moduleIcon = it->second;
                 }
             }

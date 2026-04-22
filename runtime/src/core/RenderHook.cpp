@@ -604,6 +604,7 @@ void RenderHook::Shutdown() {
 
     if (g_fontsInitialized) {
         HUD::Get()->SetFonts(nullptr, nullptr, nullptr);
+        DamageIndicator::ReleaseRenderResources();
         ImGui_ImplOpenGL2_Shutdown();
         ImGui::DestroyContext();
         g_overlayRegularFont = nullptr;
@@ -614,6 +615,7 @@ void RenderHook::Shutdown() {
         g_overlaySanFranciscoBoldFont = nullptr;
         g_overlayInterRegularFont = nullptr;
         g_overlayInterBoldFont = nullptr;
+        DamageIndicator::SetFonts(nullptr, nullptr);
         Nametags::SetFont(nullptr);
         Notifications::SetFonts(nullptr, nullptr);
         g_fontsInitialized = false;

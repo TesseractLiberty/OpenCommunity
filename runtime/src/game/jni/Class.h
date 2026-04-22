@@ -11,4 +11,6 @@ public:
 	std::string GetName(JNIEnv* env);
 	Field* GetField(JNIEnv* env, const char* name, const char* sig, bool staticField = false);
 	Method* GetMethod(JNIEnv* env, const char* name, const char* sig, bool staticMethod = false);
+
+	static void ReleaseCachedRefs(JNIEnv* env);
 };

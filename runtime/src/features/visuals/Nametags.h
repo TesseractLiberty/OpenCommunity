@@ -43,6 +43,7 @@ public:
     bool IsSynchronous() const override { return true; }
     void TickSynchronous(void* envPtr) override;
     void RenderOverlay(ImDrawList* drawList, float screenW, float screenH) override;
+    void ShutdownRuntime(void* envPtr) override;
 
 private:
     static ImFont* s_SanFranciscoBoldFont;

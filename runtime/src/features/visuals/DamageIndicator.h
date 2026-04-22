@@ -105,6 +105,7 @@ private:
 #ifdef _RUNTIME
 public:
     static void SetFonts(ImFont* regular, ImFont* bold);
+    static void ReleaseRenderResources();
 
     void RenderOverlay(ImDrawList* drawList, float screenW, float screenH) override;
 

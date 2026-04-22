@@ -599,6 +599,17 @@ void DamageIndicator::SetFonts(ImFont* regular, ImFont* bold) {
     s_OpenSansBoldFont = bold ? bold : regular;
 }
 
+void DamageIndicator::ReleaseRenderResources() {
+    if (g_BackdropBlurTexture.textureId != 0) {
+        GLuint textureId = g_BackdropBlurTexture.textureId;
+        if (glIsTexture(textureId)) {
+            glDeleteTextures(1, &textureId);
+        }
+    }
+
+    g_BackdropBlurTexture = {};
+}
+
 void DamageIndicator::RenderOverlay(ImDrawList* drawList, float screenW, float screenH) {
     if (!IsEnabled() || !drawList || !g_Game || !g_Game->IsInitialized()) {
         return;
