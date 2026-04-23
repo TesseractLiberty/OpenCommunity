@@ -24,6 +24,33 @@ jobject ItemStack::GetItem(JNIEnv* env) {
     return method ? method->CallObjectMethod(env, this) : nullptr;
 }
 
+std::string ItemStack::GetDisplayName(JNIEnv* env) {
+    if (!env || !this || !g_Game || !g_Game->IsInitialized()) {
+        return {};
+    }
+
+    const std::string className = Mapper::Get("net/minecraft/item/ItemStack");
+    const std::string methodName = Mapper::Get("getStackDisplayName");
+    if (className.empty() || methodName.empty()) {
+        return {};
+    }
+
+    Class* itemStackClass = g_Game->FindClass(className);
+    Method* method = itemStackClass ? itemStackClass->GetMethod(env, methodName.c_str(), "()Ljava/lang/String;") : nullptr;
+    jstring displayName = method ? static_cast<jstring>(method->CallObjectMethod(env, this)) : nullptr;
+    if (!displayName) {
+        return {};
+    }
+
+    const char* chars = env->GetStringUTFChars(displayName, nullptr);
+    const std::string result = chars ? chars : "";
+    if (chars) {
+        env->ReleaseStringUTFChars(displayName, chars);
+    }
+    env->DeleteLocalRef(displayName);
+    return result;
+}
+
 bool ItemStack::IsArmor(JNIEnv* env) {
     if (!env || !this || !g_Game || !g_Game->IsInitialized()) {
         return false;

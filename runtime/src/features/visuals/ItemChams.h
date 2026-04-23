@@ -9,8 +9,11 @@
 #ifdef _RUNTIME
 #include "../../../../deps/imgui/imgui.h"
 
+#include <chrono>
 #include <jni.h>
 #include <mutex>
+#include <string>
+#include <unordered_map>
 #include <unordered_set>
 #endif
 
@@ -21,6 +24,8 @@ public:
         SetImagePrefix(module_icons::item_chams_icon_data, module_icons::item_chams_icon_data_size);
         AddOption(ModuleOption::Combo("Mode", { "ESP", "Draw" }, 0));
         AddOption(ModuleOption::SliderInt("Porcentagem", 0, 0, 100));
+        AddOption(ModuleOption::Toggle("Notify Drops", false));
+        AddOption(ModuleOption::Toggle("Notify Pickup", false));
     }
 
     void SyncToConfig(void* configPtr) override {
@@ -32,6 +37,8 @@ public:
         config->ItemChams.m_Enabled = IsEnabled();
         config->ItemChams.m_Mode = GetMode();
         config->ItemChams.m_Percentage = GetPercentageThreshold();
+        config->ItemChams.m_NotifyDrops = IsDropNotificationsEnabled();
+        config->ItemChams.m_NotifyPickups = IsPickupNotificationsEnabled();
         config->Modules.m_ItemChams = IsEnabled();
     }
 
@@ -44,6 +51,8 @@ public:
         SetEnabled(config->ItemChams.m_Enabled);
         SetMode(config->ItemChams.m_Mode);
         SetPercentageThreshold(config->ItemChams.m_Percentage);
+        SetDropNotificationsEnabled(config->ItemChams.m_NotifyDrops);
+        SetPickupNotificationsEnabled(config->ItemChams.m_NotifyPickups);
     }
 
 #ifdef _RUNTIME
@@ -55,21 +64,40 @@ public:
 private:
     void ApplyArmorFiltering(JNIEnv* env, jobject worldObject);
     void RestoreHiddenArmorItems(JNIEnv* env, jobject worldObject);
+    void UpdateItemNotifications(JNIEnv* env, jobject worldObject);
     void ReleaseWorldRef(JNIEnv* env);
     bool WasHiddenByModule(int identityHash) const;
     void RememberHiddenEntity(int identityHash);
     bool ForgetHiddenEntity(int identityHash);
     void ClearHiddenEntities();
+    void ClearItemTracking();
+
+    struct TrackedItemState {
+        std::chrono::steady_clock::time_point firstSeen{};
+        std::chrono::steady_clock::time_point lastSeen{};
+        double lastX = 0.0;
+        double lastY = 0.0;
+        double lastZ = 0.0;
+        double lastLocalDistanceSq = 0.0;
+        int percentage = 0;
+        std::string itemName;
+    };
 
     mutable std::mutex m_HiddenMutex;
     std::unordered_set<int> m_HiddenEntityIds;
+    std::unordered_map<int, TrackedItemState> m_TrackedItems;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_RecentDropNotifications;
+    std::unordered_map<std::string, std::chrono::steady_clock::time_point> m_RecentPickupNotifications;
     bool m_WasEnabled = false;
+    bool m_ItemTrackerWarmed = false;
     jobject m_LastWorld = nullptr;
 #endif
 
 private:
     static constexpr size_t kModeOption = 0;
     static constexpr size_t kPercentageOption = 1;
+    static constexpr size_t kNotifyDropsOption = 2;
+    static constexpr size_t kNotifyPickupOption = 3;
     static constexpr int kModeEsp = 0;
     static constexpr int kModeDraw = 1;
 
@@ -86,6 +114,14 @@ private:
         return m_Options.size() > kPercentageOption ? (std::clamp)(m_Options[kPercentageOption].intValue, 0, 100) : 0;
     }
 
+    bool IsDropNotificationsEnabled() const {
+        return m_Options.size() > kNotifyDropsOption && m_Options[kNotifyDropsOption].boolValue;
+    }
+
+    bool IsPickupNotificationsEnabled() const {
+        return m_Options.size() > kNotifyPickupOption && m_Options[kNotifyPickupOption].boolValue;
+    }
+
     void SetMode(int value) {
         if (m_Options.size() > kModeOption) {
             m_Options[kModeOption].comboIndex = value == kModeDraw ? kModeDraw : kModeEsp;
@@ -95,6 +131,18 @@ private:
     void SetPercentageThreshold(int value) {
         if (m_Options.size() > kPercentageOption) {
             m_Options[kPercentageOption].intValue = (std::clamp)(value, 0, 100);
+        }
+    }
+
+    void SetDropNotificationsEnabled(bool value) {
+        if (m_Options.size() > kNotifyDropsOption) {
+            m_Options[kNotifyDropsOption].boolValue = value;
+        }
+    }
+
+    void SetPickupNotificationsEnabled(bool value) {
+        if (m_Options.size() > kNotifyPickupOption) {
+            m_Options[kNotifyPickupOption].boolValue = value;
         }
     }
 };

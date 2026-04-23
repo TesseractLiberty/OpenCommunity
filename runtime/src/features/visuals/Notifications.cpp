@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cfloat>
@@ -49,6 +50,28 @@ namespace {
     ImFont* g_InterRegularFont = nullptr;
     ImFont* g_InterBoldFont = nullptr;
 
+    struct RichTextRun {
+        std::string text;
+        bool bold = false;
+    };
+
+    enum class RichTextPartType {
+        Word,
+        Space,
+        NewLine
+    };
+
+    struct RichTextPart {
+        std::string text;
+        bool bold = false;
+        RichTextPartType type = RichTextPartType::Word;
+    };
+
+    struct RichTextMetrics {
+        float width = 0.0f;
+        float height = 0.0f;
+    };
+
     float Clamp01(float value) {
         return (value < 0.0f) ? 0.0f : ((value > 1.0f) ? 1.0f : value);
     }
@@ -79,11 +102,183 @@ namespace {
         return font->CalcTextSizeA(fontSize, FLT_MAX, wrapWidth, text.c_str());
     }
 
+    std::vector<RichTextRun> ParseRichTextRuns(const std::string& text) {
+        std::vector<RichTextRun> runs;
+        std::string buffer;
+        bool bold = false;
+
+        for (size_t index = 0; index < text.size(); ++index) {
+            if ((index + 1) < text.size() && text[index] == '*' && text[index + 1] == '*') {
+                if (!buffer.empty()) {
+                    runs.push_back({ buffer, bold });
+                    buffer.clear();
+                }
+
+                bold = !bold;
+                ++index;
+                continue;
+            }
+
+            buffer.push_back(text[index]);
+        }
+
+        if (!buffer.empty()) {
+            runs.push_back({ buffer, bold });
+        }
+
+        return runs;
+    }
+
+    std::vector<RichTextPart> BuildRichTextParts(const std::string& text) {
+        std::vector<RichTextPart> parts;
+        const auto runs = ParseRichTextRuns(text);
+
+        for (const auto& run : runs) {
+            std::string buffer;
+            RichTextPartType currentType = RichTextPartType::Word;
+
+            auto flushBuffer = [&]() {
+                if (!buffer.empty()) {
+                    parts.push_back({ buffer, run.bold, currentType });
+                    buffer.clear();
+                }
+            };
+
+            for (unsigned char rawCh : run.text) {
+                const char ch = static_cast<char>(rawCh);
+                if (ch == '\n') {
+                    flushBuffer();
+                    parts.push_back({ "\n", run.bold, RichTextPartType::NewLine });
+                    continue;
+                }
+
+                const bool isWhitespace = std::isspace(rawCh) != 0;
+                const RichTextPartType nextType = isWhitespace ? RichTextPartType::Space : RichTextPartType::Word;
+                if (!buffer.empty() && nextType != currentType) {
+                    flushBuffer();
+                }
+
+                currentType = nextType;
+                buffer.push_back(ch);
+            }
+
+            flushBuffer();
+        }
+
+        return parts;
+    }
+
+    ImFont* ResolveRichTextFont(bool bold) {
+        if (bold && g_InterBoldFont) {
+            return g_InterBoldFont;
+        }
+
+        if (g_InterRegularFont) {
+            return g_InterRegularFont;
+        }
+
+        return ImGui::GetFont();
+    }
+
+    float GetRichTextLineHeight(float fontSize) {
+        const ImVec2 regular = CalcTextSize(ResolveRichTextFont(false), fontSize, "Ag");
+        const ImVec2 bold = CalcTextSize(ResolveRichTextFont(true), fontSize, "Ag");
+        return (std::max)(regular.y, bold.y);
+    }
+
+    RichTextMetrics CalcRichTextMetrics(const std::string& text, float fontSize, float wrapWidth) {
+        const auto parts = BuildRichTextParts(text);
+        const float lineHeight = GetRichTextLineHeight(fontSize);
+        float currentLineWidth = 0.0f;
+        float maxLineWidth = 0.0f;
+        float totalHeight = lineHeight;
+
+        for (const auto& part : parts) {
+            if (part.type == RichTextPartType::NewLine) {
+                maxLineWidth = (std::max)(maxLineWidth, currentLineWidth);
+                currentLineWidth = 0.0f;
+                totalHeight += lineHeight;
+                continue;
+            }
+
+            const ImVec2 partSize = CalcTextSize(ResolveRichTextFont(part.bold), fontSize, part.text);
+            if (part.type == RichTextPartType::Space) {
+                if (currentLineWidth <= 0.0f) {
+                    continue;
+                }
+
+                if (wrapWidth > 0.0f && (currentLineWidth + partSize.x) > wrapWidth) {
+                    maxLineWidth = (std::max)(maxLineWidth, currentLineWidth);
+                    currentLineWidth = 0.0f;
+                    totalHeight += lineHeight;
+                    continue;
+                }
+            } else if (wrapWidth > 0.0f && currentLineWidth > 0.0f && (currentLineWidth + partSize.x) > wrapWidth) {
+                maxLineWidth = (std::max)(maxLineWidth, currentLineWidth);
+                currentLineWidth = 0.0f;
+                totalHeight += lineHeight;
+            }
+
+            currentLineWidth += partSize.x;
+            maxLineWidth = (std::max)(maxLineWidth, currentLineWidth);
+        }
+
+        return { maxLineWidth, totalHeight };
+    }
+
+    void DrawRichText(ImDrawList* drawList, const ImVec2& position, float fontSize, ImU32 color, const std::string& text, float wrapWidth) {
+        if (!drawList || text.empty()) {
+            return;
+        }
+
+        const auto parts = BuildRichTextParts(text);
+        const float lineHeight = GetRichTextLineHeight(fontSize);
+        const float startX = position.x;
+        float cursorX = startX;
+        float cursorY = position.y;
+
+        for (const auto& part : parts) {
+            if (part.type == RichTextPartType::NewLine) {
+                cursorX = startX;
+                cursorY += lineHeight;
+                continue;
+            }
+
+            ImFont* font = ResolveRichTextFont(part.bold);
+            const ImVec2 partSize = CalcTextSize(font, fontSize, part.text);
+            const float currentLineWidth = cursorX - startX;
+
+            if (part.type == RichTextPartType::Space) {
+                if (currentLineWidth <= 0.0f) {
+                    continue;
+                }
+
+                if (wrapWidth > 0.0f && (currentLineWidth + partSize.x) > wrapWidth) {
+                    cursorX = startX;
+                    cursorY += lineHeight;
+                    continue;
+                }
+
+                cursorX += partSize.x;
+                continue;
+            }
+
+            if (wrapWidth > 0.0f && currentLineWidth > 0.0f && (currentLineWidth + partSize.x) > wrapWidth) {
+                cursorX = startX;
+                cursorY += lineHeight;
+            }
+
+            drawList->AddText(font, fontSize, ImVec2(cursorX, cursorY), color, part.text.c_str());
+            cursorX += partSize.x;
+        }
+    }
+
     float CalcNotificationHeight(ImFont* titleFont, ImFont* messageFont, const NotificationEntry& notification) {
+        (void)messageFont;
         const float textWidth = kCardWidth - (kCardPadding * 2.0f) - kIconSize - kColumnGap;
         const ImVec2 titleSize = CalcTextSize(titleFont, 14.0f, notification.title, textWidth);
-        const ImVec2 messageSize = CalcTextSize(messageFont, 12.0f, notification.message, textWidth);
-        const float textHeight = titleSize.y + 1.0f + messageSize.y;
+        const RichTextMetrics messageSize = CalcRichTextMetrics(notification.message, 12.0f, textWidth);
+        const float textHeight = titleSize.y + 1.0f + messageSize.height;
         return (std::max)(kIconSize + (kCardPadding * 2.0f), textHeight + (kCardPadding * 2.0f));
     }
 
@@ -249,14 +444,13 @@ namespace {
             alpha);
 
         ImFont* titleFont = g_InterBoldFont ? g_InterBoldFont : ImGui::GetFont();
-        ImFont* messageFont = g_InterRegularFont ? g_InterRegularFont : ImGui::GetFont();
         const float textX = iconMin.x + kIconSize + kColumnGap;
         const float textWidth = kCardWidth - (kCardPadding * 2.0f) - kIconSize - kColumnGap;
         const ImVec2 titlePos(textX, min.y + kCardPadding - 1.0f);
         const ImVec2 messagePos(textX, min.y + kCardPadding + 18.0f);
 
         drawList->AddText(titleFont, 14.0f, titlePos, titleColor, notification.title.c_str(), nullptr, textWidth);
-        drawList->AddText(messageFont, 12.0f, messagePos, messageColor, notification.message.c_str(), nullptr, textWidth);
+        DrawRichText(drawList, messagePos, 12.0f, messageColor, notification.message, textWidth);
     }
 }
 
