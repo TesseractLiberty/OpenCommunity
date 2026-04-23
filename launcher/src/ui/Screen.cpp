@@ -19,6 +19,7 @@
 #include "../../../deps/imgui/images/ui/message_information_icon.h"
 #include "../../../deps/imgui/images/ui/command_refresh_icon.h"
 #include "../../../deps/imgui/images/ui/color_theme_icon.h"
+#include "../../../deps/imgui/images/enemy_info/armor_icons.h"
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_STATIC
 #include "../../../deps/imgui/stb_image.h"
@@ -47,6 +48,18 @@ namespace
     constexpr const char* kProjectReleasesUrl = "https://github.com/TesseractLiberty/OpenCommunity/releases";
     constexpr wchar_t kGitHubApiHost[] = L"api.github.com";
     constexpr wchar_t kGitHubLatestReleasePath[] = L"/repos/TesseractLiberty/OpenCommunity/releases/latest";
+    constexpr wchar_t kLauncherWindowClassName[] = L"OpenCommunity";
+    constexpr wchar_t kEnemyInfoWindowClassName[] = L"OpenCommunityEnemyInfo";
+    constexpr wchar_t kEnemyInfoWindowTitle[] = L"OpenCommunity Enemy Info";
+    constexpr int kEnemyInfoArmorSlots = 4;
+    constexpr int kEnemyInfoCardPreviewRows = 4;
+    constexpr float kEnemyInfoCompactRowHeight = 48.0f;
+    constexpr float kEnemyInfoRegularRowHeight = 42.0f;
+    constexpr std::array<int, kEnemyInfoArmorSlots> kEnemyInfoDiamondMaxDurability = { 363, 528, 495, 429 };
+    constexpr ImU32 kEnemyInfoDurabilityBlue = IM_COL32(72, 196, 255, 255);
+    constexpr ImU32 kEnemyInfoDurabilityGreen = IM_COL32(58, 222, 94, 255);
+    constexpr ImU32 kEnemyInfoDurabilityYellow = IM_COL32(255, 219, 72, 255);
+    constexpr ImU32 kEnemyInfoDurabilityRed = IM_COL32(255, 76, 76, 255);
 
     enum class ReleaseCheckState {
         Idle,
@@ -224,6 +237,7 @@ namespace
     std::unordered_map<std::string, PlayerHeadTextureEntry> g_PlayerHeadCache;
     std::unordered_map<const unsigned char*, ID3D11ShaderResourceView*> g_ModuleIconCache;
     std::unordered_map<std::string, ID3D11ShaderResourceView*> g_ModulePathIconCache;
+    std::unordered_map<const unsigned char*, ID3D11ShaderResourceView*> g_SharedMemoryTextureCache;
     std::mutex g_ReleaseCheckMutex;
     std::atomic<bool> g_ReleaseCheckInProgress = false;
 
@@ -661,6 +675,93 @@ namespace
         ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
     }
 
+    void ClearEnemyInfoSecondApplicationState(ModuleConfig* config)
+    {
+        if (!config) {
+            return;
+        }
+
+        config->EnemyInfoList.m_SecondApplicationOpen = false;
+        config->EnemyInfoList.m_SecondApplicationPid = 0;
+        config->EnemyInfoList.m_SecondApplicationWindow = 0;
+    }
+
+    bool IsEnemyInfoSecondApplicationAlive(const ModuleConfig* config)
+    {
+        if (!config || !config->EnemyInfoList.m_SecondApplicationOpen ||
+            config->EnemyInfoList.m_SecondApplicationPid == 0 ||
+            config->EnemyInfoList.m_SecondApplicationWindow == 0) {
+            return false;
+        }
+
+        const HWND windowHandle = reinterpret_cast<HWND>(static_cast<ULONG_PTR>(config->EnemyInfoList.m_SecondApplicationWindow));
+        if (!windowHandle || !IsWindow(windowHandle)) {
+            return false;
+        }
+
+        DWORD processId = 0;
+        GetWindowThreadProcessId(windowHandle, &processId);
+        return processId != 0 && processId == config->EnemyInfoList.m_SecondApplicationPid;
+    }
+
+    bool FocusEnemyInfoSecondApplication(ModuleConfig* config)
+    {
+        if (!IsEnemyInfoSecondApplicationAlive(config)) {
+            ClearEnemyInfoSecondApplicationState(config);
+            return false;
+        }
+
+        const HWND windowHandle = reinterpret_cast<HWND>(static_cast<ULONG_PTR>(config->EnemyInfoList.m_SecondApplicationWindow));
+        ShowWindow(windowHandle, SW_RESTORE);
+        BringWindowToTop(windowHandle);
+        SetForegroundWindow(windowHandle);
+        SetActiveWindow(windowHandle);
+        return true;
+    }
+
+    std::wstring GetCurrentExecutablePath()
+    {
+        wchar_t executablePath[MAX_PATH] = {};
+        if (GetModuleFileNameW(nullptr, executablePath, MAX_PATH) == 0) {
+            return {};
+        }
+
+        return executablePath;
+    }
+
+    bool LaunchEnemyInfoSecondApplication()
+    {
+        const std::wstring executablePath = GetCurrentExecutablePath();
+        if (executablePath.empty()) {
+            return false;
+        }
+
+        STARTUPINFOW startupInfo = {};
+        startupInfo.cb = sizeof(startupInfo);
+
+        PROCESS_INFORMATION processInfo = {};
+        std::wstring commandLine = L"\"" + executablePath + L"\" --enemy-info-window";
+        const BOOL created = CreateProcessW(
+            executablePath.c_str(),
+            commandLine.data(),
+            nullptr,
+            nullptr,
+            FALSE,
+            0,
+            nullptr,
+            nullptr,
+            &startupInfo,
+            &processInfo);
+
+        if (!created) {
+            return false;
+        }
+
+        CloseHandle(processInfo.hThread);
+        CloseHandle(processInfo.hProcess);
+        return true;
+    }
+
     void ReleaseShaderResource(ID3D11ShaderResourceView*& texture)
     {
         if (texture) {
@@ -691,6 +792,12 @@ namespace
             ReleaseShaderResource(texture);
         }
         g_ModulePathIconCache.clear();
+
+        for (auto& [imageData, texture] : g_SharedMemoryTextureCache) {
+            (void)imageData;
+            ReleaseShaderResource(texture);
+        }
+        g_SharedMemoryTextureCache.clear();
     }
 
     bool FetchLatestReleaseJson(std::string& outBody, DWORD& outStatusCode, std::string& outError)
@@ -1622,6 +1729,572 @@ namespace
         return {};
     }
 
+    ID3D11ShaderResourceView* GetCachedMemoryTexture(ID3D11Device* device, const unsigned char* data, unsigned int dataSize)
+    {
+        if (!device || !data || dataSize == 0) {
+            return nullptr;
+        }
+
+        auto textureIt = g_SharedMemoryTextureCache.find(data);
+        if (textureIt != g_SharedMemoryTextureCache.end()) {
+            return textureIt->second;
+        }
+
+        int width = 0;
+        int height = 0;
+        int channels = 0;
+        unsigned char* pixels = stbi_load_from_memory(data, static_cast<int>(dataSize), &width, &height, &channels, 4);
+        ID3D11ShaderResourceView* texture = nullptr;
+        if (pixels && width > 0 && height > 0) {
+            texture = CreateTextureFromPixels(device, pixels, width, height);
+        }
+        if (pixels) {
+            stbi_image_free(pixels);
+        }
+
+        g_SharedMemoryTextureCache[data] = texture;
+        return texture;
+    }
+
+    struct EnemyInfoIconSource {
+        const unsigned char* data = nullptr;
+        unsigned int size = 0;
+    };
+
+    int GetEnemyInfoDurabilityPercent(int remainingDurability, int maxDurability)
+    {
+        if (remainingDurability <= 0 || maxDurability <= 0) {
+            return 0;
+        }
+
+        const float pct = (std::clamp)(
+            (static_cast<float>(remainingDurability) / static_cast<float>(maxDurability)) * 100.0f,
+            0.0f,
+            100.0f);
+        return (std::clamp)(static_cast<int>(std::round(pct)), 0, 100);
+    }
+
+    int GetEnemyInfoDamagePercent(int remainingDurability, int maxDurability)
+    {
+        if (maxDurability <= 0) {
+            return 100;
+        }
+
+        const int safeRemaining = (std::clamp)(remainingDurability, 0, maxDurability);
+        return (std::clamp)(100 - GetEnemyInfoDurabilityPercent(safeRemaining, maxDurability), 0, 100);
+    }
+
+    EnemyInfoIconSource GetEnemyInfoArmorIconSource(int armorIndex, int remainingDurability, int maxDurability)
+    {
+        static const EnemyInfoIconSource kVanilla[kEnemyInfoArmorSlots] = {
+            { enemy_info_icons::vanilla_helmet_data, enemy_info_icons::vanilla_helmet_data_size },
+            { enemy_info_icons::vanilla_chestplate_data, enemy_info_icons::vanilla_chestplate_data_size },
+            { enemy_info_icons::vanilla_leggings_data, enemy_info_icons::vanilla_leggings_data_size },
+            { enemy_info_icons::vanilla_boots_data, enemy_info_icons::vanilla_boots_data_size }
+        };
+        static const EnemyInfoIconSource kGreen[kEnemyInfoArmorSlots] = {
+            { enemy_info_icons::green_helmet_data, enemy_info_icons::green_helmet_data_size },
+            { enemy_info_icons::green_chestplate_data, enemy_info_icons::green_chestplate_data_size },
+            { enemy_info_icons::green_leggings_data, enemy_info_icons::green_leggings_data_size },
+            { enemy_info_icons::green_boots_data, enemy_info_icons::green_boots_data_size }
+        };
+        static const EnemyInfoIconSource kYellow[kEnemyInfoArmorSlots] = {
+            { enemy_info_icons::yellow_helmet_data, enemy_info_icons::yellow_helmet_data_size },
+            { enemy_info_icons::yellow_chestplate_data, enemy_info_icons::yellow_chestplate_data_size },
+            { enemy_info_icons::yellow_leggings_data, enemy_info_icons::yellow_leggings_data_size },
+            { enemy_info_icons::yellow_boots_data, enemy_info_icons::yellow_boots_data_size }
+        };
+        static const EnemyInfoIconSource kRed[kEnemyInfoArmorSlots] = {
+            { enemy_info_icons::red_helmet_data, enemy_info_icons::red_helmet_data_size },
+            { enemy_info_icons::red_chestplate_data, enemy_info_icons::red_chestplate_data_size },
+            { enemy_info_icons::red_leggings_data, enemy_info_icons::red_leggings_data_size },
+            { enemy_info_icons::red_boots_data, enemy_info_icons::red_boots_data_size }
+        };
+
+        armorIndex = (std::clamp)(armorIndex, 0, kEnemyInfoArmorSlots - 1);
+        if (remainingDurability <= 0 || maxDurability <= 0) {
+            return kRed[armorIndex];
+        }
+
+        const int damagePct = GetEnemyInfoDamagePercent(remainingDurability, maxDurability);
+        if (damagePct <= 19) {
+            return kVanilla[armorIndex];
+        }
+        if (damagePct <= 50) {
+            return kGreen[armorIndex];
+        }
+        if (damagePct <= 85) {
+            return kYellow[armorIndex];
+        }
+        return kRed[armorIndex];
+    }
+
+    int GetEnemyInfoVisibleRowCount(const ModuleConfig* config, int rowLimit)
+    {
+        if (rowLimit <= 0) {
+            return 0;
+        }
+
+        if (!config) {
+            return 1;
+        }
+
+        const int entryCount = (std::clamp)(config->EnemyInfoList.m_EntryCount, 0, static_cast<int>(std::size(config->EnemyInfoList.m_Entries)));
+        return entryCount > 0 ? (std::min)(entryCount, rowLimit) : 1;
+    }
+
+    float GetEnemyInfoPreviewHeight(const ModuleConfig* config, int rowLimit, bool compact)
+    {
+        const float headerHeight = compact ? 78.0f : 88.0f;
+        const float rowHeight = compact ? kEnemyInfoCompactRowHeight : kEnemyInfoRegularRowHeight;
+        const float rowGap = compact ? 8.0f : 10.0f;
+        const float footerHeight = compact ? 18.0f : 26.0f;
+        const int visibleRows = GetEnemyInfoVisibleRowCount(config, rowLimit);
+        return headerHeight + visibleRows * rowHeight + (visibleRows > 0 ? (visibleRows - 1) * rowGap : 0.0f) + footerHeight;
+    }
+
+    ImU32 GetEnemyInfoDurabilityColor(int remainingDurability, int maxDurability)
+    {
+        if (remainingDurability <= 0 || maxDurability <= 0) {
+            return kEnemyInfoDurabilityRed;
+        }
+
+        const int damagePct = GetEnemyInfoDamagePercent(remainingDurability, maxDurability);
+        if (damagePct <= 19) {
+            return kEnemyInfoDurabilityBlue;
+        }
+        if (damagePct <= 50) {
+            return kEnemyInfoDurabilityGreen;
+        }
+        if (damagePct <= 85) {
+            return kEnemyInfoDurabilityYellow;
+        }
+        return kEnemyInfoDurabilityRed;
+    }
+
+    int GetEnemyInfoSetDamagePercent(const ModuleConfig::EnemyInfoListEntry& entry)
+    {
+        int damage = 0;
+        int maximum = 0;
+        for (int armorIndex = 0; armorIndex < kEnemyInfoArmorSlots; ++armorIndex) {
+            const int slotMaximum = entry.m_HasArmor[armorIndex]
+                ? (std::max)(kEnemyInfoDiamondMaxDurability[armorIndex], entry.m_MaxDurability[armorIndex])
+                : kEnemyInfoDiamondMaxDurability[armorIndex];
+            const int slotRemaining = entry.m_HasArmor[armorIndex]
+                ? (std::clamp)(entry.m_RemainingDurability[armorIndex], 0, slotMaximum)
+                : 0;
+            damage += slotMaximum - slotRemaining;
+            maximum += slotMaximum;
+        }
+
+        return maximum > 0
+            ? (std::clamp)(static_cast<int>(std::round((static_cast<float>(damage) / static_cast<float>(maximum)) * 100.0f)), 0, 100)
+            : 100;
+    }
+
+    ImU32 GetEnemyInfoSetBorderColor(const ModuleConfig::EnemyInfoListEntry& entry)
+    {
+        const int damagePct = GetEnemyInfoSetDamagePercent(entry);
+        if (damagePct <= 19) {
+            return kEnemyInfoDurabilityBlue;
+        }
+        if (damagePct <= 50) {
+            return kEnemyInfoDurabilityGreen;
+        }
+        if (damagePct <= 85) {
+            return kEnemyInfoDurabilityYellow;
+        }
+        return kEnemyInfoDurabilityRed;
+    }
+
+    bool TryConsumeMinecraftColorCode(const std::string& text, size_t index, char& colorCode, size_t& consumed)
+    {
+        colorCode = 0;
+        consumed = 0;
+        if (index >= text.size()) {
+            return false;
+        }
+
+        const unsigned char current = static_cast<unsigned char>(text[index]);
+        if (current == 0xA7 && index + 1 < text.size()) {
+            colorCode = text[index + 1];
+            consumed = 2;
+            return true;
+        }
+
+        if (current == 0xC2 && index + 2 < text.size() && static_cast<unsigned char>(text[index + 1]) == 0xA7) {
+            colorCode = text[index + 2];
+            consumed = 3;
+            return true;
+        }
+
+        return false;
+    }
+
+    ImU32 MinecraftColorToU32(char code, ImU32 fallback)
+    {
+        switch (static_cast<char>(std::tolower(static_cast<unsigned char>(code)))) {
+        case '0': return IM_COL32(0, 0, 0, 255);
+        case '1': return IM_COL32(0, 0, 170, 255);
+        case '2': return IM_COL32(0, 170, 0, 255);
+        case '3': return IM_COL32(0, 170, 170, 255);
+        case '4': return IM_COL32(170, 0, 0, 255);
+        case '5': return IM_COL32(170, 0, 170, 255);
+        case '6': return IM_COL32(255, 170, 0, 255);
+        case '7': return IM_COL32(170, 170, 170, 255);
+        case '8': return IM_COL32(85, 85, 85, 255);
+        case '9': return IM_COL32(85, 85, 255, 255);
+        case 'a': return IM_COL32(85, 255, 85, 255);
+        case 'b': return IM_COL32(85, 255, 255, 255);
+        case 'c': return IM_COL32(255, 85, 85, 255);
+        case 'd': return IM_COL32(255, 85, 255, 255);
+        case 'e': return IM_COL32(255, 255, 85, 255);
+        case 'f': return IM_COL32(255, 255, 255, 255);
+        case 'r': return fallback;
+        default: return fallback;
+        }
+    }
+
+    std::string FitPlainTextToWidth(ImFont* font, float fontSize, std::string text, float maxWidth)
+    {
+        if (!font || text.empty() || maxWidth <= 0.0f ||
+            CalcTextSizeWithFont(font, text.c_str(), fontSize).x <= maxWidth) {
+            return text;
+        }
+
+        while (text.size() > 4) {
+            text.resize(text.size() - 1);
+            const std::string candidate = text + "...";
+            if (CalcTextSizeWithFont(font, candidate.c_str(), fontSize).x <= maxWidth) {
+                return candidate;
+            }
+        }
+
+        return "...";
+    }
+
+    float DrawMinecraftFormattedText(ImDrawList* drawList, ImFont* font, float fontSize, ImVec2 pos, const std::string& text, ImU32 defaultColor)
+    {
+        if (!drawList || !font || text.empty()) {
+            return 0.0f;
+        }
+
+        ImU32 currentColor = defaultColor;
+        float cursorX = pos.x;
+        for (size_t index = 0; index < text.size();) {
+            char colorCode = 0;
+            size_t consumed = 0;
+            if (TryConsumeMinecraftColorCode(text, index, colorCode, consumed)) {
+                currentColor = MinecraftColorToU32(colorCode, defaultColor);
+                index += consumed;
+                continue;
+            }
+
+            size_t next = index + 1;
+            while (next < text.size()) {
+                char nextCode = 0;
+                size_t nextConsumed = 0;
+                if (TryConsumeMinecraftColorCode(text, next, nextCode, nextConsumed)) {
+                    break;
+                }
+                ++next;
+            }
+
+            const std::string segment = text.substr(index, next - index);
+            drawList->AddText(font, fontSize, ImVec2(cursorX, pos.y), currentColor, segment.c_str());
+            cursorX += CalcTextSizeWithFont(font, segment.c_str(), fontSize).x;
+            index = next;
+        }
+
+        return cursorX - pos.x;
+    }
+
+    void DrawEnemyInfoSubtitle(
+        ImDrawList* drawList,
+        ImFont* bodyFont,
+        ImFont* boldFont,
+        float bodyFontSize,
+        const ImVec2& pos,
+        float maxWidth,
+        const ModuleConfig* config,
+        bool enabled)
+    {
+        if (!drawList || !bodyFont || !boldFont || maxWidth <= 0.0f) {
+            return;
+        }
+
+        const bool hasTrackedClan = config &&
+            (config->EnemyInfoList.m_TrackedClanFormatted[0] != '\0' ||
+             config->EnemyInfoList.m_TrackedClan[0] != '\0');
+        if (hasTrackedClan) {
+            constexpr const char* prefix = "Tracking ";
+            drawList->AddText(bodyFont, bodyFontSize, pos, color::GetSecondaryTextU32(), prefix);
+
+            const float prefixWidth = CalcTextSizeWithFont(bodyFont, prefix, bodyFontSize).x;
+            const char* trackedClan = config->EnemyInfoList.m_TrackedClanFormatted[0] != '\0'
+                ? config->EnemyInfoList.m_TrackedClanFormatted
+                : config->EnemyInfoList.m_TrackedClan;
+            DrawMinecraftFormattedText(
+                drawList,
+                boldFont,
+                bodyFontSize + 1.0f,
+                ImVec2(pos.x + prefixWidth, pos.y - 1.0f),
+                trackedClan,
+                color::GetLinkU32());
+            return;
+        }
+
+        const std::string subtitle = enabled
+            ? "Attack a rival player to start tracking the enemy clan."
+            : "Enable the module and attack a rival player.";
+        const std::string fittedSubtitle = FitPlainTextToWidth(bodyFont, bodyFontSize, subtitle, maxWidth);
+        drawList->AddText(bodyFont, bodyFontSize, pos, color::GetSecondaryTextU32(), fittedSubtitle.c_str());
+    }
+
+    void DrawEnemyInfoArmorTile(
+        ImDrawList* drawList,
+        ID3D11Device* device,
+        ImFont* font,
+        float fontSize,
+        const ImVec2& origin,
+        float iconSize,
+        int armorIndex,
+        const ModuleConfig::EnemyInfoListEntry& entry)
+    {
+        if (!drawList || !font || armorIndex < 0 || armorIndex >= kEnemyInfoArmorSlots) {
+            return;
+        }
+
+        const ImVec2 iconMin(origin.x, origin.y);
+        const ImVec2 iconMax(origin.x + iconSize, origin.y + iconSize);
+        drawList->AddRectFilled(iconMin, iconMax, color::GetPanelActiveU32(0.88f), 5.0f);
+        drawList->AddRect(iconMin, iconMax, color::GetBorderU32(0.78f), 5.0f, 0, 1.0f);
+
+        if (entry.m_HasArmor[armorIndex]) {
+            const EnemyInfoIconSource source = GetEnemyInfoArmorIconSource(
+                armorIndex,
+                entry.m_RemainingDurability[armorIndex],
+                entry.m_MaxDurability[armorIndex]);
+            if (ID3D11ShaderResourceView* iconTexture = GetCachedMemoryTexture(device, source.data, source.size)) {
+                drawList->AddImage(
+                    reinterpret_cast<ImTextureID>(iconTexture),
+                    ImVec2(iconMin.x + 2.0f, iconMin.y + 2.0f),
+                    ImVec2(iconMax.x - 2.0f, iconMax.y - 2.0f));
+            }
+        } else {
+            const ImVec2 crossA(iconMin.x + 4.0f, iconMin.y + 4.0f);
+            const ImVec2 crossB(iconMax.x - 4.0f, iconMax.y - 4.0f);
+            drawList->AddLine(crossA, crossB, color::GetDangerU32(), 1.8f);
+            drawList->AddLine(ImVec2(crossA.x, crossB.y), ImVec2(crossB.x, crossA.y), color::GetDangerU32(), 1.8f);
+        }
+
+        const char* durabilityText = "0%";
+        char durabilityBuffer[16] = {};
+        if (entry.m_HasArmor[armorIndex]) {
+            snprintf(
+                durabilityBuffer,
+                sizeof(durabilityBuffer),
+                "%d%%",
+                GetEnemyInfoDurabilityPercent(entry.m_RemainingDurability[armorIndex], entry.m_MaxDurability[armorIndex]));
+            durabilityText = durabilityBuffer;
+        }
+
+        const ImVec2 textSize = CalcTextSizeWithFont(font, durabilityText, fontSize);
+        const ImVec2 textPos(origin.x + (iconSize - textSize.x) * 0.5f, origin.y + iconSize + 2.0f);
+        drawList->AddText(
+            font,
+            fontSize,
+            ImVec2(textPos.x + 1.0f, textPos.y + 1.0f),
+            IM_COL32(0, 0, 0, 145),
+            durabilityText);
+        drawList->AddText(
+            font,
+            fontSize,
+            textPos,
+            entry.m_HasArmor[armorIndex]
+                ? GetEnemyInfoDurabilityColor(entry.m_RemainingDurability[armorIndex], entry.m_MaxDurability[armorIndex])
+                : kEnemyInfoDurabilityRed,
+            durabilityText);
+    }
+
+    void DrawEnemyInfoRow(
+        ImDrawList* drawList,
+        ID3D11Device* device,
+        ImFont* titleFont,
+        float titleFontSize,
+        ImFont* bodyFont,
+        float bodyFontSize,
+        const ModuleConfig::EnemyInfoListEntry& entry,
+        const char* trackedTargetName,
+        const ImVec2& rowMin,
+        float rowWidth,
+        bool compact)
+    {
+        if (!drawList || !titleFont || !bodyFont || rowWidth <= 0.0f) {
+            return;
+        }
+
+        const float rowHeight = compact ? kEnemyInfoCompactRowHeight : kEnemyInfoRegularRowHeight;
+        const float headSize = compact ? 28.0f : 28.0f;
+        const float armorIconSize = compact ? 18.0f : 18.0f;
+        const float armorSlotSpacing = compact ? 5.0f : 6.0f;
+        const float outerPadding = compact ? 9.0f : 10.0f;
+        const float webIconSize = compact ? 18.0f : 18.0f;
+        const float durabilityFontSize = compact ? 10.5f : 11.0f;
+        const ImVec2 rowMax(rowMin.x + rowWidth, rowMin.y + rowHeight);
+
+        const bool highlighted =
+            trackedTargetName && trackedTargetName[0] != '\0' &&
+            _stricmp(entry.m_Name, trackedTargetName) == 0;
+        const ImU32 rowFill = highlighted ? color::GetPanelHoverU32(0.94f) : color::GetPanelU32(0.84f);
+        const ImU32 setBorderColor = GetEnemyInfoSetBorderColor(entry);
+        const ImU32 rowBorder = setBorderColor;
+        drawList->AddRectFilled(rowMin, rowMax, rowFill, 9.0f);
+        drawList->AddRect(rowMin, rowMax, rowBorder, 9.0f, 0, highlighted ? 1.4f : 1.0f);
+
+        const ImVec2 headMin(rowMin.x + outerPadding, rowMin.y + (rowHeight - headSize) * 0.5f);
+        const ImVec2 headMax(headMin.x + headSize, headMin.y + headSize);
+        DrawPlayerHeadPreview(drawList, device, bodyFont, bodyFontSize, entry.m_Name, headMin, headMax);
+
+        const float webAreaWidth = entry.m_InWeb ? (webIconSize + 10.0f) : 0.0f;
+        const float armorSlotWidth = armorIconSize + 8.0f;
+        const float armorAreaWidth = armorSlotWidth * static_cast<float>(kEnemyInfoArmorSlots) + armorSlotSpacing * static_cast<float>(kEnemyInfoArmorSlots - 1);
+        const float armorStartX = rowMax.x - outerPadding - webAreaWidth - armorAreaWidth;
+        const float nameStartX = headMax.x + 10.0f;
+        const float nameMaxWidth = (std::max)(70.0f, armorStartX - nameStartX - 12.0f);
+
+        std::string rowName = entry.m_Name;
+        if (!entry.m_InRender) {
+            rowName += compact ? " [Out]" : " [Out of render]";
+        }
+
+        std::string fittedName = rowName;
+        while (!fittedName.empty() &&
+               CalcTextSizeWithFont(titleFont, fittedName.c_str(), titleFontSize).x > nameMaxWidth) {
+            if (fittedName.size() <= 4) {
+                break;
+            }
+            fittedName = fittedName.substr(0, fittedName.size() - 4) + "...";
+        }
+
+        drawList->AddText(
+            titleFont,
+            titleFontSize,
+            ImVec2(nameStartX, rowMin.y + (rowHeight - titleFontSize) * 0.5f - 1.0f),
+            highlighted ? color::GetLinkU32() : color::GetStrongTextU32(),
+            fittedName.c_str());
+
+        const float armorOriginY = rowMin.y + 5.0f;
+        for (int armorIndex = 0; armorIndex < kEnemyInfoArmorSlots; ++armorIndex) {
+            const float armorX = armorStartX + armorIndex * (armorSlotWidth + armorSlotSpacing);
+            DrawEnemyInfoArmorTile(
+                drawList,
+                device,
+                titleFont,
+                durabilityFontSize,
+                ImVec2(armorX, armorOriginY),
+                armorIconSize,
+                armorIndex,
+                entry);
+        }
+
+        if (entry.m_InWeb) {
+            const ImVec2 webMin(rowMax.x - outerPadding - webIconSize, rowMin.y + (rowHeight - webIconSize) * 0.5f);
+            const ImVec2 webMax(webMin.x + webIconSize, webMin.y + webIconSize);
+            drawList->AddRectFilled(webMin, webMax, color::GetPanelActiveU32(0.84f), 5.0f);
+            drawList->AddRect(webMin, webMax, color::GetWarningU32(0.88f), 5.0f, 0, 1.0f);
+            if (ID3D11ShaderResourceView* webTexture = GetCachedMemoryTexture(device, enemy_info_icons::web_data, enemy_info_icons::web_data_size)) {
+                drawList->AddImage(reinterpret_cast<ImTextureID>(webTexture), webMin, webMax);
+            }
+        }
+    }
+
+    void RenderEnemyInfoPreviewPanel(
+        const ModuleConfig* config,
+        ImDrawList* drawList,
+        ID3D11Device* device,
+        ImFont* titleFont,
+        float titleFontSize,
+        ImFont* bodyFont,
+        float bodyFontSize,
+        const ImVec2& panelMin,
+        float panelWidth,
+        int rowLimit,
+        bool compact)
+    {
+        if (!drawList || !bodyFont || !titleFont || panelWidth <= 0.0f) {
+            return;
+        }
+
+        const float panelHeight = GetEnemyInfoPreviewHeight(config, rowLimit, compact);
+        const float panelRounding = compact ? 10.0f : 16.0f;
+        const float horizontalPadding = compact ? 12.0f : 16.0f;
+        const float headerHeight = compact ? 78.0f : 88.0f;
+        const float rowHeight = compact ? kEnemyInfoCompactRowHeight : kEnemyInfoRegularRowHeight;
+        const float rowGap = compact ? 8.0f : 10.0f;
+        const ImVec2 panelMax(panelMin.x + panelWidth, panelMin.y + panelHeight);
+
+        drawList->AddRectFilled(panelMin, panelMax, color::GetPanelU32(0.92f), panelRounding);
+        drawList->AddRect(panelMin, panelMax, color::GetBorderU32(0.82f), panelRounding, 0, 1.0f);
+
+        const bool enabled = config && config->EnemyInfoList.m_Enabled;
+        const char* title = enabled ? "EnemyInfoList" : "EnemyInfoList (disabled)";
+        drawList->AddText(titleFont, titleFontSize, ImVec2(panelMin.x + horizontalPadding, panelMin.y + 10.0f), color::GetStrongTextU32(), title);
+
+        DrawEnemyInfoSubtitle(
+            drawList,
+            bodyFont,
+            titleFont,
+            bodyFontSize,
+            ImVec2(panelMin.x + horizontalPadding, panelMin.y + 10.0f + titleFontSize + 8.0f),
+            panelWidth - horizontalPadding * 2.0f,
+            config,
+            enabled);
+
+        const int entryCount = config
+            ? (std::clamp)(config->EnemyInfoList.m_EntryCount, 0, static_cast<int>(std::size(config->EnemyInfoList.m_Entries)))
+            : 0;
+        const int visibleRows = entryCount > 0 ? (std::min)(entryCount, rowLimit) : 0;
+        float rowY = panelMin.y + headerHeight;
+
+        if (visibleRows == 0) {
+            const char* idleText = enabled ? "Waiting for enemy data..." : "No enemy clan selected yet.";
+            drawList->AddText(
+                bodyFont,
+                bodyFontSize,
+                ImVec2(panelMin.x + horizontalPadding, rowY + 6.0f),
+                color::GetMutedTextU32(0.94f),
+                idleText);
+        } else {
+            for (int entryIndex = 0; entryIndex < visibleRows; ++entryIndex) {
+                DrawEnemyInfoRow(
+                    drawList,
+                    device,
+                    titleFont,
+                    compact ? titleFontSize - 1.0f : titleFontSize,
+                    bodyFont,
+                    bodyFontSize,
+                    config->EnemyInfoList.m_Entries[entryIndex],
+                    config->EnemyInfoList.m_TrackedTargetName,
+                    ImVec2(panelMin.x + horizontalPadding, rowY),
+                    panelWidth - horizontalPadding * 2.0f,
+                    compact);
+                rowY += rowHeight + rowGap;
+            }
+        }
+
+        if (config && entryCount > visibleRows) {
+            char footerBuffer[64] = {};
+            snprintf(footerBuffer, sizeof(footerBuffer), "Showing %d of %d enemies", visibleRows, entryCount);
+            drawList->AddText(
+                bodyFont,
+                bodyFontSize - 1.0f,
+                ImVec2(panelMin.x + horizontalPadding, panelMax.y - bodyFontSize - 4.0f),
+                color::GetMutedTextU32(0.90f),
+                footerBuffer);
+        }
+    }
+
     std::string FormatModuleName(const std::string& name, bool spacedModules)
     {
         if (!spacedModules || name.empty()) {
@@ -2471,8 +3144,9 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hwnd, UINT msg
 
 static Screen* g_Instance = nullptr;
 
-Screen::Screen(float width, float height) 
-    : m_Width(width), m_Height(height) {
+Screen::Screen(float width, float height, bool enemyInfoWindow)
+    : m_Width(width), m_Height(height),
+      m_WindowMode(enemyInfoWindow ? WindowMode::EnemyInfoWindow : WindowMode::MainLauncher) {
     g_Instance = this;
 }
 
@@ -2873,7 +3547,14 @@ bool Screen::ImportAutomaticPaletteFromImage()
 
 bool Screen::Initialize() {
     ShowWindow(GetConsoleWindow(), SW_HIDE);
-    m_Wc = { sizeof(m_Wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, L"OpenCommunity", nullptr };
+    const wchar_t* className = m_WindowMode == WindowMode::EnemyInfoWindow
+        ? kEnemyInfoWindowClassName
+        : kLauncherWindowClassName;
+    const wchar_t* windowTitle = m_WindowMode == WindowMode::EnemyInfoWindow
+        ? kEnemyInfoWindowTitle
+        : kLauncherWindowClassName;
+
+    m_Wc = { sizeof(m_Wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), nullptr, nullptr, nullptr, nullptr, className, nullptr };
     RegisterClassExW(&m_Wc);
     
     int screenX = GetSystemMetrics(SM_CXSCREEN);
@@ -2884,7 +3565,7 @@ bool Screen::Initialize() {
     m_Hwnd = CreateWindowExW(
         0,
         m_Wc.lpszClassName,
-        L"OpenCommunity",
+        windowTitle,
         WS_POPUP,
         x, y,
         static_cast<int>(m_Width), static_cast<int>(m_Height),
@@ -2892,7 +3573,11 @@ bool Screen::Initialize() {
     );
     
     if (!m_Hwnd) return false;
-    ApplyRoundedWindowRegion(m_Hwnd, static_cast<int>(m_Width), static_cast<int>(m_Height), 42);
+    ApplyRoundedWindowRegion(
+        m_Hwnd,
+        static_cast<int>(m_Width),
+        static_cast<int>(m_Height),
+        m_WindowMode == WindowMode::EnemyInfoWindow ? 28 : 42);
     
     if (!CreateDeviceD3D(m_Hwnd)) {
         DestroyWindow(m_Hwnd);
@@ -2959,13 +3644,17 @@ bool Screen::Initialize() {
     ImGui_ImplDX11_Init(m_Device, m_Context);
     
     LoadIconTextures();
-    
-    ModuleRegistry::RegisterAll();
-    ModuleManager::Get()->SetKeybindProcessPredicate([](DWORD processId) {
-        const auto* info = Singleton<ClientInfo>::Get();
-        return info && info->m_TargetPid != 0 && processId == info->m_TargetPid;
-    });
-    ModuleManager::Get()->SyncAllFromConfig(Bridge::Get()->GetConfig());
+
+    if (m_WindowMode == WindowMode::MainLauncher) {
+        ModuleRegistry::RegisterAll();
+        ModuleManager::Get()->SetKeybindProcessPredicate([](DWORD processId) {
+            const auto* info = Singleton<ClientInfo>::Get();
+            return info && info->m_TargetPid != 0 && processId == info->m_TargetPid;
+        });
+        ModuleManager::Get()->SyncAllFromConfig(Bridge::Get()->GetConfig());
+    } else {
+        RegisterEnemyInfoWindowState();
+    }
     
     m_Initialized = true;
     return true;
@@ -2973,6 +3662,10 @@ bool Screen::Initialize() {
 
 void Screen::Shutdown() {
     if (!m_Initialized) return;
+
+    if (m_WindowMode == WindowMode::EnemyInfoWindow) {
+        ClearEnemyInfoWindowState();
+    }
     
     ReleaseIconTextures();
     ReleaseLauncherTextureCaches();
@@ -2986,6 +3679,58 @@ void Screen::Shutdown() {
     UnregisterClassW(m_Wc.lpszClassName, m_Wc.hInstance);
     
     m_Initialized = false;
+}
+
+void Screen::HandleEnemyInfoApplicationRequests()
+{
+    auto* config = Bridge::Get()->GetConfig();
+    if (!config) {
+        return;
+    }
+
+    if (config->EnemyInfoList.m_SecondApplicationOpen && !IsEnemyInfoSecondApplicationAlive(config)) {
+        ClearEnemyInfoSecondApplicationState(config);
+    }
+
+    if (config->EnemyInfoList.m_OpenSecondApplicationRequested) {
+        if (!FocusEnemyInfoSecondApplication(config)) {
+            LaunchEnemyInfoSecondApplication();
+        }
+        config->EnemyInfoList.m_OpenSecondApplicationRequested = false;
+    }
+
+    if (config->EnemyInfoList.m_FocusSecondApplicationRequested) {
+        FocusEnemyInfoSecondApplication(config);
+        config->EnemyInfoList.m_FocusSecondApplicationRequested = false;
+    }
+}
+
+void Screen::RegisterEnemyInfoWindowState()
+{
+    auto* config = Bridge::Get()->GetConfig();
+    if (!config || !m_Hwnd) {
+        return;
+    }
+
+    config->EnemyInfoList.m_SecondApplicationOpen = true;
+    config->EnemyInfoList.m_SecondApplicationPid = GetCurrentProcessId();
+    config->EnemyInfoList.m_SecondApplicationWindow = static_cast<std::uint64_t>(reinterpret_cast<ULONG_PTR>(m_Hwnd));
+    config->EnemyInfoList.m_OpenSecondApplicationRequested = false;
+    config->EnemyInfoList.m_FocusSecondApplicationRequested = false;
+}
+
+void Screen::ClearEnemyInfoWindowState()
+{
+    auto* config = Bridge::Get()->GetConfig();
+    if (!config || !m_Hwnd) {
+        return;
+    }
+
+    const auto currentWindowValue = static_cast<std::uint64_t>(reinterpret_cast<ULONG_PTR>(m_Hwnd));
+    if (config->EnemyInfoList.m_SecondApplicationPid == GetCurrentProcessId() &&
+        config->EnemyInfoList.m_SecondApplicationWindow == currentWindowValue) {
+        ClearEnemyInfoSecondApplicationState(config);
+    }
 }
 
 void Screen::RenderIntro() {
@@ -3781,6 +4526,7 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
     static float s_CategoryScroll[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     auto& modules = ModuleManager::Get()->GetModules(category);
     if (modules.empty()) return;
+    const ModuleConfig* config = Bridge::Get()->GetConfig();
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 origin = ImGui::GetCursorScreenPos();
@@ -3821,6 +4567,9 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
         float cardHeight = headerH + cardPadY;
         if (!visibleOrder.empty()) {
             cardHeight += static_cast<float>(visibleOrder.size()) * optLineH + GetModuleBodyFooterSpacing(mod, visibleOrder);
+        }
+        if (mod && mod->GetName() == "EnemyInfoList") {
+            cardHeight += GetEnemyInfoPreviewHeight(config, kEnemyInfoCardPreviewRows, true);
         }
         return cardHeight;
     };
@@ -4371,9 +5120,15 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     break;
                 }
                 case OptionType::Button: {
-                    dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), color::GetStrongTextU32(), opt.name.c_str());
-                    ImGui::SetCursorScreenPos(ImVec2(optX + optW - sliderW, optY));
-                    if (ImGui::Button(opt.buttonLabel.c_str(), ImVec2(sliderW, optLineH - 6.0f))) {
+                    const bool fullWidthButton = mod->GetName() == "EnemyInfoList";
+                    if (!fullWidthButton) {
+                        dl->AddText(labelFont, labelFS, ImVec2(optX, optY + 2.0f), color::GetStrongTextU32(), opt.name.c_str());
+                    }
+
+                    const float buttonWidth = fullWidthButton ? optW : sliderW;
+                    const float buttonX = fullWidthButton ? optX : (optX + optW - sliderW);
+                    ImGui::SetCursorScreenPos(ImVec2(buttonX, optY));
+                    if (ImGui::Button(opt.buttonLabel.c_str(), ImVec2(buttonWidth, optLineH - 6.0f))) {
                         opt.buttonPressed = true;
                     }
                     break;
@@ -4387,6 +5142,22 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
             ImGui::PopStyleColor(14);
 
             if (fontBody) ImGui::PopFont();
+        }
+
+        if (mod->GetName() == "EnemyInfoList") {
+            const float previewY = cy + headerH + 4.0f + optCount * optLineH + (optCount > 0 ? GetModuleBodyFooterSpacing(mod, visibleOptionOrder) - 2.0f : 0.0f);
+            RenderEnemyInfoPreviewPanel(
+                config,
+                dl,
+                device,
+                fontBold ? fontBold : ImGui::GetFont(),
+                (fontBold ? fontBold : ImGui::GetFont())->FontSize,
+                fontBody ? fontBody : ImGui::GetFont(),
+                (fontBody ? fontBody : ImGui::GetFont())->FontSize,
+                ImVec2(cx + cardPadX, previewY),
+                colW - cardPadX * 2.0f,
+                kEnemyInfoCardPreviewRows,
+                true);
         }
 
         dl->PopClipRect();
@@ -5213,6 +5984,155 @@ void Screen::RenderClosing() {
     }
 }
 
+void Screen::RenderEnemyInfoWindow()
+{
+    ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+    ImGui::SetNextWindowSize(ImVec2(m_Width, m_Height));
+
+    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground;
+
+    if (!ImGui::Begin("EnemyInfoSecondWindow", nullptr, flags)) {
+        ImGui::End();
+        return;
+    }
+
+    auto* config = Bridge::Get()->GetConfig();
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    const ImVec2 windowPos = ImGui::GetWindowPos();
+
+    DrawWindowBase(drawList, windowPos, m_Width, m_Height);
+    DrawTopographicBackground(drawList, windowPos, m_Width, m_Height, static_cast<float>(ImGui::GetTime()), 0.82f);
+
+    const float cardPadding = 20.0f;
+    const float cardWidth = m_Width - 40.0f;
+    const float cardHeight = m_Height - 40.0f;
+    const ImVec2 cardMin(windowPos.x + 20.0f, windowPos.y + 20.0f);
+    const ImVec2 cardMax(cardMin.x + cardWidth, cardMin.y + cardHeight);
+    drawList->AddRectFilled(cardMin, cardMax, color::GetPanelU32(0.97f), 24.0f);
+    drawList->AddRectFilled(
+        ImVec2(cardMin.x + 1.0f, cardMin.y + 1.0f),
+        ImVec2(cardMax.x - 1.0f, cardMax.y - 1.0f),
+        color::GetGlassHighlightU32(0.10f),
+        23.0f);
+    drawList->AddRect(cardMin, cardMax, color::GetBorderU32(0.94f), 24.0f, 0, 1.0f);
+
+    const std::string headerTitle = "EnemyInfoList";
+    drawList->AddText(
+        m_FontBold ? m_FontBold : ImGui::GetFont(),
+        26.0f,
+        ImVec2(cardMin.x + cardPadding, cardMin.y + cardPadding),
+        color::GetStrongTextU32(),
+        headerTitle.c_str());
+
+    std::string subtitle = "Attack a rival player to start tracking the enemy clan.";
+    if (config) {
+        if (config->EnemyInfoList.m_TrackedClanFormatted[0] != '\0') {
+            subtitle = "Tracking rival clan ";
+            subtitle += config->EnemyInfoList.m_TrackedClanFormatted;
+        } else if (config->EnemyInfoList.m_TrackedClan[0] != '\0') {
+            subtitle = "Tracking rival clan ";
+            subtitle += config->EnemyInfoList.m_TrackedClan;
+        }
+    }
+
+    DrawMinecraftFormattedText(
+        drawList,
+        m_FontBody ? m_FontBody : ImGui::GetFont(),
+        17.0f,
+        ImVec2(cardMin.x + cardPadding, cardMin.y + cardPadding + 34.0f),
+        subtitle,
+        color::GetSecondaryTextU32());
+
+    char countBuffer[64] = {};
+    const int entryCount = config
+        ? (std::clamp)(config->EnemyInfoList.m_EntryCount, 0, static_cast<int>(std::size(config->EnemyInfoList.m_Entries)))
+        : 0;
+    snprintf(countBuffer, sizeof(countBuffer), "%d tracked enemy%s", entryCount, entryCount == 1 ? "" : "ies");
+    const ImVec2 chipMin(cardMin.x + cardPadding, cardMin.y + 76.0f);
+    const ImVec2 chipMax(chipMin.x + 164.0f, chipMin.y + 28.0f);
+    drawList->AddRectFilled(chipMin, chipMax, color::GetPanelActiveU32(0.90f), 12.0f);
+    drawList->AddRect(chipMin, chipMax, color::GetBorderU32(0.80f), 12.0f, 0, 1.0f);
+    drawList->AddText(
+        m_FontBody ? m_FontBody : ImGui::GetFont(),
+        15.0f,
+        ImVec2(chipMin.x + 12.0f, chipMin.y + 5.0f),
+        color::GetStrongTextU32(),
+        countBuffer);
+
+    const ImVec2 closeButtonSize(184.0f, 42.0f);
+    const ImVec2 closeButtonPos(cardMax.x - cardPadding - closeButtonSize.x, cardMin.y + cardPadding);
+    if (DrawRoundedActionButton(
+            drawList,
+            "##enemy_info_close_second_window",
+            "Close second application",
+            closeButtonPos,
+            closeButtonSize,
+            14.0f,
+            color::GetPanelActiveU32(0.90f),
+            color::GetPanelHoverU32(),
+            color::GetPanelActiveU32(0.98f),
+            color::GetBorderU32(0.90f),
+            color::GetStrongTextU32(),
+            m_FontBoldMed,
+            16.0f,
+            true)) {
+        Close();
+    }
+
+    const ImVec2 listMin(cardMin.x + cardPadding, cardMin.y + 112.0f);
+    const ImVec2 listMax(cardMax.x - cardPadding, cardMax.y - 18.0f);
+    drawList->AddRectFilled(listMin, listMax, color::GetPanelU32(0.88f), 18.0f);
+    drawList->AddRect(listMin, listMax, color::GetBorderU32(0.82f), 18.0f, 0, 1.0f);
+
+    ImGui::SetCursorScreenPos(ImVec2(listMin.x + 10.0f, listMin.y + 10.0f));
+    if (ImGui::BeginChild(
+            "##enemy_info_second_window_scroll",
+            ImVec2(listMax.x - listMin.x - 20.0f, listMax.y - listMin.y - 20.0f),
+            false,
+            ImGuiWindowFlags_NoBackground)) {
+        ImDrawList* childDrawList = ImGui::GetWindowDrawList();
+        const ImVec2 childOrigin = ImGui::GetCursorScreenPos();
+        const float childWidth = ImGui::GetContentRegionAvail().x - 6.0f;
+
+        if (!config || entryCount <= 0) {
+            const char* idleText = config && config->EnemyInfoList.m_Enabled
+                ? "Waiting for enemy data..."
+                : "Enable EnemyInfoList and attack a rival player.";
+            childDrawList->AddText(
+                m_FontBody ? m_FontBody : ImGui::GetFont(),
+                18.0f,
+                ImVec2(childOrigin.x + 4.0f, childOrigin.y + 4.0f),
+                color::GetMutedTextU32(0.96f),
+                idleText);
+            ImGui::Dummy(ImVec2(childWidth, 40.0f));
+        } else {
+            float rowY = childOrigin.y;
+            for (int entryIndex = 0; entryIndex < entryCount; ++entryIndex) {
+                DrawEnemyInfoRow(
+                    childDrawList,
+                    m_Device,
+                    m_FontBold ? m_FontBold : ImGui::GetFont(),
+                    18.0f,
+                    m_FontBody ? m_FontBody : ImGui::GetFont(),
+                    15.0f,
+                    config->EnemyInfoList.m_Entries[entryIndex],
+                    config->EnemyInfoList.m_TrackedTargetName,
+                    ImVec2(childOrigin.x, rowY),
+                    childWidth,
+                    false);
+                rowY += kEnemyInfoRegularRowHeight + 5.0f;
+            }
+
+            ImGui::Dummy(ImVec2(childWidth, (kEnemyInfoRegularRowHeight + 5.0f) * entryCount));
+        }
+    }
+    ImGui::EndChild();
+
+    ImGui::End();
+}
+
 void Screen::RenderMainInterfaceLayer(const char* windowName, const ImVec2& windowPos, bool interactive, float overlayAlpha) {
     ModuleManager::Get()->SyncAllFromConfig(Bridge::Get()->GetConfig());
 
@@ -5305,6 +6225,9 @@ void Screen::RenderMainInterfaceLayer(const char* windowName, const ImVec2& wind
     // Automatically process keybinds and sync all modules to shared memory
     if (interactive) {
         ModuleManager::Get()->UpdateLauncher(Bridge::Get()->GetConfig());
+        if (m_WindowMode == WindowMode::MainLauncher) {
+            HandleEnemyInfoApplicationRequests();
+        }
     }
 }
 
@@ -5364,29 +6287,33 @@ void Screen::Render() {
     const float overlayBlend = 1.0f - static_cast<float>(std::exp(-static_cast<double>(deltaTime * 18.0f)));
     m_WindowMoveOverlayAlpha += (overlayTarget - m_WindowMoveOverlayAlpha) * overlayBlend;
     m_WindowMoveOverlayAlpha = (std::clamp)(m_WindowMoveOverlayAlpha, 0.0f, 1.0f);
-    
-    switch (m_State) {
-    case AppState::Intro:
-        RenderIntro();
-        break;
-    case AppState::InstanceChooser:
-        RenderInstanceChooser();
-        break;
-    case AppState::Injecting:
-        RenderInjecting();
-        break;
-    case AppState::UpdatePrompt:
-        RenderUpdatePrompt();
-        break;
-    case AppState::TransitionToInterface:
-        RenderTransitionToInterface();
-        break;
-    case AppState::MainInterface:
-        RenderMainInterface();
-        break;
-    case AppState::Closing:
-        RenderClosing();
-        break;
+
+    if (m_WindowMode == WindowMode::EnemyInfoWindow) {
+        RenderEnemyInfoWindow();
+    } else {
+        switch (m_State) {
+        case AppState::Intro:
+            RenderIntro();
+            break;
+        case AppState::InstanceChooser:
+            RenderInstanceChooser();
+            break;
+        case AppState::Injecting:
+            RenderInjecting();
+            break;
+        case AppState::UpdatePrompt:
+            RenderUpdatePrompt();
+            break;
+        case AppState::TransitionToInterface:
+            RenderTransitionToInterface();
+            break;
+        case AppState::MainInterface:
+            RenderMainInterface();
+            break;
+        case AppState::Closing:
+            RenderClosing();
+            break;
+        }
     }
 
     if (m_WindowMoveOverlayAlpha > 0.001f) {
@@ -5427,22 +6354,36 @@ void Screen::Run() {
             continue;
         }
 
-        if (auto* info = Singleton<ClientInfo>::Get()) {
-            if (info->m_TargetPid != 0 && !proc::IsProcessRunning(info->m_TargetPid)) {
-                m_Running = false;
+        if (m_WindowMode == WindowMode::MainLauncher) {
+            if (auto* info = Singleton<ClientInfo>::Get()) {
+                if (info->m_TargetPid != 0 && !proc::IsProcessRunning(info->m_TargetPid)) {
+                    m_Running = false;
+                }
             }
         }
-        
-        if (!m_Running) break;
+
+        if (m_WindowMode == WindowMode::EnemyInfoWindow) {
+            if (auto* config = Bridge::Get()->GetConfig()) {
+                if (config->m_Destruct) {
+                    m_Running = false;
+                }
+            }
+        }
+
+        if (!m_Running) {
+            break;
+        }
 
         Render();
     }
 
-    if (auto* config = Bridge::Get()->GetConfig()) {
-        config->m_Destruct = true;
+    if (m_WindowMode == WindowMode::MainLauncher) {
+        if (auto* config = Bridge::Get()->GetConfig()) {
+            config->m_Destruct = true;
+        }
     }
 
-    Sleep(500);
+    Sleep(m_WindowMode == WindowMode::MainLauncher ? 500 : 50);
 }
 
 void Screen::Close() {

@@ -17,7 +17,7 @@ enum class DamageIndicatorMode {
 
 struct ModuleConfig {
     static constexpr std::uint32_t kMagic = 0x4746434F; // OCFG
-    static constexpr std::uint32_t kVersion = 5;
+    static constexpr std::uint32_t kVersion = 6;
 
     std::uint32_t m_Magic = kMagic;
     std::uint32_t m_Version = kVersion;
@@ -116,6 +116,29 @@ struct ModuleConfig {
         bool m_Enabled = false;
     } Nametags;
 
+    struct EnemyInfoListEntry {
+        char m_Name[17] = {};
+        int m_RemainingDurability[4] = {};
+        int m_MaxDurability[4] = {};
+        bool m_HasArmor[4] = {};
+        bool m_InWeb = false;
+        bool m_InRender = false;
+    };
+
+    struct {
+        bool m_Enabled = false;
+        bool m_OpenSecondApplicationRequested = false;
+        bool m_FocusSecondApplicationRequested = false;
+        bool m_SecondApplicationOpen = false;
+        std::uint32_t m_SecondApplicationPid = 0;
+        std::uint64_t m_SecondApplicationWindow = 0;
+        char m_TrackedClan[32] = {};
+        char m_TrackedClanFormatted[64] = {};
+        char m_TrackedTargetName[17] = {};
+        EnemyInfoListEntry m_Entries[15] = {};
+        int m_EntryCount = 0;
+    } EnemyInfoList;
+
     struct {
         bool m_Enabled = true;
     } Notifications;
@@ -166,6 +189,7 @@ struct ModuleConfig {
         bool m_Target = false;
         bool m_HideClans = false;
         bool m_Nametags = false;
+        bool m_EnemyInfoList = false;
         bool m_Notifications = true;
         bool m_NoRender = false;
         bool m_ItemChams = false;

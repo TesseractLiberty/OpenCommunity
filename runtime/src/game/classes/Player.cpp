@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cctype>
 #include <unordered_map>
+#include <vector>
 
 struct OriginalEntityData {
     AxisAlignedBB_t bb;
@@ -122,7 +123,74 @@ namespace {
         return fieldName.empty() ? nullptr : ownerClass->GetField(env, fieldName.c_str(), signature);
     }
 
-    std::string GetDisplayNameText(JNIEnv* env, jobject playerObject) {
+    bool HasMinecraftFormatting(const std::string& text) {
+        return text.find("\xC2\xA7") != std::string::npos ||
+            text.find(static_cast<char>(0xA7)) != std::string::npos;
+    }
+
+    std::string TrimFormattedCandidate(std::string text) {
+        while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
+            text.erase(text.begin());
+        }
+        while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) {
+            text.pop_back();
+        }
+        return text;
+    }
+
+    std::string ExtractFormattedTagFromDisplayName(const std::string& formattedDisplayName, const std::string& plainName) {
+        if (formattedDisplayName.empty() || plainName.empty()) {
+            return {};
+        }
+
+        std::string clean;
+        std::vector<size_t> cleanToOriginal;
+        clean.reserve(formattedDisplayName.size());
+        cleanToOriginal.reserve(formattedDisplayName.size());
+
+        for (size_t index = 0; index < formattedDisplayName.size(); ++index) {
+            const unsigned char current = static_cast<unsigned char>(formattedDisplayName[index]);
+            if (current == 0xA7 || current == 0xC2) {
+                if (current == 0xC2 && index + 1 < formattedDisplayName.size() &&
+                    static_cast<unsigned char>(formattedDisplayName[index + 1]) == 0xA7) {
+                    ++index;
+                }
+                if (index + 1 < formattedDisplayName.size()) {
+                    ++index;
+                }
+                continue;
+            }
+
+            cleanToOriginal.push_back(index);
+            clean.push_back(formattedDisplayName[index]);
+        }
+
+        const size_t namePos = clean.find(plainName);
+        if (namePos == std::string::npos) {
+            return {};
+        }
+
+        const size_t originalStart = namePos < cleanToOriginal.size() ? cleanToOriginal[namePos] : formattedDisplayName.size();
+        const size_t originalEnd = (namePos + plainName.size()) < cleanToOriginal.size()
+            ? cleanToOriginal[namePos + plainName.size()]
+            : formattedDisplayName.size();
+
+        std::string before = TrimFormattedCandidate(formattedDisplayName.substr(0, originalStart));
+        std::string after = originalEnd < formattedDisplayName.size()
+            ? TrimFormattedCandidate(formattedDisplayName.substr(originalEnd))
+            : std::string{};
+
+        if (CleanTagDelimiters(StripFormatting(before)).size() >= 2) {
+            return before;
+        }
+        if (CleanTagDelimiters(StripFormatting(after)).size() >= 2) {
+            return after;
+        }
+
+        return {};
+    }
+
+    std::string GetDisplayNameText(JNIEnv* env, jobject playerObject, bool formatted) {
         if (!env || !playerObject || !g_Game || !g_Game->IsInitialized()) {
             return {};
         }
@@ -152,7 +220,7 @@ namespace {
             return {};
         }
 
-        Method* textMethod = GetMappedMethod(env, chatClass, "getUnformattedTextForChat", "()Ljava/lang/String;");
+        Method* textMethod = GetMappedMethod(env, chatClass, formatted ? "getFormattedText" : "getUnformattedTextForChat", "()Ljava/lang/String;");
         if (!textMethod) {
             env->DeleteLocalRef(chatComponent);
             return {};
@@ -215,10 +283,14 @@ std::string Player::GetName(JNIEnv* env, bool stripFormatting) {
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
 
     if (result.empty()) {
-        result = GetDisplayNameText(env, reinterpret_cast<jobject>(this));
+        result = GetDisplayNameText(env, reinterpret_cast<jobject>(this), false);
     }
 
     return stripFormatting ? StripFormatting(result) : result;
+}
+
+std::string Player::GetFormattedDisplayName(JNIEnv* env) {
+    return GetDisplayNameText(env, reinterpret_cast<jobject>(this), true);
 }
 
 std::string Player::GetClanTag(JNIEnv* env, Scoreboard* scoreboard) {
@@ -248,7 +320,7 @@ std::string Player::GetClanTag(JNIEnv* env, Scoreboard* scoreboard) {
         }
     }
 
-    std::string displayName = StripFormatting(GetDisplayNameText(env, reinterpret_cast<jobject>(this)));
+    std::string displayName = StripFormatting(GetDisplayNameText(env, reinterpret_cast<jobject>(this), false));
     if (displayName.empty()) {
         return {};
     }
@@ -277,17 +349,24 @@ std::string Player::GetFormattedClanTag(JNIEnv* env, Scoreboard* scoreboard) {
         return {};
     }
 
+    const std::string formattedDisplayName = GetFormattedDisplayName(env);
+    const std::string displayTag = ExtractFormattedTagFromDisplayName(formattedDisplayName, name);
+
     const std::string suffix = team->GetColorSuffix(env);
     const std::string cleanSuffix = CleanTagDelimiters(StripFormatting(suffix));
     if (!cleanSuffix.empty()) {
         env->DeleteLocalRef(reinterpret_cast<jobject>(team));
-        return suffix;
+        return !HasMinecraftFormatting(suffix) && HasMinecraftFormatting(displayTag) ? displayTag : suffix;
     }
 
     const std::string prefix = team->GetColorPrefix(env);
     const std::string cleanPrefix = CleanTagDelimiters(StripFormatting(prefix));
     env->DeleteLocalRef(reinterpret_cast<jobject>(team));
-    return cleanPrefix.empty() ? std::string{} : prefix;
+    if (!cleanPrefix.empty()) {
+        return !HasMinecraftFormatting(prefix) && HasMinecraftFormatting(displayTag) ? displayTag : prefix;
+    }
+
+    return displayTag;
 }
 
 float Player::GetHealth(JNIEnv* env) {
@@ -670,6 +749,22 @@ bool Player::IsInvisible(JNIEnv* env) {
     const bool invisible = method ? method->CallBooleanMethod(env, this) : true;
     env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
     return invisible;
+}
+
+bool Player::IsInWeb(JNIEnv* env) {
+    if (!env || !this) {
+        return false;
+    }
+
+    Class* playerClass = GetPlayerClass(env, reinterpret_cast<jobject>(this));
+    if (!playerClass) {
+        return false;
+    }
+
+    Field* field = GetMappedField(env, playerClass, "isInWeb", "Z");
+    const bool inWeb = field ? field->GetBooleanField(env, this) : false;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(playerClass));
+    return inWeb;
 }
 
 int Player::GetHurtTime(JNIEnv* env) {

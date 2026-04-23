@@ -114,3 +114,98 @@ jobject World::GetScoreboard(JNIEnv* env) {
     env->DeleteLocalRef(reinterpret_cast<jclass>(worldClass));
     return value;
 }
+
+bool World::IsWebBlockAt(JNIEnv* env, int x, int y, int z) {
+    if (!env || !this || !g_Game || !g_Game->IsInitialized()) {
+        return false;
+    }
+
+    const std::string blockPosClassName = Mapper::Get("net/minecraft/util/BlockPos");
+    const std::string blockPosSignature = Mapper::Get("net/minecraft/util/BlockPos", 2);
+    const std::string blockStateSignature = Mapper::Get("net/minecraft/block/state/IBlockState", 2);
+    const std::string blockSignature = Mapper::Get("net/minecraft/block/Block", 2);
+    if (blockPosClassName.empty() || blockPosSignature.empty() ||
+        blockStateSignature.empty() || blockSignature.empty()) {
+        return false;
+    }
+
+    Class* blockPosClass = g_Game->FindClass(blockPosClassName);
+    if (!blockPosClass) {
+        return false;
+    }
+
+    jmethodID blockPosCtor = env->GetMethodID(reinterpret_cast<jclass>(blockPosClass), "<init>", "(III)V");
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return false;
+    }
+    if (!blockPosCtor) {
+        return false;
+    }
+
+    jobject blockPos = env->NewObject(
+        reinterpret_cast<jclass>(blockPosClass),
+        blockPosCtor,
+        static_cast<jint>(x),
+        static_cast<jint>(y),
+        static_cast<jint>(z));
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        if (blockPos) {
+            env->DeleteLocalRef(blockPos);
+        }
+        return false;
+    }
+    if (!blockPos) {
+        return false;
+    }
+
+    auto* worldClass = reinterpret_cast<Class*>(env->GetObjectClass(reinterpret_cast<jobject>(this)));
+    if (!worldClass) {
+        env->DeleteLocalRef(blockPos);
+        return false;
+    }
+
+    const std::string getBlockStateName = Mapper::Get("getBlockState");
+    const std::string getBlockStateSignature = "(" + blockPosSignature + ")" + blockStateSignature;
+    Method* getBlockStateMethod = getBlockStateName.empty()
+        ? nullptr
+        : worldClass->GetMethod(env, getBlockStateName.c_str(), getBlockStateSignature.c_str());
+    jobject blockState = getBlockStateMethod ? getBlockStateMethod->CallObjectMethod(env, this, false, blockPos) : nullptr;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(worldClass));
+    env->DeleteLocalRef(blockPos);
+    if (!blockState) {
+        return false;
+    }
+
+    auto* blockStateClass = reinterpret_cast<Class*>(env->GetObjectClass(blockState));
+    if (!blockStateClass) {
+        env->DeleteLocalRef(blockState);
+        return false;
+    }
+
+    const std::string getBlockName = Mapper::Get("getBlock");
+    const std::string getBlockSignature = "()" + blockSignature;
+    Method* getBlockMethod = getBlockName.empty()
+        ? nullptr
+        : blockStateClass->GetMethod(env, getBlockName.c_str(), getBlockSignature.c_str());
+    jobject block = getBlockMethod ? getBlockMethod->CallObjectMethod(env, blockState) : nullptr;
+    env->DeleteLocalRef(reinterpret_cast<jclass>(blockStateClass));
+    env->DeleteLocalRef(blockState);
+    if (!block) {
+        return false;
+    }
+
+    Class* blocksClass = g_Game->FindClass(Mapper::Get("net/minecraft/init/Blocks"));
+    Field* webField = blocksClass
+        ? blocksClass->GetField(env, Mapper::Get("webBlock").c_str(), blockSignature.c_str(), true)
+        : nullptr;
+    jobject webBlock = webField ? webField->GetObjectField(env, blocksClass, true) : nullptr;
+    const bool result = webBlock && env->IsSameObject(block, webBlock);
+
+    if (webBlock) {
+        env->DeleteLocalRef(webBlock);
+    }
+    env->DeleteLocalRef(block);
+    return result;
+}

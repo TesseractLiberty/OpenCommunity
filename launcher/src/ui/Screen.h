@@ -7,7 +7,7 @@ struct ImFont;
 
 class Screen {
 public:
-    Screen(float width, float height);
+    Screen(float width, float height, bool enemyInfoWindow = false);
     ~Screen();
 
     void Run();
@@ -28,6 +28,7 @@ private:
     void RenderUpdatePrompt();
     void RenderTransitionToInterface();
     void RenderMainInterface();
+    void RenderEnemyInfoWindow();
     void RenderHUDPreview();
 
     void RenderCombatTab();
@@ -46,6 +47,9 @@ private:
     void LoadInterfaceThemeSettings();
     void SaveInterfaceThemeSettings() const;
     bool ImportAutomaticPaletteFromImage();
+    void HandleEnemyInfoApplicationRequests();
+    void RegisterEnemyInfoWindowState();
+    void ClearEnemyInfoWindowState();
 
     static LRESULT WINAPI WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
     LRESULT HandleWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -91,7 +95,9 @@ private:
     std::filesystem::path m_ImportedPaletteSource;
 
     enum class AppState { Intro, InstanceChooser, Injecting, UpdatePrompt, TransitionToInterface, MainInterface, Closing };
+    enum class WindowMode { MainLauncher, EnemyInfoWindow };
     AppState m_State = AppState::Intro;
+    WindowMode m_WindowMode = WindowMode::MainLauncher;
     float m_ClosingStartTime = -1.0f;
     float m_InjectionCompleteTime = -1.0f;
     float m_InjectionViewStartTime = -1.0f;

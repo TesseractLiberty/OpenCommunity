@@ -9,6 +9,7 @@
 #include "../game/jni/GameInstance.h"
 #include "../game/jni/JniRefs.h"
 #include "../game/mapping/Mapper.h"
+#include "../features/visuals/EnemyInfoList.h"
 #include "../features/visuals/Target.h"
 #include <jni.h>
 #include <atomic>
@@ -113,9 +114,10 @@ namespace {
                 Class* playerClass = g_Game->FindClass(Mapper::Get("net/minecraft/entity/player/EntityPlayer"));
                 if (playerClass && env->IsInstanceOf(entityObject.Get(), reinterpret_cast<jclass>(playerClass))) {
                     JniLocalRef<jobject> localPlayerObject(env, Minecraft::GetThePlayer(env));
-                    if (!localPlayerObject || !env->IsSameObject(entityObject.Get(), localPlayerObject.Get())) {
-                        Target::OnLocalAttack(env, reinterpret_cast<Player*>(entityObject.Get()));
-                    }
+                        if (!localPlayerObject || !env->IsSameObject(entityObject.Get(), localPlayerObject.Get())) {
+                            Target::OnLocalAttack(env, reinterpret_cast<Player*>(entityObject.Get()));
+                            EnemyInfoList::OnLocalAttack(env, reinterpret_cast<Player*>(entityObject.Get()));
+                        }
                 }
             }
         }

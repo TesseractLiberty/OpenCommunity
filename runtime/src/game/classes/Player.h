@@ -12,6 +12,7 @@ struct Vec3D {
 class Player {
 public:
     std::string GetName(JNIEnv* env, bool stripFormatting = true);
+    std::string GetFormattedDisplayName(JNIEnv* env);
     std::string GetClanTag(JNIEnv* env, class Scoreboard* scoreboard);
     std::string GetFormattedClanTag(JNIEnv* env, class Scoreboard* scoreboard);
     float GetHealth(JNIEnv* env);
@@ -36,6 +37,7 @@ public:
     void SetPosition(double x, double y, double z, JNIEnv* env);
     void SetAlwaysRenderNameTag(bool value, JNIEnv* env);
     bool IsInvisible(JNIEnv* env);
+    bool IsInWeb(JNIEnv* env);
     int GetHurtTime(JNIEnv* env);
     bool IsUsingItem(JNIEnv* env);
     int GetSwingProgressInt(JNIEnv* env);
