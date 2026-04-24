@@ -16,6 +16,7 @@
 #include "../../../deps/imgui/images/ui/running_icon.h"
 #include "../../../deps/imgui/images/ui/eye_icon.h"
 #include "../../../deps/imgui/images/ui/settings_icon.h"
+#include "../../../deps/imgui/images/ui/game_chat_icon.h"
 #include "../../../deps/imgui/images/ui/message_information_icon.h"
 #include "../../../deps/imgui/images/ui/command_refresh_icon.h"
 #include "../../../deps/imgui/images/ui/color_theme_icon.h"
@@ -2644,6 +2645,168 @@ namespace
         return pressed;
     }
 
+    bool DrawSettingsToggleSwitch(
+        ImDrawList* drawList,
+        const char* id,
+        const ImVec2& pos,
+        bool value,
+        bool enabled = true)
+    {
+        if (!drawList || !id) {
+            return false;
+        }
+
+        const ImVec2 size(50.0f, 26.0f);
+        ImGui::SetCursorScreenPos(pos);
+        const bool pressed = ImGui::InvisibleButton(id, size) && enabled;
+        const bool hovered = enabled && ImGui::IsItemHovered();
+        const bool held = enabled && ImGui::IsItemActive();
+        if (hovered) {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        }
+
+        ImU32 fillColor = value ? color::GetLinkU32(0.94f) : color::GetPanelActiveU32(0.92f);
+        if (!enabled) {
+            fillColor = color::GetPanelActiveU32(0.70f);
+        } else if (held) {
+            fillColor = value ? color::GetLinkHoverU32() : color::GetPanelHoverU32(0.96f);
+        } else if (hovered) {
+            fillColor = value ? color::GetLinkHoverU32(0.96f) : color::GetPanelHoverU32(0.94f);
+        }
+
+        const ImVec2 min = pos;
+        const ImVec2 max(pos.x + size.x, pos.y + size.y);
+        drawList->AddRectFilled(min, max, fillColor, size.y * 0.5f);
+        drawList->AddRectFilled(
+            ImVec2(min.x + 1.0f, min.y + 1.0f),
+            ImVec2(max.x - 1.0f, max.y - 1.0f),
+            color::GetGlassHighlightU32(value ? 0.14f : 0.08f),
+            size.y * 0.5f - 1.0f);
+        drawList->AddRect(min, max, color::GetBorderU32(value ? 0.95f : 0.82f), size.y * 0.5f, 0, value ? 1.2f : 1.0f);
+
+        const float knobRadius = 9.0f;
+        const float knobCenterY = min.y + size.y * 0.5f;
+        const float knobCenterX = value ? (max.x - knobRadius - 4.0f) : (min.x + knobRadius + 4.0f);
+        drawList->AddCircleFilled(ImVec2(knobCenterX, knobCenterY), knobRadius, IM_COL32(248, 250, 252, 255), 24);
+        drawList->AddCircle(ImVec2(knobCenterX, knobCenterY), knobRadius, color::GetBorderU32(0.75f), 24, 1.0f);
+
+        return pressed;
+    }
+
+    bool DrawSettingsTextField(
+        ImDrawList* drawList,
+        const char* id,
+        const ImVec2& pos,
+        const ImVec2& size,
+        char* buffer,
+        size_t bufferSize,
+        const char* hint,
+        ImGuiInputTextFlags flags = ImGuiInputTextFlags_None,
+        bool enabled = true)
+    {
+        if (!drawList || !id || !buffer || bufferSize == 0 || size.x <= 0.0f || size.y <= 0.0f) {
+            return false;
+        }
+
+        buffer[bufferSize - 1] = '\0';
+
+        const ImVec2 min = pos;
+        const ImVec2 max(pos.x + size.x, pos.y + size.y);
+        const bool hovered = enabled && ImGui::IsMouseHoveringRect(min, max, true);
+        const ImU32 fillColor = enabled
+            ? (hovered ? color::GetFieldHoverU32(0.98f) : color::GetFieldBgU32(0.96f))
+            : color::GetFieldBgU32(0.78f);
+        drawList->AddRectFilled(min, max, fillColor, 10.0f);
+        drawList->AddRectFilled(
+            ImVec2(min.x + 1.0f, min.y + 1.0f),
+            ImVec2(max.x - 1.0f, max.y - 1.0f),
+            color::GetGlassHighlightU32(enabled ? 0.20f : 0.08f),
+            9.0f);
+        drawList->AddRect(min, max, color::GetBorderU32(enabled ? 0.92f : 0.70f), 10.0f, 0, enabled ? 1.0f : 0.9f);
+
+        ImGui::SetCursorScreenPos(pos);
+        ImGui::PushItemWidth(size.x);
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, enabled ? color::GetStrongTextVec4() : color::GetMutedTextVec4());
+        ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, color::GetLinkVec4(0.35f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 6.0f));
+        if (!enabled) {
+            ImGui::BeginDisabled();
+        }
+        const bool changed = ImGui::InputTextWithHint(id, hint ? hint : "", buffer, bufferSize, flags);
+        if (!enabled) {
+            ImGui::EndDisabled();
+        }
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor(6);
+        ImGui::PopItemWidth();
+
+        buffer[bufferSize - 1] = '\0';
+        return changed;
+    }
+
+    bool DrawSettingsComboField(
+        ImDrawList* drawList,
+        const char* id,
+        const ImVec2& pos,
+        const ImVec2& size,
+        int* currentIndex,
+        const char* const* items,
+        int itemCount,
+        bool enabled = true)
+    {
+        if (!drawList || !id || !currentIndex || !items || itemCount <= 0 || size.x <= 0.0f || size.y <= 0.0f) {
+            return false;
+        }
+
+        *currentIndex = (std::clamp)(*currentIndex, 0, itemCount - 1);
+
+        const ImVec2 min = pos;
+        const ImVec2 max(pos.x + size.x, pos.y + size.y);
+        const bool hovered = enabled && ImGui::IsMouseHoveringRect(min, max, true);
+        const ImU32 fillColor = enabled
+            ? (hovered ? color::GetFieldHoverU32(0.98f) : color::GetFieldBgU32(0.96f))
+            : color::GetFieldBgU32(0.78f);
+        drawList->AddRectFilled(min, max, fillColor, 10.0f);
+        drawList->AddRectFilled(
+            ImVec2(min.x + 1.0f, min.y + 1.0f),
+            ImVec2(max.x - 1.0f, max.y - 1.0f),
+            color::GetGlassHighlightU32(enabled ? 0.20f : 0.08f),
+            9.0f);
+        drawList->AddRect(min, max, color::GetBorderU32(enabled ? 0.92f : 0.70f), 10.0f, 0, enabled ? 1.0f : 0.9f);
+
+        ImGui::SetCursorScreenPos(pos);
+        ImGui::PushItemWidth(size.x);
+        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_Text, enabled ? color::GetStrongTextVec4() : color::GetMutedTextVec4());
+        ImGui::PushStyleColor(ImGuiCol_PopupBg, color::GetPanelVec4(0.98f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 6.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 10.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 10.0f);
+        if (!enabled) {
+            ImGui::BeginDisabled();
+        }
+        const bool changed = ImGui::Combo(id, currentIndex, items, itemCount);
+        if (!enabled) {
+            ImGui::EndDisabled();
+        }
+        ImGui::PopStyleVar(4);
+        ImGui::PopStyleColor(9);
+        ImGui::PopItemWidth();
+        return changed;
+    }
+
     bool DrawThemeOptionCard(
         ImDrawList* drawList,
         const char* id,
@@ -3449,6 +3612,7 @@ void Screen::LoadIconTextures() {
     LoadTextureFromMemory(icons::running_icon_data, icons::running_icon_data_size, &m_IconMovement, &w, &h, true);
     LoadTextureFromMemory(icons::eye_icon_data, icons::eye_icon_data_size, &m_IconVisuals, &w, &h, true);
     LoadTextureFromMemory(icons::settings_icon_data, icons::settings_icon_data_size, &m_IconSettings, &w, &h, true);
+    LoadTextureFromMemory(icons::game_chat_icon_data, icons::game_chat_icon_data_size, &m_GameChatTexture, nullptr, nullptr, true);
     LoadTextureFromMemory(icons::message_information_icon_data, icons::message_information_icon_data_size, &m_InfoLampTexture, nullptr, nullptr, true);
     LoadTextureFromMemory(icons::command_refresh_icon_data, icons::command_refresh_icon_data_size, &m_UpdatesTexture, nullptr, nullptr, true);
     LoadTextureFromMemory(icons::color_theme_icon_data, icons::color_theme_icon_data_size, &m_InterfaceThemeTexture, nullptr, nullptr, true);
@@ -3461,6 +3625,7 @@ void Screen::ReleaseIconTextures() {
     if (m_IconMovement) { m_IconMovement->Release(); m_IconMovement = nullptr; }
     if (m_IconVisuals) { m_IconVisuals->Release(); m_IconVisuals = nullptr; }
     if (m_IconSettings) { m_IconSettings->Release(); m_IconSettings = nullptr; }
+    if (m_GameChatTexture) { m_GameChatTexture->Release(); m_GameChatTexture = nullptr; }
     if (m_InfoLampTexture) { m_InfoLampTexture->Release(); m_InfoLampTexture = nullptr; }
     if (m_UpdatesTexture) { m_UpdatesTexture->Release(); m_UpdatesTexture = nullptr; }
     if (m_InterfaceThemeTexture) { m_InterfaceThemeTexture->Release(); m_InterfaceThemeTexture = nullptr; }
@@ -5222,6 +5387,7 @@ void Screen::RenderSettingsTab() {
     ImFont* bodyFont = m_FontBody ? m_FontBody : ImGui::GetFont();
     ImFont* accentFont = m_FontBold ? m_FontBold : bodyFont;
     const float bodyFontSize = bodyFont ? bodyFont->FontSize : ImGui::GetFontSize();
+    auto* config = Bridge::Get()->GetConfig();
     const float themeChipHeight = 26.0f;
     const float themeChipGap = 8.0f;
     const ImVec2 themePreviewSize(214.0f, 122.0f);
@@ -5230,6 +5396,73 @@ void Screen::RenderSettingsTab() {
     const float infoHeaderHeight = 66.0f;
     const float infoBottomPadding = 24.0f;
     const float themeLeftColumnWidth = (std::max)(160.0f, pageWidth - cardPadding * 2.0f - themePreviewSize.x - themePreviewGap);
+
+    auto measureSettingsTextHeight = [&](const std::string& text, float maxWidth, float fontSize) -> float {
+        std::vector<SettingsTextSegment> segments;
+        segments.push_back({ text, nullptr, false });
+        return DrawWrappedSettingsLine(
+            nullptr,
+            ImVec2(0.0f, 0.0f),
+            maxWidth,
+            segments,
+            bodyFont,
+            accentFont,
+            fontSize,
+            bodyColor,
+            linkColor,
+            linkHoverColor);
+    };
+
+    std::string previewPrefix = ".";
+    if (config && config->GameChat.m_Prefix[0] != '\0') {
+        previewPrefix = config->GameChat.m_Prefix;
+    }
+
+    const std::string chatIntroText =
+        "Intercept commands typed in Minecraft chat. Messages without the configured prefix are ignored. Every module can be controlled from here, with Tab autocomplete like LiquidBounce.";
+    const std::string chatToggleDescription =
+        "Enable local client commands from the in-game chat box.";
+    const std::string chatOutputDescription =
+        "Choose where command feedback is shown: Notifications or the in-game chat.";
+    const std::string chatPrefixDescription =
+        "The client only reads messages that start with this prefix.";
+    const std::string chatExampleLine =
+        "Examples: " + previewPrefix + "t autoclicker  |  " +
+        previewPrefix + "target mode low-armor  |  " +
+        previewPrefix + "enemyinfolist status  |  Tab autocomplete";
+    const std::string chatTipLine =
+        "Tip: type .t and press Tab to cycle modules, or type a module name to cycle its commands and option values.";
+
+    const float chatIntroTopOffset = 74.0f;
+    const float chatSectionGap = 18.0f;
+    const float chatDescriptionOffset = 24.0f;
+    const float chatBottomPadding = 20.0f;
+    const float chatRowControlGap = 18.0f;
+    const float chatModeControlWidth = 156.0f;
+    const float chatDetailColumnWidth = (std::max)(120.0f, textWidth - chatModeControlWidth - chatRowControlGap);
+    const float chatIntroHeight = measureSettingsTextHeight(chatIntroText, textWidth, bodyFontSize);
+    const float chatToggleDescriptionHeight = measureSettingsTextHeight(chatToggleDescription, chatDetailColumnWidth, bodyFontSize - 1.0f);
+    const float chatOutputDescriptionHeight = measureSettingsTextHeight(chatOutputDescription, chatDetailColumnWidth, bodyFontSize - 1.0f);
+    const float chatPrefixDescriptionHeight = measureSettingsTextHeight(chatPrefixDescription, chatDetailColumnWidth, bodyFontSize - 1.0f);
+    const float chatExampleHeight = measureSettingsTextHeight(chatExampleLine, textWidth, bodyFontSize - 1.0f);
+    const float chatTipHeight = measureSettingsTextHeight(chatTipLine, textWidth, bodyFontSize - 1.0f);
+    const float chatToggleRowHeight = chatDescriptionOffset + chatToggleDescriptionHeight;
+    const float chatOutputRowHeight = chatDescriptionOffset + chatOutputDescriptionHeight;
+    const float chatPrefixRowHeight = chatDescriptionOffset + chatPrefixDescriptionHeight;
+    const float chatSettingsHeight =
+        (chatIntroTopOffset - 4.0f) +
+        chatIntroHeight +
+        chatSectionGap +
+        chatToggleRowHeight +
+        chatSectionGap +
+        chatOutputRowHeight +
+        chatSectionGap +
+        chatPrefixRowHeight +
+        chatSectionGap +
+        chatExampleHeight +
+        8.0f +
+        chatTipHeight +
+        chatBottomPadding;
 
     auto measureChipBlockHeight = [&](const std::vector<const char*>& labels) -> float {
         if (labels.empty()) {
@@ -5323,7 +5556,7 @@ void Screen::RenderSettingsTab() {
     }
 
     const float infoHeight = infoHeaderHeight + measuredInfoTextHeight + infoBottomPadding;
-    const float totalContentHeight = infoHeight + cardGap + themeCardHeight + cardGap + updatesHeight + cardGap + buttonHeight + 8.0f;
+    const float totalContentHeight = infoHeight + cardGap + themeCardHeight + cardGap + chatSettingsHeight + cardGap + updatesHeight + cardGap + buttonHeight + 8.0f;
     const float visibleHeight = (std::max)(120.0f, (m_Height - 40.0f));
     const float maxScroll = (std::max)(0.0f, totalContentHeight - visibleHeight);
     static float s_SettingsScrollOffset = 0.0f;
@@ -5343,7 +5576,9 @@ void Screen::RenderSettingsTab() {
     const ImVec2 infoMax(pageX + pageWidth, pageY + infoHeight);
     const ImVec2 themeMin(pageX, infoMax.y + cardGap);
     const ImVec2 themeMax(pageX + pageWidth, themeMin.y + themeCardHeight);
-    const ImVec2 updatesMin(pageX, themeMax.y + cardGap);
+    const ImVec2 chatMin(pageX, themeMax.y + cardGap);
+    const ImVec2 chatMax(pageX + pageWidth, chatMin.y + chatSettingsHeight);
+    const ImVec2 updatesMin(pageX, chatMax.y + cardGap);
     const ImVec2 updatesMax(pageX + pageWidth, updatesMin.y + updatesHeight);
     const ImVec2 closeMin(pageX, updatesMax.y + cardGap);
     const ImVec2 closeMax(pageX + pageWidth, closeMin.y + buttonHeight);
@@ -5362,6 +5597,11 @@ void Screen::RenderSettingsTab() {
     drawList->AddRectFilled(themeMin, themeMax, panelColor, cardRounding);
     drawList->AddRectFilled(ImVec2(themeMin.x + 1.0f, themeMin.y + 1.0f), ImVec2(themeMax.x - 1.0f, themeMax.y - 1.0f), panelInnerColor, cardRounding - 1.0f);
     drawList->AddRect(themeMin, themeMax, panelBorderColor, cardRounding, 0, 1.0f);
+
+    drawList->AddRectFilled(ImVec2(chatMin.x, chatMin.y + 6.0f), ImVec2(chatMax.x, chatMax.y + 6.0f), panelShadowColor, cardRounding);
+    drawList->AddRectFilled(chatMin, chatMax, panelColor, cardRounding);
+    drawList->AddRectFilled(ImVec2(chatMin.x + 1.0f, chatMin.y + 1.0f), ImVec2(chatMax.x - 1.0f, chatMax.y - 1.0f), panelInnerColor, cardRounding - 1.0f);
+    drawList->AddRect(chatMin, chatMax, panelBorderColor, cardRounding, 0, 1.0f);
 
     const float titleY = infoMin.y + 18.0f;
     float titleX = infoMin.x + cardPadding;
@@ -5767,6 +6007,130 @@ void Screen::RenderSettingsTab() {
             ApplyInterfaceTheme();
         }
     }
+
+    const float chatTitleY = chatMin.y + 18.0f;
+    float chatTitleX = chatMin.x + cardPadding;
+    if (m_GameChatTexture) {
+        const float chatIconSize = 24.0f;
+        const ImVec2 iconMin(chatTitleX, chatTitleY - 1.0f);
+        const ImVec2 iconMax(iconMin.x + chatIconSize, iconMin.y + chatIconSize);
+        drawList->AddImageRounded(reinterpret_cast<ImTextureID>(m_GameChatTexture), iconMin, iconMax, ImVec2(0.0f, 0.0f), ImVec2(1.0f, 1.0f), color::GetIconTintU32(), 7.0f, ImDrawFlags_RoundCornersAll);
+        chatTitleX += chatIconSize + 10.0f;
+    }
+    drawList->AddText(titleFont, titleFontSize, ImVec2(chatTitleX, chatTitleY), titleColor, "Game Chat");
+    drawList->AddLine(ImVec2(chatMin.x + cardPadding, chatMin.y + 56.0f), ImVec2(chatMax.x - cardPadding, chatMin.y + 56.0f), dividerColor, 1.0f);
+    DrawWrappedSettingsLine(
+        drawList,
+        ImVec2(chatMin.x + cardPadding, chatMin.y + chatIntroTopOffset),
+        textWidth,
+        { { chatIntroText, nullptr, false } },
+        bodyFont,
+        accentFont,
+        bodyFontSize,
+        bodyColor,
+        linkColor,
+        linkHoverColor);
+
+    const float chatToggleRowY = chatMin.y + chatIntroTopOffset + chatIntroHeight + chatSectionGap;
+    drawList->AddText(accentFont, bodyFontSize, ImVec2(chatMin.x + cardPadding, chatToggleRowY + 2.0f), titleColor, "Use game chat");
+    DrawWrappedSettingsLine(
+        drawList,
+        ImVec2(chatMin.x + cardPadding, chatToggleRowY + chatDescriptionOffset),
+        chatDetailColumnWidth,
+        { { chatToggleDescription, nullptr, false } },
+        bodyFont,
+        accentFont,
+        bodyFontSize - 1.0f,
+        bodyColor,
+        linkColor,
+        linkHoverColor);
+    const ImVec2 chatTogglePos(chatMax.x - cardPadding - 50.0f, chatToggleRowY + 6.0f);
+    const bool chatEnabled = config && config->GameChat.m_UseGameChat;
+    if (DrawSettingsToggleSwitch(drawList, "##settings_use_game_chat", chatTogglePos, chatEnabled, config != nullptr)) {
+        config->GameChat.m_UseGameChat = !config->GameChat.m_UseGameChat;
+    }
+
+    const float outputRowY = chatToggleRowY + chatToggleRowHeight + chatSectionGap;
+    drawList->AddText(accentFont, bodyFontSize, ImVec2(chatMin.x + cardPadding, outputRowY + 2.0f), titleColor, "Mode");
+    DrawWrappedSettingsLine(
+        drawList,
+        ImVec2(chatMin.x + cardPadding, outputRowY + chatDescriptionOffset),
+        chatDetailColumnWidth,
+        { { chatOutputDescription, nullptr, false } },
+        bodyFont,
+        accentFont,
+        bodyFontSize - 1.0f,
+        bodyColor,
+        linkColor,
+        linkHoverColor);
+    static const char* kGameChatOutputModes[] = { "Notifications", "Chat" };
+    int outputMode = config ? config->GameChat.m_OutputMode : static_cast<int>(GameChatOutputMode::Notifications);
+    outputMode = (std::clamp)(outputMode, 0, static_cast<int>(IM_ARRAYSIZE(kGameChatOutputModes)) - 1);
+    if (DrawSettingsComboField(
+            drawList,
+            "##settings_game_chat_output_mode",
+            ImVec2(chatMax.x - cardPadding - 156.0f, outputRowY - 2.0f),
+            ImVec2(156.0f, 32.0f),
+            &outputMode,
+            kGameChatOutputModes,
+            IM_ARRAYSIZE(kGameChatOutputModes),
+            config != nullptr)) {
+        config->GameChat.m_OutputMode = outputMode;
+    }
+
+    const float prefixRowY = outputRowY + chatOutputRowHeight + chatSectionGap;
+    drawList->AddText(accentFont, bodyFontSize, ImVec2(chatMin.x + cardPadding, prefixRowY + 2.0f), titleColor, "Prefix");
+    DrawWrappedSettingsLine(
+        drawList,
+        ImVec2(chatMin.x + cardPadding, prefixRowY + chatDescriptionOffset),
+        chatDetailColumnWidth,
+        { { chatPrefixDescription, nullptr, false } },
+        bodyFont,
+        accentFont,
+        bodyFontSize - 1.0f,
+        bodyColor,
+        linkColor,
+        linkHoverColor);
+    char disabledPrefixBuffer[16] = ".";
+    char* prefixBuffer = config ? config->GameChat.m_Prefix : disabledPrefixBuffer;
+    const size_t prefixBufferSize = config ? sizeof(config->GameChat.m_Prefix) : sizeof(disabledPrefixBuffer);
+    const ImVec2 prefixFieldPos(chatMax.x - cardPadding - 128.0f, prefixRowY - 2.0f);
+    DrawSettingsTextField(
+        drawList,
+        "##settings_game_chat_prefix",
+        prefixFieldPos,
+        ImVec2(128.0f, 32.0f),
+        prefixBuffer,
+        prefixBufferSize,
+        ".",
+        ImGuiInputTextFlags_CharsNoBlank,
+        config != nullptr);
+    const ImU32 chatHintColor = (config && config->GameChat.m_UseGameChat && config->GameChat.m_Prefix[0] == '\0')
+        ? color::GetWarningU32()
+        : color::GetMutedTextU32();
+    const float chatExampleY = prefixRowY + chatPrefixRowHeight + chatSectionGap;
+    DrawWrappedSettingsLine(
+        drawList,
+        ImVec2(chatMin.x + cardPadding, chatExampleY),
+        textWidth,
+        { { chatExampleLine, nullptr, false } },
+        bodyFont,
+        accentFont,
+        bodyFontSize - 1.0f,
+        chatHintColor,
+        linkColor,
+        linkHoverColor);
+    DrawWrappedSettingsLine(
+        drawList,
+        ImVec2(chatMin.x + cardPadding, chatExampleY + chatExampleHeight + 8.0f),
+        textWidth,
+        { { chatTipLine, nullptr, false } },
+        bodyFont,
+        accentFont,
+        bodyFontSize - 1.0f,
+        color::GetMutedTextU32(),
+        linkColor,
+        linkHoverColor);
 
     ReleaseCheckStatus releaseStatus;
     {

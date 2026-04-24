@@ -15,9 +15,14 @@ enum class DamageIndicatorMode {
     Astralis = 1
 };
 
+enum class GameChatOutputMode {
+    Notifications = 0,
+    Chat = 1
+};
+
 struct ModuleConfig {
     static constexpr std::uint32_t kMagic = 0x4746434F; // OCFG
-    static constexpr std::uint32_t kVersion = 8;
+    static constexpr std::uint32_t kVersion = 10;
 
     std::uint32_t m_Magic = kMagic;
     std::uint32_t m_Version = kVersion;
@@ -27,6 +32,12 @@ struct ModuleConfig {
     bool m_Destruct = false;
     bool m_FullDestruct = false;
     char m_Username[64] = {};
+
+    struct {
+        bool m_UseGameChat = false;
+        char m_Prefix[16] = ".";
+        int m_OutputMode = static_cast<int>(GameChatOutputMode::Notifications);
+    } GameChat;
 
     struct {
         bool m_Enabled = true;

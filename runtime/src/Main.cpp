@@ -7,7 +7,25 @@
 #include "features/visuals/Notifications.h"
 #include "game/jni/GameInstance.h"
 #include "game/jni/JniRefs.h"
+#include "../../shared/common/logging/Logger.h"
 #include "../../deps/minhook/MinHook.h"
+
+namespace {
+    const char* VersionToString(GameVersions version) {
+        switch (version) {
+        case BADLION:
+            return "BADLION";
+        case FORGE_1_8:
+            return "FORGE_1_8";
+        case FEATHER_1_8:
+            return "FEATHER_1_8";
+        case LUNAR:
+            return "LUNAR";
+        default:
+            return "UNKNOWN";
+        }
+    }
+}
 
 static void SafeUpdateModules(ModuleManager* modules, void* config) {
     __try {
@@ -51,27 +69,39 @@ static void SafeShutdownRuntimeAll(ModuleManager* modules, void* env) {
 
 static DWORD MainThreadImpl() {
     Sleep(3000);
+    OC_LOG_INFO("Runtime", "Main thread started.");
     
     if (!Bridge::Get()->Initialize()) {
+        OC_LOG_ERROR("Runtime", "Bridge initialization failed.");
         return 1;
     }
+    OC_LOG_INFO("Runtime", "Bridge initialized.");
     
     g_Game = new GameInstance();
     if (!g_Game->Attach()) {
+        OC_LOG_ERROR("Runtime", "Failed to attach to JVM/JVMTI.");
         delete g_Game;
         g_Game = nullptr;
     }
+    else {
+        OC_LOG_INFO("Runtime", "Attached to JVM/JVMTI.");
+    }
     
     if (g_Game && !g_Game->InitializeGame()) {
+        OC_LOG_ERROR("Runtime", "Failed to initialize game instance.");
         g_Game->Detach();
         delete g_Game;
         g_Game = nullptr;
+    }
+    else if (g_Game) {
+        OC_LOG_INFOF("Runtime", "Game initialized with version %s.", VersionToString(g_Game->GetGameVersion()));
     }
     
     ModuleRegistry::RegisterAll();
     
     MH_Initialize();
-    GameThreadHook::Initialize();
+    const bool gameThreadHookInitialized = GameThreadHook::Initialize();
+    OC_LOG_INFOF("Runtime", "GameThreadHook initialize result: %s", gameThreadHookInitialized ? "success" : "failed");
     RenderHook::Get()->Initialize();
     
     auto* config = Bridge::Get()->GetConfig();

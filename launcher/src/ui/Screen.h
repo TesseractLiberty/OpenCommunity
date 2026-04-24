@@ -122,6 +122,7 @@ private:
     ID3D11ShaderResourceView* m_IconMovement = nullptr;
     ID3D11ShaderResourceView* m_IconVisuals = nullptr;
     ID3D11ShaderResourceView* m_IconSettings = nullptr;
+    ID3D11ShaderResourceView* m_GameChatTexture = nullptr;
     ID3D11ShaderResourceView* m_InfoLampTexture = nullptr;
     ID3D11ShaderResourceView* m_UpdatesTexture = nullptr;
     ID3D11ShaderResourceView* m_InterfaceThemeTexture = nullptr;

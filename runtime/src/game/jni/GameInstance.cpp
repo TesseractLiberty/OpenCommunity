@@ -2,6 +2,7 @@
 #include "GameInstance.h"
 #include "Field.h"
 #include "Method.h"
+#include "../../../../shared/common/logging/Logger.h"
 
 #include <algorithm>
 
@@ -13,6 +14,18 @@ namespace {
     std::string NormalizeClassName(std::string className) {
         std::replace(className.begin(), className.end(), '/', '.');
         return className;
+    }
+
+    void LogCapabilityAddResult(const char* capabilityName, jvmtiError error) {
+        if (error == JVMTI_ERROR_NONE) {
+            OC_LOG_INFOF("Runtime", "JVMTI capability granted: %s", capabilityName ? capabilityName : "(unknown)");
+        } else {
+            OC_LOG_WARNINGF(
+                "Runtime",
+                "JVMTI capability unavailable: %s (error %d)",
+                capabilityName ? capabilityName : "(unknown)",
+                static_cast<int>(error));
+        }
     }
 }
 
@@ -62,9 +75,33 @@ bool GameInstance::Attach()
 		m_Jvmti = nullptr;
 	}
 	else if (m_Jvmti) {
-		jvmtiCapabilities capabilities{};
-		capabilities.can_generate_breakpoint_events = 1;
-		m_Jvmti->AddCapabilities(&capabilities);
+        jvmtiCapabilities breakpointCapabilities{};
+        breakpointCapabilities.can_generate_breakpoint_events = 1;
+        LogCapabilityAddResult("can_generate_breakpoint_events", m_Jvmti->AddCapabilities(&breakpointCapabilities));
+
+        jvmtiCapabilities localVariableCapabilities{};
+        localVariableCapabilities.can_access_local_variables = 1;
+        LogCapabilityAddResult("can_access_local_variables", m_Jvmti->AddCapabilities(&localVariableCapabilities));
+
+        jvmtiCapabilities earlyReturnCapabilities{};
+        earlyReturnCapabilities.can_force_early_return = 1;
+        LogCapabilityAddResult("can_force_early_return", m_Jvmti->AddCapabilities(&earlyReturnCapabilities));
+
+        jvmtiCapabilities activeCapabilities{};
+        const jvmtiError capabilitiesError = m_Jvmti->GetCapabilities(&activeCapabilities);
+        if (capabilitiesError == JVMTI_ERROR_NONE) {
+            m_HasBreakpointEventsCapability = activeCapabilities.can_generate_breakpoint_events != 0;
+            m_HasLocalVariableAccessCapability = activeCapabilities.can_access_local_variables != 0;
+            m_HasForceEarlyReturnCapability = activeCapabilities.can_force_early_return != 0;
+            OC_LOG_INFOF(
+                "Runtime",
+                "JVMTI active capabilities: breakpoints=%d locals=%d forceEarlyReturn=%d",
+                m_HasBreakpointEventsCapability ? 1 : 0,
+                m_HasLocalVariableAccessCapability ? 1 : 0,
+                m_HasForceEarlyReturnCapability ? 1 : 0);
+        } else {
+            OC_LOG_ERRORF("Runtime", "GetCapabilities failed with JVMTI error %d.", static_cast<int>(capabilitiesError));
+        }
 	}
 
 	return true;
@@ -92,6 +129,9 @@ void GameInstance::Detach()
 
 	m_Initialized = false;
 	m_GameVersion = UNKNOWN;
+    m_HasBreakpointEventsCapability = false;
+    m_HasLocalVariableAccessCapability = false;
+    m_HasForceEarlyReturnCapability = false;
 }
 
 bool GameInstance::PopulateClassCache()

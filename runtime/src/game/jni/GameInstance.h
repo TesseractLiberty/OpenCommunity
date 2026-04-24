@@ -20,6 +20,9 @@ public:
 	auto GetJVMTI() const { return m_Jvmti; }
 	auto GetGameVersion() const { return m_GameVersion; }
 	bool IsInitialized() const { return m_Initialized; }
+    bool HasBreakpointEventsCapability() const { return m_HasBreakpointEventsCapability; }
+    bool HasLocalVariableAccessCapability() const { return m_HasLocalVariableAccessCapability; }
+    bool HasForceEarlyReturnCapability() const { return m_HasForceEarlyReturnCapability; }
 
 	JNIEnv* GetCurrentEnv() const;
 	bool Attach();
@@ -40,6 +43,9 @@ private:
 	JavaVM* m_Jvm = nullptr;
 	JNIEnv* m_Env = nullptr;
 	jvmtiEnv* m_Jvmti = nullptr;
+    bool m_HasBreakpointEventsCapability = false;
+    bool m_HasLocalVariableAccessCapability = false;
+    bool m_HasForceEarlyReturnCapability = false;
 };
 
 extern GameInstance* g_Game;
