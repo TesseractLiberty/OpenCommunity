@@ -3335,7 +3335,7 @@ LRESULT Screen::HandleWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         return HTCLIENT;
     }
     case WM_LBUTTONDOWN:
-        if (isWithinDragStrip(lParam)) {
+        if (isWithinDragStrip(lParam) && !ImGui::IsAnyItemHovered()) {
             RECT windowRect = {};
             POINT cursorPoint = {};
             GetWindowRect(hwnd, &windowRect);
