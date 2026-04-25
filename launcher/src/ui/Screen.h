@@ -73,6 +73,10 @@ private:
     float m_WindowMoveOverlayAlpha = 0.0f;
     POINT m_WindowDragOffset = {};
     int m_CurrentTab = 0;
+    char m_SearchQuery[128] = {};
+    float m_SidebarWidth = 52.0f;
+    float m_SidebarTargetWidth = 52.0f;
+    bool m_IsSidebarHovered = false;
     float m_IntroStartTime = -1.0f;
 
     enum class InterfaceTheme {

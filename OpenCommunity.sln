@@ -1,6 +1,7 @@
+﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
-VisualStudioVersion = 18.3.11527.330 d18.3
+VisualStudioVersion = 18.3.11527.330
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "launcher", "launcher\launcher.vcxproj", "{A1B2C3D4-E5F6-7890-1234-567890ABCDEF}"
 EndProject
@@ -12,12 +13,12 @@ Global
 		Release|x64 = Release|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{A1B2C3D4-E5F6-7890-1234-567890ABCDEF}.Debug|x64.ActiveCfg = Debug|x64
-		{A1B2C3D4-E5F6-7890-1234-567890ABCDEF}.Debug|x64.Build.0 = Debug|x64
+		{A1B2C3D4-E5F6-7890-1234-567890ABCDEF}.Debug|x64.ActiveCfg = Release|x64
+		{A1B2C3D4-E5F6-7890-1234-567890ABCDEF}.Debug|x64.Build.0 = Release|x64
 		{A1B2C3D4-E5F6-7890-1234-567890ABCDEF}.Release|x64.ActiveCfg = Release|x64
 		{A1B2C3D4-E5F6-7890-1234-567890ABCDEF}.Release|x64.Build.0 = Release|x64
-		{B2C3D4E5-F6A7-8901-2345-678901BCDEF0}.Debug|x64.ActiveCfg = Debug|x64
-		{B2C3D4E5-F6A7-8901-2345-678901BCDEF0}.Debug|x64.Build.0 = Debug|x64
+		{B2C3D4E5-F6A7-8901-2345-678901BCDEF0}.Debug|x64.ActiveCfg = Release|x64
+		{B2C3D4E5-F6A7-8901-2345-678901BCDEF0}.Debug|x64.Build.0 = Release|x64
 		{B2C3D4E5-F6A7-8901-2345-678901BCDEF0}.Release|x64.ActiveCfg = Release|x64
 		{B2C3D4E5-F6A7-8901-2345-678901BCDEF0}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
