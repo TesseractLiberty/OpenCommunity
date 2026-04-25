@@ -1194,31 +1194,41 @@ namespace
         D3D11_TEXTURE2D_DESC desc = {};
         desc.Width = width;
         desc.Height = height;
-        desc.MipLevels = 1;
+        desc.MipLevels = 0; 
         desc.ArraySize = 1;
         desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         desc.SampleDesc.Count = 1;
         desc.Usage = D3D11_USAGE_DEFAULT;
-        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-
-        D3D11_SUBRESOURCE_DATA subresource = {};
-        subresource.pSysMem = pixels;
-        subresource.SysMemPitch = width * 4;
+        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+        desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
 
         ID3D11Texture2D* texture = nullptr;
-        if (FAILED(device->CreateTexture2D(&desc, &subresource, &texture)) || !texture) {
+        if (FAILED(device->CreateTexture2D(&desc, nullptr, &texture)) || !texture) {
             return nullptr;
         }
 
-        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-        srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Texture2D.MipLevels = 1;
+        ID3D11DeviceContext* context = nullptr;
+        device->GetImmediateContext(&context);
+        if (context) {
+            context->UpdateSubresource(texture, 0, nullptr, pixels, width * 4, 0);
+            
+            D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+            srvDesc.Format = desc.Format;
+            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            srvDesc.Texture2D.MipLevels = -1;
 
-        ID3D11ShaderResourceView* shaderResourceView = nullptr;
-        const HRESULT result = device->CreateShaderResourceView(texture, &srvDesc, &shaderResourceView);
+            ID3D11ShaderResourceView* shaderResourceView = nullptr;
+            if (SUCCEEDED(device->CreateShaderResourceView(texture, &srvDesc, &shaderResourceView))) {
+                context->GenerateMips(shaderResourceView);
+                context->Release();
+                texture->Release();
+                return shaderResourceView;
+            }
+            context->Release();
+        }
+        
         texture->Release();
-        return SUCCEEDED(result) ? shaderResourceView : nullptr;
+        return nullptr;
     }
 
     void NormalizePixelsToWhite(unsigned char* pixels, int width, int height)
@@ -2393,7 +2403,7 @@ namespace
         drawList->AddRectFilled(surfaceMin, surfaceMax, color::GetBackgroundU32(), 0.0f);
     }
 
-    // --- Topographic noise & contour system (Kali Linux style) ---
+    
     static float topoHash(int x, int y) {
         int h = x * 374761393 + y * 668265263;
         h = (h ^ (h >> 13)) * 1274126177;
@@ -2433,7 +2443,7 @@ namespace
         return value;
     }
 
-    void DrawTopographicBackground(ImDrawList* drawList, const ImVec2& origin, float width, float height, float /*elapsed*/, float alphaMultiplier = 1.0f) {
+    void DrawTopographicBackground(ImDrawList* drawList, const ImVec2& origin, float width, float height, float , float alphaMultiplier = 1.0f) {
         drawList->PushClipRect(origin, ImVec2(origin.x + width, origin.y + height), true);
 
         const int gridW = 120;
@@ -2445,7 +2455,7 @@ namespace
         const int lineAlpha = static_cast<int>(80.0f * (std::clamp)(alphaMultiplier, 0.0f, 1.0f));
         const ImU32 lineColor = color::GetTopographicLineU32(lineAlpha / 255.0f);
 
-        // sample noise grid
+        
         static float grid[121][91];
         static bool gridReady = false;
         static float cachedW = 0, cachedH = 0;
@@ -2462,7 +2472,7 @@ namespace
             cachedH = height;
         }
 
-        // marching squares for each contour level
+        
         for (int lv = 1; lv < numLevels; lv++) {
             float threshold = (float)lv / (float)numLevels;
 
@@ -2484,20 +2494,20 @@ namespace
                     float x0 = origin.x + gx * cellW;
                     float y0 = origin.y + gy * cellH;
 
-                    // interpolation helpers for edge midpoints
+                    
                     auto lerpEdge = [&](float va, float vb, float ax, float ay, float bx, float by) -> ImVec2 {
                         float t = (threshold - va) / (vb - va + 1e-6f);
                         t = (t < 0.0f) ? 0.0f : ((t > 1.0f) ? 1.0f : t);
                         return ImVec2(ax + (bx - ax) * t, ay + (by - ay) * t);
                     };
 
-                    // edge midpoints: top, right, bottom, left
+                    
                     ImVec2 eT = lerpEdge(v00, v10, x0, y0, x0 + cellW, y0);
                     ImVec2 eR = lerpEdge(v10, v11, x0 + cellW, y0, x0 + cellW, y0 + cellH);
                     ImVec2 eB = lerpEdge(v01, v11, x0, y0 + cellH, x0 + cellW, y0 + cellH);
                     ImVec2 eL = lerpEdge(v00, v01, x0, y0, x0, y0 + cellH);
 
-                    // draw line segments based on marching squares config
+                    
                     switch (config) {
                     case 1: case 14: drawList->AddLine(eT, eL, lineColor, 0.8f); break;
                     case 2: case 13: drawList->AddLine(eT, eR, lineColor, 0.8f); break;
@@ -2928,9 +2938,13 @@ namespace
         char popupId[128];
         snprintf(popupId, sizeof(popupId), "%s_picker", id ? id : "theme_color");
 
+        const float swatchSize = 24.0f;
+        const ImVec2 swatchMin(pos.x + size.x - swatchSize, pos.y + (size.y - swatchSize) * 0.5f);
+        const ImVec2 swatchMax(swatchMin.x + swatchSize, swatchMin.y + swatchSize);
+
         ImGui::PushID(id);
-        ImGui::SetCursorScreenPos(pos);
-        ImGui::InvisibleButton("##compact_theme_color_field", size);
+        ImGui::SetCursorScreenPos(swatchMin);
+        ImGui::InvisibleButton("##compact_theme_color_field", ImVec2(swatchSize, swatchSize));
 
         const bool hovered = ImGui::IsItemHovered();
         const bool active = ImGui::IsItemActive();
@@ -2939,36 +2953,12 @@ namespace
             ImGui::OpenPopup(popupId);
         }
 
-        const ImVec2 min = pos;
-        const ImVec2 max(pos.x + size.x, pos.y + size.y);
-        const ImU32 fieldColor = popupOpen || active
-            ? color::GetFieldActiveU32(0.98f)
-            : (hovered ? color::GetFieldHoverU32(0.96f) : color::GetFieldBgU32(0.94f));
-        drawList->AddRectFilled(min, max, fieldColor, 10.0f);
-        drawList->AddRect(min, max, color::GetBorderU32(popupOpen ? 0.98f : 0.86f), 10.0f, 0, popupOpen ? 1.4f : 1.0f);
-
-        const float swatchSize = size.y - 8.0f;
-        const ImVec2 swatchMin(min.x + 4.0f, min.y + 4.0f);
-        const ImVec2 swatchMax(swatchMin.x + swatchSize, swatchMin.y + swatchSize);
-        drawList->AddRectFilled(swatchMin, swatchMax, ImGui::ColorConvertFloat4ToU32(colorValue), 7.0f);
-        drawList->AddRect(swatchMin, swatchMax, color::GetBorderU32(0.94f), 7.0f, 0, 1.0f);
-
-        const float chevronCenterX = max.x - 12.0f;
-        const float chevronCenterY = min.y + size.y * 0.5f;
-        const ImU32 chevronColor = color::GetMutedTextU32(popupOpen || hovered ? 0.95f : 0.82f);
-        drawList->AddLine(
-            ImVec2(chevronCenterX - 3.5f, chevronCenterY - 1.5f),
-            ImVec2(chevronCenterX, chevronCenterY + 2.0f),
-            chevronColor,
-            1.6f);
-        drawList->AddLine(
-            ImVec2(chevronCenterX, chevronCenterY + 2.0f),
-            ImVec2(chevronCenterX + 3.5f, chevronCenterY - 1.5f),
-            chevronColor,
-            1.6f);
+        
+        drawList->AddRectFilled(swatchMin, swatchMax, ImGui::ColorConvertFloat4ToU32(colorValue), 6.0f);
+        drawList->AddRect(swatchMin, swatchMax, color::GetBorderU32(popupOpen || hovered ? 0.98f : 0.75f), 6.0f, 0, (popupOpen || active) ? 1.5f : 1.0f);
 
         bool changed = false;
-        ImGui::SetNextWindowPos(ImVec2(min.x, max.y + 8.0f), ImGuiCond_Appearing);
+        ImGui::SetNextWindowPos(ImVec2(pos.x, pos.y + size.y + 8.0f), ImGuiCond_Appearing);
         ImGui::SetNextWindowSize(ImVec2(242.0f, 0.0f), ImGuiCond_Appearing);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f);
         ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 8.0f);
@@ -3326,7 +3316,7 @@ LRESULT WINAPI Screen::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
 }
 
 LRESULT Screen::HandleWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    constexpr LONG kWindowDragHeight = 14;
+    constexpr LONG kWindowDragHeight = 40;
     auto isWithinDragStrip = [&](LPARAM mouseParam) -> bool {
         const LONG x = static_cast<LONG>(static_cast<SHORT>(LOWORD(mouseParam)));
         const LONG y = static_cast<LONG>(static_cast<SHORT>(HIWORD(mouseParam)));
@@ -3564,9 +3554,9 @@ bool Screen::LoadTextureFromMemory(const unsigned char* data, unsigned int dataS
     if (invertRGB) {
         int totalPixels = width * height;
         for (int p = 0; p < totalPixels; p++) {
-            pixels[p * 4 + 0] = 255 - pixels[p * 4 + 0]; // R
-            pixels[p * 4 + 1] = 255 - pixels[p * 4 + 1]; // G
-            pixels[p * 4 + 2] = 255 - pixels[p * 4 + 2]; // B
+            pixels[p * 4 + 0] = 255 - pixels[p * 4 + 0]; 
+            pixels[p * 4 + 1] = 255 - pixels[p * 4 + 1]; 
+            pixels[p * 4 + 2] = 255 - pixels[p * 4 + 2]; 
         }
     }
 
@@ -4687,7 +4677,7 @@ void Screen::RenderHUDPreview() {
     }
 }
 
-static void RenderModulesForCategory(ModuleCategory category, float areaWidth, float areaHeight, ImFont* fontBold, ImFont* fontBody, ID3D11Device* device) {
+static void RenderModulesForCategory(ModuleCategory category, float areaWidth, float areaHeight, ImFont* fontBold, ImFont* fontBody, ID3D11Device* device, const char* searchQuery = nullptr) {
     static float s_CategoryScroll[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     auto& modules = ModuleManager::Get()->GetModules(category);
     if (modules.empty()) return;
@@ -4721,9 +4711,9 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
     const float colW = (areaWidth - colGap) * 0.5f;
     const float toggleSize = 16.0f;
     const float bindW = 42.0f;
-    const float optLineH = 28.0f;
-    const float headerH = 28.0f;
-    const float cardRounding = 8.0f;
+    const float optLineH = 30.0f; 
+    const float headerH = 32.0f; 
+    const float cardRounding = 10.0f;
     const float contentBottomPad = 16.0f;
     const float visibleHeight = (areaHeight > contentBottomPad) ? (areaHeight - contentBottomPad) : areaHeight;
 
@@ -4745,12 +4735,22 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
 
     float layoutColY[2] = { 0.0f, 0.0f };
     for (const auto& mod : modules) {
+        if (searchQuery && searchQuery[0] != '\0') {
+            std::string name = mod->GetName();
+            std::string query = searchQuery;
+            std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+            std::transform(query.begin(), query.end(), query.begin(), ::tolower);
+            if (name.find(query) == std::string::npos) {
+                continue;
+            }
+        }
+
         const float cardHeight = getCardHeight(mod);
         const int col = (layoutColY[0] <= layoutColY[1]) ? 0 : 1;
         layoutColY[col] += cardHeight + cardGapY;
     }
 
-    const float totalContentHeight = (std::max)(0.0f, (std::max)(layoutColY[0], layoutColY[1]) - cardGapY);
+    const float totalContentHeight = (std::max)(0.0f, (std::max)(layoutColY[0], layoutColY[1]) - cardGapY + 60.0f); 
     const float maxScroll = (std::max)(0.0f, totalContentHeight - visibleHeight);
     const int categoryIndex = static_cast<int>(category);
     float& scrollOffset = s_CategoryScroll[categoryIndex];
@@ -4767,6 +4767,17 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
 
     for (int mi = 0; mi < (int)modules.size(); mi++) {
         auto& mod = modules[mi];
+
+        if (searchQuery && searchQuery[0] != '\0') {
+            std::string name = mod->GetName();
+            std::string query = searchQuery;
+            std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+            std::transform(query.begin(), query.end(), query.begin(), ::tolower);
+            if (name.find(query) == std::string::npos) {
+                continue;
+            }
+        }
+
         const auto visibleOptionOrder = GetVisibleOptionOrder(mod);
         const int optCount = static_cast<int>(visibleOptionOrder.size());
         const float cardH = getCardHeight(mod);
@@ -4778,10 +4789,22 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
         ImVec2 cardMin(cx, cy);
         ImVec2 cardMax(cx + colW, cy + cardH);
 
-        dl->AddRectFilled(cardMin, cardMax, color::GetPanelU32(0.82f), cardRounding);
-        dl->AddRect(cardMin, cardMax, color::GetBorderU32(0.66f), cardRounding, 0, 1.0f);
+        bool enabled = mod->IsEnabled();
+        
+        if (enabled) {
+            float hue = fmodf((float)ImGui::GetTime() * 0.4f, 1.0f);
+            ImVec4 glowColor;
+            ImGui::ColorConvertHSVtoRGB(hue, 0.6f, 1.0f, glowColor.x, glowColor.y, glowColor.z);
+            for (int i = 1; i <= 3; i++) {
+                dl->AddRect(cardMin, cardMax, ImGui::ColorConvertFloat4ToU32(ImVec4(glowColor.x, glowColor.y, glowColor.z, 0.15f / i)), cardRounding, 0, (float)i * 1.5f);
+            }
+        } else {
+            dl->AddRect(cardMin, ImVec2(cardMax.x + 2, cardMax.y + 2), color::GetGlassShadowU32(0.08f), cardRounding, 0, 2.0f);
+        }
 
-        // Render module prefix icon if available
+        dl->AddRectFilled(cardMin, cardMax, color::GetPanelU32(enabled ? 0.96f : 0.82f), cardRounding);
+        dl->AddRect(cardMin, cardMax, color::GetBorderU32(enabled ? 0.85f : 0.66f), cardRounding, 0, 1.0f);
+
         const float prefixIconSize = 20.0f;
         float nameOffsetX = 0.0f;
         if (device) {
@@ -4797,20 +4820,29 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                         NormalizePixelsToWhite(pixels, tw, th);
                         D3D11_TEXTURE2D_DESC desc = {};
                         desc.Width = tw; desc.Height = th;
-                        desc.MipLevels = 1; desc.ArraySize = 1;
+                        desc.MipLevels = 0; 
+                        desc.ArraySize = 1;
                         desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                         desc.SampleDesc.Count = 1;
                         desc.Usage = D3D11_USAGE_DEFAULT;
-                        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-                        D3D11_SUBRESOURCE_DATA sub = {};
-                        sub.pSysMem = pixels; sub.SysMemPitch = tw * 4;
+                        desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+                        desc.MiscFlags = D3D11_RESOURCE_MISC_GENERATE_MIPS;
+                        
                         ID3D11Texture2D* tex = nullptr;
-                        if (SUCCEEDED(device->CreateTexture2D(&desc, &sub, &tex))) {
-                            D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-                            srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                            srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                            srvDesc.Texture2D.MipLevels = 1;
-                            device->CreateShaderResourceView(tex, &srvDesc, &srv);
+                        if (SUCCEEDED(device->CreateTexture2D(&desc, nullptr, &tex))) {
+                            ID3D11DeviceContext* context = nullptr;
+                            device->GetImmediateContext(&context);
+                            if (context) {
+                                context->UpdateSubresource(tex, 0, nullptr, pixels, tw * 4, 0);
+                                D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+                                srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                                srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+                                srvDesc.Texture2D.MipLevels = -1;
+                                if (SUCCEEDED(device->CreateShaderResourceView(tex, &srvDesc, &srv))) {
+                                    context->GenerateMips(srv);
+                                }
+                                context->Release();
+                            }
                             tex->Release();
                         }
                     }
@@ -4842,10 +4874,10 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
             }
 
             if (moduleIcon) {
-                float iconY = cy + (headerH - prefixIconSize) * 0.5f;
-                float iconX = cx + cardPadX;
-                dl->AddImage((ImTextureID)moduleIcon, ImVec2(iconX, iconY), ImVec2(iconX + prefixIconSize, iconY + prefixIconSize), ImVec2(0, 0), ImVec2(1, 1), color::GetIconTintU32());
-                nameOffsetX = prefixIconSize + 6.0f;
+                float iconY = floorf(cy + (headerH - prefixIconSize) * 0.5f);
+                float iconX = floorf(cx + cardPadX);
+                dl->AddImage((ImTextureID)moduleIcon, ImVec2(iconX, iconY), ImVec2(iconX + prefixIconSize, iconY + prefixIconSize), ImVec2(0, 0), ImVec2(1, 1), color::GetStrongTextU32(0.9f));
+                nameOffsetX = prefixIconSize + 8.0f;
             }
         }
 
@@ -4941,17 +4973,22 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
             if (betaBadgeX + betaBadgeWidth <= toggleX - 8.0f) {
                 const ImVec2 betaMin(betaBadgeX, betaBadgeY);
                 const ImVec2 betaMax(betaBadgeX + betaBadgeWidth, betaBadgeY + betaBadgeHeight);
-                dl->AddRectFilled(betaMin, betaMax, color::GetDangerU32(), 5.0f);
+                
+                dl->AddRectFilled(betaMin, betaMax, IM_COL32(255, 60, 60, 255), 5.0f);
+                dl->AddRectFilledMultiColor(betaMin, betaMax, 
+                    IM_COL32(255, 100, 100, 40), IM_COL32(255, 60, 60, 0),
+                    IM_COL32(255, 60, 60, 0), IM_COL32(255, 100, 100, 40));
+                
                 dl->AddText(
                     bf,
                     bfs,
                     ImVec2(betaMin.x + (betaBadgeWidth - betaTextSize.x) * 0.5f, betaMin.y + (betaBadgeHeight - betaTextSize.y) * 0.5f),
-                    IM_COL32(255, 255, 255, 255),
+                    IM_COL32(255, 255, 255, 240),
                     betaLabel);
             }
         }
 
-        bool enabled = mod->IsEnabled();
+        enabled = mod->IsEnabled();
         ImU32 toggleBg = enabled ? color::GetStrongTextU32() : color::GetPanelActiveU32(0.88f);
         dl->AddRectFilled(toggleMin, toggleMax, toggleBg, 4.0f);
         if (enabled) {
@@ -4976,10 +5013,8 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
             float optX = cx + cardPadX;
             float optW = colW - cardPadX * 2;
 
-            // Push body font so widgets render at correct 17pt size
             if (fontBody) ImGui::PushFont(fontBody);
 
-            // Push light style for ImGui widgets on white/light cards
             ImGui::PushStyleColor(ImGuiCol_FrameBg, color::GetFieldBgVec4());
             ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, color::GetFieldHoverVec4());
             ImGui::PushStyleColor(ImGuiCol_FrameBgActive, color::GetFieldActiveVec4());
@@ -5029,7 +5064,6 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                         break;
                     }
 
-                    // Custom drawn checkbox to match card style
                     float cbY = optY + (optLineH - cbSize) * 0.5f;
                     ImVec2 cbMin(cbX, cbY);
                     ImVec2 cbMax(cbX + cbSize, cbY + cbSize);
@@ -5059,12 +5093,11 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                 case OptionType::SliderInt: {
                     dl->AddText(labelFont, labelFS, ImVec2(optX, optY + (optLineH - labelFS) * 0.5f), color::GetStrongTextU32(), opt.name.c_str());
 
-                    // Custom thin rounded slider — positioned right after label text
                     const float sliderH = 6.0f;
                     const float grabRadius = 7.0f;
                     ImVec2 labelSize = labelFont->CalcTextSizeA(labelFS, FLT_MAX, 0.0f, opt.name.c_str());
                     float sliderX = optX + labelSize.x + 12.0f;
-                    float actualSliderW = optX + optW - sliderX - 30.0f;
+                    float actualSliderW = optX + optW - sliderX - 38.0f;
                     if (actualSliderW < 40.0f) actualSliderW = 40.0f;
                     float sliderY = optY + (optLineH - sliderH) * 0.5f;
                     ImVec2 trackMin(sliderX, sliderY);
@@ -5090,11 +5123,9 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     if (opt.intValue < opt.intMin) opt.intValue = opt.intMin;
                     if (opt.intValue > opt.intMax) opt.intValue = opt.intMax;
 
-                    // Track background
                     dl->AddRectFilled(trackMin, trackMax, color::GetPanelActiveU32(0.92f), trackRounding);
                     dl->AddRect(trackMin, trackMax, color::GetBorderU32(0.72f), trackRounding, 0, 1.0f);
 
-                    // Filled portion
                     float tNorm = (opt.intMax > opt.intMin) ? (float)(opt.intValue - opt.intMin) / (float)(opt.intMax - opt.intMin) : 0.0f;
                     if (tNorm < 0.0f) tNorm = 0.0f; if (tNorm > 1.0f) tNorm = 1.0f;
                     float fillX = sliderX + tNorm * actualSliderW;
@@ -5102,28 +5133,26 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                         dl->AddRectFilled(trackMin, ImVec2(fillX, trackMax.y), color::GetStrongTextU32(), trackRounding);
                     }
 
-                    // Grab circle
                     float grabCX = sliderX + tNorm * actualSliderW;
                     float grabCY = sliderY + sliderH * 0.5f;
                     dl->AddCircleFilled(ImVec2(grabCX, grabCY), grabRadius, color::GetStrongTextU32());
-                    dl->AddCircle(ImVec2(grabCX, grabCY), grabRadius, color::GetModuleAltTextU32(), 0, 1.2f);
+                    dl->AddCircle(ImVec2(grabCX, grabCY), grabRadius, color::GetPanelU32(), 0, 1.5f);
 
-                    // Value text
                     char valBuf[32];
                     snprintf(valBuf, sizeof(valBuf), "%d", opt.intValue);
-                    dl->AddText(labelFont, labelFS, ImVec2(sliderX + actualSliderW + 7.0f, optY + (optLineH - labelFS) * 0.5f), color::GetSecondaryTextU32(), valBuf);
+                    ImVec2 valSize = labelFont->CalcTextSizeA(labelFS, FLT_MAX, 0.0f, valBuf);
+                    dl->AddText(labelFont, labelFS, ImVec2(optX + optW - valSize.x - 4.0f, optY + (optLineH - labelFS) * 0.5f), color::GetSecondaryTextU32(), valBuf);
 
                     break;
                 }
                 case OptionType::SliderFloat: {
                     dl->AddText(labelFont, labelFS, ImVec2(optX, optY + (optLineH - labelFS) * 0.5f), color::GetStrongTextU32(), opt.name.c_str());
 
-                    // Custom thin rounded slider — positioned right after label text
                     const float sliderH = 6.0f;
                     const float grabRadius = 7.0f;
                     ImVec2 labelSizeF = labelFont->CalcTextSizeA(labelFS, FLT_MAX, 0.0f, opt.name.c_str());
                     float sliderX = optX + labelSizeF.x + 12.0f;
-                    float actualSliderWF = optX + optW - sliderX - 30.0f;
+                    float actualSliderWF = optX + optW - sliderX - 48.0f;
                     if (actualSliderWF < 40.0f) actualSliderWF = 40.0f;
                     float sliderY = optY + (optLineH - sliderH) * 0.5f;
                     ImVec2 trackMin(sliderX, sliderY);
@@ -5149,11 +5178,9 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                     if (opt.floatValue < opt.floatMin) opt.floatValue = opt.floatMin;
                     if (opt.floatValue > opt.floatMax) opt.floatValue = opt.floatMax;
 
-                    // Track background
                     dl->AddRectFilled(trackMin, trackMax, color::GetPanelActiveU32(0.92f), trackRounding);
                     dl->AddRect(trackMin, trackMax, color::GetBorderU32(0.72f), trackRounding, 0, 1.0f);
 
-                    // Filled portion
                     float tNorm = (opt.floatMax > opt.floatMin) ? (opt.floatValue - opt.floatMin) / (opt.floatMax - opt.floatMin) : 0.0f;
                     if (tNorm < 0.0f) tNorm = 0.0f; if (tNorm > 1.0f) tNorm = 1.0f;
                     float fillX = sliderX + tNorm * actualSliderWF;
@@ -5161,16 +5188,15 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
                         dl->AddRectFilled(trackMin, ImVec2(fillX, trackMax.y), color::GetStrongTextU32(), trackRounding);
                     }
 
-                    // Grab circle
                     float grabCX = sliderX + tNorm * actualSliderWF;
                     float grabCY = sliderY + sliderH * 0.5f;
                     dl->AddCircleFilled(ImVec2(grabCX, grabCY), grabRadius, color::GetStrongTextU32());
-                    dl->AddCircle(ImVec2(grabCX, grabCY), grabRadius, color::GetModuleAltTextU32(), 0, 1.2f);
+                    dl->AddCircle(ImVec2(grabCX, grabCY), grabRadius, color::GetPanelU32(), 0, 1.5f);
 
-                    // Value text
                     char valBuf[32];
                     snprintf(valBuf, sizeof(valBuf), "%.2f", opt.floatValue);
-                    dl->AddText(labelFont, labelFS, ImVec2(sliderX + actualSliderWF + 7.0f, optY + (optLineH - labelFS) * 0.5f), color::GetSecondaryTextU32(), valBuf);
+                    ImVec2 valSize = labelFont->CalcTextSizeA(labelFS, FLT_MAX, 0.0f, valBuf);
+                    dl->AddText(labelFont, labelFS, ImVec2(optX + optW - valSize.x - 4.0f, optY + (optLineH - labelFS) * 0.5f), color::GetSecondaryTextU32(), valBuf);
 
                     break;
                 }
@@ -5332,22 +5358,22 @@ static void RenderModulesForCategory(ModuleCategory category, float areaWidth, f
 }
 
 void Screen::RenderCombatTab() {
-    const float contentW = m_Width - 52.0f - 16.0f - 16.0f;
-    RenderModulesForCategory(ModuleCategory::Combat, contentW, m_Height, m_FontBold, m_FontBody, m_Device);
+    const float contentW = m_Width - m_SidebarWidth - 16.0f - 16.0f;
+    RenderModulesForCategory(ModuleCategory::Combat, contentW, m_Height, m_FontBold, m_FontBody, m_Device, m_SearchQuery);
 }
 
 void Screen::RenderMovementTab() {
-    const float contentW = m_Width - 52.0f - 16.0f - 16.0f;
-    RenderModulesForCategory(ModuleCategory::Movement, contentW, m_Height, m_FontBold, m_FontBody, m_Device);
+    const float contentW = m_Width - m_SidebarWidth - 16.0f - 16.0f;
+    RenderModulesForCategory(ModuleCategory::Movement, contentW, m_Height, m_FontBold, m_FontBody, m_Device, m_SearchQuery);
 }
 
 void Screen::RenderVisualsTab() {
-    const float contentW = m_Width - 52.0f - 16.0f - 16.0f;
-    RenderModulesForCategory(ModuleCategory::Visuals, contentW, m_Height, m_FontBold, m_FontBody, m_Device);
+    const float contentW = m_Width - m_SidebarWidth - 16.0f - 16.0f;
+    RenderModulesForCategory(ModuleCategory::Visuals, contentW, m_Height, m_FontBold, m_FontBody, m_Device, m_SearchQuery);
 }
 
 void Screen::RenderSettingsTab() {
-    const float contentW = m_Width - 52.0f - 16.0f - 16.0f;
+    const float contentW = m_Width - m_SidebarWidth - 16.0f - 16.0f;
     ImDrawList* drawList = ImGui::GetWindowDrawList();
     if (!drawList) {
         return;
@@ -6515,13 +6541,22 @@ void Screen::RenderMainInterfaceLayer(const char* windowName, const ImVec2& wind
         ImVec2 wp = ImGui::GetWindowPos();
 
         dl->AddRectFilled(wp, ImVec2(wp.x + m_Width, wp.y + m_Height), color::GetBackgroundU32());
-        DrawTopographicBackground(dl, wp, m_Width, m_Height, 0.0f);
+        DrawTopographicBackground(dl, wp, m_Width, m_Height, 0.0f, 0.55f);
 
-        const float sidebarW = 52.0f;
-        const float iconSize = 30.0f;
-        const float iconPadY = 20.0f;
+      
+        const float deltaTime = ImGui::GetIO().DeltaTime;
+        m_SidebarTargetWidth = m_IsSidebarHovered ? 160.0f : 52.0f;
+        const float lerpAmount = 1.0f - std::exp(-deltaTime * 12.0f);
+        m_SidebarWidth += (m_SidebarTargetWidth - m_SidebarWidth) * lerpAmount;
+
+        const float sidebarW = m_SidebarWidth;
+        const float iconSize = 24.0f;
+        const float iconPadY = 32.0f;
         const float totalIconsH = 4 * iconSize + 3 * iconPadY;
+        const float sidebarCenterX = 26.0f;
         const float startY = wp.y + (m_Height - totalIconsH) * 0.5f;
+
+        m_IsSidebarHovered = ImGui::IsMouseHoveringRect(wp, ImVec2(wp.x + sidebarW + 20.0f, wp.y + m_Height));
 
         const float lineX = wp.x + sidebarW;
         const float lineH = (m_Height - 20.0f) / 1.5f;
@@ -6533,37 +6568,113 @@ void Screen::RenderMainInterfaceLayer(const char* windowName, const ImVec2& wind
         ID3D11ShaderResourceView* icons[4] = { m_IconCombat, m_IconMovement, m_IconVisuals, m_IconSettings };
 
         for (int i = 0; i < 4; i++) {
-            float iconY = startY + i * (iconSize + iconPadY);
-            float iconX = wp.x + (sidebarW - iconSize) * 0.5f;
+            float iconY = floorf(startY + i * (iconSize + iconPadY));
+            float iconX = floorf(wp.x + sidebarCenterX - (iconSize * 0.5f)); 
 
             ImVec2 iconMin(iconX, iconY);
             ImVec2 iconMax(iconX + iconSize, iconY + iconSize);
 
-            ImGui::SetCursorScreenPos(iconMin);
+            
+            ImGui::SetCursorScreenPos(ImVec2(wp.x, iconY - 4.0f));
             char btnId[32];
             snprintf(btnId, sizeof(btnId), "##icon_%d", i);
-            if (ImGui::InvisibleButton(btnId, ImVec2(iconSize, iconSize))) {
+            if (ImGui::InvisibleButton(btnId, ImVec2(sidebarW, iconSize + 8.0f))) {
                 m_CurrentTab = i;
             }
 
+            const bool isSelected = (m_CurrentTab == i);
+            const bool isHovered = ImGui::IsItemHovered();
+
             if (icons[i]) {
                 ImU32 tintCol;
-                if (m_CurrentTab == i) {
+                if (isSelected) {
                     float hue = fmodf((float)ImGui::GetTime() * 0.5f, 1.0f);
                     ImVec4 rgb;
                     ImGui::ColorConvertHSVtoRGB(hue, 0.85f, 1.0f, rgb.x, rgb.y, rgb.z);
                     tintCol = IM_COL32((int)(rgb.x * 255), (int)(rgb.y * 255), (int)(rgb.z * 255), 255);
+                    
+                    dl->AddRectFilled(ImVec2(wp.x, iconY - 2.0f), ImVec2(wp.x + 3.0f, iconY + iconSize + 2.0f), tintCol, 1.5f);
                 } else {
-                    tintCol = color::GetIconTintU32();
+                    tintCol = isHovered ? color::GetStrongTextU32(0.9f) : color::GetIconTintU32();
                 }
                 dl->AddImage((ImTextureID)icons[i], iconMin, iconMax, ImVec2(0, 0), ImVec2(1, 1), tintCol);
             }
+
+            if (sidebarW > 54.0f) {
+                ImGui::PushClipRect(ImVec2(wp.x, wp.y), ImVec2(wp.x + sidebarW - 4.0f, wp.y + m_Height), true);
+                const char* tabNames[] = { "Combat", "Movement", "Visuals", "Settings" };
+                const float t = Clamp01((sidebarW - 54.0f) / 90.0f);
+                const float textAlpha = 1.0f - powf(1.0f - t, 2.0f); 
+                const float slideX = (1.0f - t) * -8.0f; 
+                const float textX = floorf(wp.x + 48.0f + slideX);
+                dl->AddText(m_FontBoldMed, 18.0f, ImVec2(textX, floorf(iconY + (iconSize - 18.0f) * 0.5f)), 
+                    color::GetStrongTextU32(textAlpha), tabNames[i]);
+                ImGui::PopClipRect();
+            }
+        }
+
+        
+        const float profileAreaH = 60.0f;
+        const float profileY = wp.y + m_Height - profileAreaH - 10.0f;
+        const float headSize = 32.0f;
+        const float headX = wp.x + (52.0f - headSize) * 0.5f;
+        const ImVec2 headMin(headX, profileY + (profileAreaH - headSize) * 0.5f);
+        const ImVec2 headMax(headMin.x + headSize, headMin.y + headSize);
+        
+        ModuleConfig* profileConfig = Bridge::Get()->GetConfig();
+        std::string username = (profileConfig && profileConfig->m_Username[0]) ? profileConfig->m_Username : "Guest";
+        DrawPlayerHeadPreview(dl, m_Device, m_FontBodyMed, 16.0f, username, headMin, headMax);
+
+        if (sidebarW > 80.0f) {
+            const float textAlpha = Clamp01((sidebarW - 80.0f) / 80.0f);
+            dl->AddText(m_FontBoldMed, 16.0f, ImVec2(headX + headSize + 10.0f, headMin.y + 2.0f), 
+                color::GetStrongTextU32(textAlpha), username.c_str());
+            dl->AddText(m_FontBody, 12.0f, ImVec2(headX + headSize + 10.0f, headMin.y + 18.0f), 
+                color::GetMutedTextU32(textAlpha * 0.8f), "Connected");
         }
 
         const float contentX = sidebarW + 16.0f;
-        ImGui::SetCursorScreenPos(ImVec2(wp.x + contentX, wp.y + 16.0f));
+        const float searchH = (m_CurrentTab != 3) ? 34.0f : 0.0f;
+        const float searchGap = (m_CurrentTab != 3) ? 12.0f : 0.0f;
+
+        if (m_CurrentTab != 3) {
+            const float availableW = m_Width - contentX - 32.0f;
+            const float searchW = (std::min)(340.0f, availableW);
+            const float searchX = contentX + (availableW - searchW) * 0.5f; 
+            const ImVec2 searchPos(wp.x + searchX, wp.y + 16.0f);
+            const ImVec2 searchMin = searchPos;
+            const ImVec2 searchMax(searchMin.x + searchW, searchMin.y + searchH);
+            
+            dl->AddRectFilled(searchMin, searchMax, color::GetFieldBgU32(0.85f), 17.0f);
+            dl->AddRect(searchMin, searchMax, color::GetBorderU32(0.60f), 17.0f, 0, 1.0f);
+            
+            const float magnifyingGlassSize = 16.0f;
+            const ImVec2 mgMin(searchMin.x + 12.0f, searchMin.y + (searchH - magnifyingGlassSize) * 0.5f);
+            dl->AddCircle(ImVec2(mgMin.x + 6, mgMin.y + 6), 5.0f, color::GetMutedTextU32(), 0, 1.5f);
+            dl->AddLine(ImVec2(mgMin.x + 9, mgMin.y + 9), ImVec2(mgMin.x + 13, mgMin.y + 13), color::GetMutedTextU32(), 1.5f);
+
+            ImGui::SetCursorScreenPos(ImVec2(searchMin.x + 34.0f, searchMin.y + (searchH - 17.0f) * 0.5f)); 
+            ImGui::PushItemWidth(searchW - 44.0f);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0, 0, 0, 0));
+            ImGui::PushStyleColor(ImGuiCol_Text, color::GetStrongTextU32());
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0)); 
+            
+            if (m_SearchQuery[0] == '\0') {
+                dl->AddText(m_FontBody, 16.0f, ImVec2(searchMin.x + 34.0f, searchMin.y + (searchH - 17.0f) * 0.5f), color::GetMutedTextU32(0.6f), "Search modules...");
+            }
+            
+            ImGui::InputText("##global_search", m_SearchQuery, sizeof(m_SearchQuery));
+            ImGui::PopStyleVar(2);
+            ImGui::PopStyleColor(4);
+            ImGui::PopItemWidth();
+        }
+
+        ImGui::SetCursorScreenPos(ImVec2(wp.x + contentX, wp.y + 16.0f + searchH + searchGap));
         ImGui::BeginGroup();
-        ImGui::PushClipRect(ImVec2(wp.x + contentX, wp.y), ImVec2(wp.x + m_Width, wp.y + m_Height), true);
+        ImGui::PushClipRect(ImVec2(wp.x + contentX, wp.y + 16.0f + searchH + searchGap), ImVec2(wp.x + m_Width, wp.y + m_Height), true);
 
         switch (m_CurrentTab) {
         case 0: RenderCombatTab(); break;
@@ -6586,7 +6697,7 @@ void Screen::RenderMainInterfaceLayer(const char* windowName, const ImVec2& wind
     }
 
 
-    // Automatically process keybinds and sync all modules to shared memory
+    
     if (interactive) {
         ModuleManager::Get()->UpdateLauncher(Bridge::Get()->GetConfig());
         if (m_WindowMode == WindowMode::MainLauncher) {
