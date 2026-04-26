@@ -12,6 +12,7 @@
 class ModuleManager {
 public:
     using KeybindProcessPredicate = std::function<bool(DWORD)>;
+    using KeybindInputBlockPredicate = std::function<bool()>;
     using ModuleToggleCallback = std::function<void(const Module& module, bool enabled)>;
 
     static ModuleManager* Get() {
@@ -21,6 +22,10 @@ public:
 
     void SetKeybindProcessPredicate(KeybindProcessPredicate predicate) {
         m_KeybindProcessPredicate = std::move(predicate);
+    }
+
+    void SetKeybindInputBlockPredicate(KeybindInputBlockPredicate predicate) {
+        m_KeybindInputBlockPredicate = std::move(predicate);
     }
 
     void SetModuleToggleCallback(ModuleToggleCallback callback) {
@@ -61,7 +66,11 @@ public:
     }
 
     void ProcessKeybinds() {
-        if (!IsKeybindInputAllowed()) {
+        const std::unordered_map<int, bool> currentKeyStates = CaptureBoundKeyStates();
+        const bool canProcessInput = IsKeybindInputAllowed() && !IsKeybindInputBlocked();
+
+        if (!canProcessInput) {
+            m_KeybindDownStates = currentKeyStates;
             return;
         }
 
@@ -73,13 +82,22 @@ public:
                 }
 
                 const int key = module->GetKeybind();
-                if (key != 0 && (GetAsyncKeyState(key) & 1)) {
+                const auto currentIt = currentKeyStates.find(key);
+                if (currentIt == currentKeyStates.end() || !currentIt->second) {
+                    continue;
+                }
+
+                const auto previousIt = m_KeybindDownStates.find(key);
+                const bool wasDown = previousIt != m_KeybindDownStates.end() && previousIt->second;
+                if (!wasDown) {
                     const bool wasEnabled = module->IsEnabled();
                     module->Toggle();
                     NotifyEnabledChangeIfNeeded(*module, wasEnabled, module->IsEnabled());
                 }
             }
         }
+
+        m_KeybindDownStates = currentKeyStates;
     }
 
     void SyncAllToConfig(void* configPtr) {
@@ -201,6 +219,31 @@ private:
         }
     }
 
+    std::unordered_map<int, bool> CaptureBoundKeyStates() const {
+        std::unordered_map<int, bool> states;
+        for (const auto& [category, modules] : m_Modules) {
+            (void)category;
+            for (const auto& module : modules) {
+                if (!module || !module->SupportsKeybind()) {
+                    continue;
+                }
+
+                const int key = module->GetKeybind();
+                if (key <= 0 || key >= 256 || states.find(key) != states.end()) {
+                    continue;
+                }
+
+                states.emplace(key, (GetAsyncKeyState(key) & 0x8000) != 0);
+            }
+        }
+
+        return states;
+    }
+
+    bool IsKeybindInputBlocked() const {
+        return m_KeybindInputBlockPredicate && m_KeybindInputBlockPredicate();
+    }
+
     bool IsKeybindInputAllowed() const {
         HWND foregroundWindow = GetForegroundWindow();
         if (!foregroundWindow || !IsWindow(foregroundWindow)) {
@@ -226,7 +269,9 @@ private:
 
     std::unordered_map<ModuleCategory, std::vector<std::shared_ptr<Module>>> m_Modules;
     std::unordered_map<std::string, bool> m_KnownEnabledStates;
+    std::unordered_map<int, bool> m_KeybindDownStates;
     KeybindProcessPredicate m_KeybindProcessPredicate;
+    KeybindInputBlockPredicate m_KeybindInputBlockPredicate;
     ModuleToggleCallback m_ModuleToggleCallback;
     bool m_EnableStatePrimed = false;
 };

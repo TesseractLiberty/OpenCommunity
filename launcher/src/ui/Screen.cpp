@@ -3806,6 +3806,19 @@ bool Screen::Initialize() {
             const auto* info = Singleton<ClientInfo>::Get();
             return info && info->m_TargetPid != 0 && processId == info->m_TargetPid;
         });
+        ModuleManager::Get()->SetKeybindInputBlockPredicate([]() {
+            const ModuleConfig* config = Bridge::Get()->GetConfig();
+            if (config && config->Runtime.m_KeybindInputBlocked) {
+                return true;
+            }
+
+            if (ImGui::GetCurrentContext()) {
+                const ImGuiIO& io = ImGui::GetIO();
+                return io.WantCaptureKeyboard || io.WantTextInput || ImGui::IsAnyItemActive();
+            }
+
+            return false;
+        });
         ModuleManager::Get()->SyncAllFromConfig(Bridge::Get()->GetConfig());
     } else {
         RegisterEnemyInfoWindowState();

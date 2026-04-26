@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "GameThreadHook.h"
+#include "Bridge.h"
 #include "../../../deps/minhook/MinHook.h"
 #include "../../../shared/common/modules/ModuleManager.h"
 #include "../../../shared/common/logging/Logger.h"
@@ -197,6 +198,32 @@ namespace {
         return std::find(state.suggestions.begin(), state.suggestions.end(), value) != state.suggestions.end();
     }
 
+    void SetKeybindInputBlocked(bool blocked) {
+        ModuleConfig* config = Bridge::Get()->GetConfig();
+        if (config) {
+            config->Runtime.m_KeybindInputBlocked = blocked;
+        }
+    }
+
+    bool IsGuiChatScreen(JNIEnv* env, jobject currentScreen) {
+        if (!env || !currentScreen || !g_Game || !g_Game->IsInitialized()) {
+            return false;
+        }
+
+        Class* guiChatClass = g_Game->FindClass(Mapper::Get("net/minecraft/client/gui/GuiChat"));
+        return guiChatClass && env->IsInstanceOf(currentScreen, reinterpret_cast<jclass>(guiChatClass));
+    }
+
+    void UpdateKeybindInputBlockState(JNIEnv* env) {
+        if (!env || !g_Game || !g_Game->IsInitialized()) {
+            SetKeybindInputBlocked(false);
+            return;
+        }
+
+        JniLocalRef<jobject> currentScreen(env, Minecraft::GetCurrentScreen(env));
+        SetKeybindInputBlocked(IsGuiChatScreen(env, currentScreen.Get()));
+    }
+
     bool ResolveGuiChatBindings(JNIEnv* env, Class*& guiChatClass, Field*& inputField, Method*& getTextMethod, Method*& setTextMethod) {
         if (!env || !g_Game || !g_Game->IsInitialized()) {
             return false;
@@ -225,6 +252,7 @@ namespace {
         static GameChatAutocompleteState autocompleteState;
 
         if (!env || !g_Game || !g_Game->IsInitialized()) {
+            SetKeybindInputBlocked(false);
             return;
         }
 
@@ -237,10 +265,15 @@ namespace {
         Method* getTextMethod = nullptr;
         Method* setTextMethod = nullptr;
         const bool hasGuiBindings = ResolveGuiChatBindings(env, guiChatClass, inputField, getTextMethod, setTextMethod);
-        const bool isGuiChatOpen = hasGuiBindings && currentScreen &&
-            env->IsInstanceOf(currentScreen.Get(), reinterpret_cast<jclass>(guiChatClass));
+        const bool isGuiChatOpen = IsGuiChatScreen(env, currentScreen.Get());
+        SetKeybindInputBlocked(isGuiChatOpen);
 
         if (isGuiChatOpen) {
+            if (!hasGuiBindings) {
+                chatWasOpen = true;
+                return;
+            }
+
             JniLocalRef<jobject> textFieldObject(env, inputField->GetObjectField(env, currentScreen.Get()));
             JniLocalRef<jobject> textObject(
                 env,
@@ -982,9 +1015,11 @@ void GameThreadHook::SanitizeInteractionState(void* envPtr)
 {
     auto* env = static_cast<JNIEnv*>(envPtr);
     if (!env) {
+        SetKeybindInputBlocked(false);
         return;
     }
 
+    UpdateKeybindInputBlockState(env);
     SanitizeHiddenObjectMouseOver(env);
 }
 

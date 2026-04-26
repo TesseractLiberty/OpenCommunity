@@ -22,7 +22,7 @@ enum class GameChatOutputMode {
 
 struct ModuleConfig {
     static constexpr std::uint32_t kMagic = 0x4746434F; // OCFG
-    static constexpr std::uint32_t kVersion = 10;
+    static constexpr std::uint32_t kVersion = 11;
 
     std::uint32_t m_Magic = kMagic;
     std::uint32_t m_Version = kVersion;
@@ -32,6 +32,10 @@ struct ModuleConfig {
     bool m_Destruct = false;
     bool m_FullDestruct = false;
     char m_Username[64] = {};
+
+    struct {
+        bool m_KeybindInputBlocked = false;
+    } Runtime;
 
     struct {
         bool m_UseGameChat = false;
