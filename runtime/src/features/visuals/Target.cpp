@@ -1468,6 +1468,8 @@ void Target::TickSynchronous(void* envPtr) {
         ClearTargetHealthCache();
         m_PreviousSwingProgressInt = 0;
         m_PreviousPhysicalClick = false;
+        m_BrowseDamageTrackedTargetName.clear();
+        m_LastBrowseTrackedHurtTime = 0;
         return;
     }
 
@@ -1480,6 +1482,8 @@ void Target::TickSynchronous(void* envPtr) {
     if (!worldObject) {
         ClearOnlinePlayersToConfig(config);
         ClearTargetHealthCache();
+        m_BrowseDamageTrackedTargetName.clear();
+        m_LastBrowseTrackedHurtTime = 0;
         return;
     }
 
@@ -1505,6 +1509,8 @@ void Target::TickSynchronous(void* envPtr) {
         ClearTargetHealthCache();
         m_PreviousSwingProgressInt = 0;
         m_PreviousPhysicalClick = false;
+        m_BrowseDamageTrackedTargetName.clear();
+        m_LastBrowseTrackedHurtTime = 0;
         SyncOnlinePlayersToConfigSafe(env, world, localPlayerObject, config);
         if (localPlayerObject) {
             env->DeleteLocalRef(localPlayerObject);
@@ -1519,6 +1525,8 @@ void Target::TickSynchronous(void* envPtr) {
     if (!localPlayerObject) {
         m_PreviousSwingProgressInt = 0;
         m_PreviousPhysicalClick = false;
+        m_BrowseDamageTrackedTargetName.clear();
+        m_LastBrowseTrackedHurtTime = 0;
         env->DeleteLocalRef(worldObject);
         return;
     }
@@ -1556,14 +1564,24 @@ void Target::TickSynchronous(void* envPtr) {
 
             SetLockedTarget(nextTarget);
             m_BrowseHitCount = 0;
+            m_BrowseDamageTrackedTargetName.clear();
+            m_LastBrowseTrackedHurtTime = 0;
             m_LastBrowseSwitchTime = std::chrono::steady_clock::now();
             return true;
         };
 
-        auto isLockedBrowseTargetRendered = [&]() -> bool {
+        struct LockedBrowseTargetObservation {
+            bool rendered = false;
+            bool tookDamage = false;
+        };
+
+        auto observeLockedBrowseTarget = [&]() -> LockedBrowseTargetObservation {
+            LockedBrowseTargetObservation observation;
             const std::string lockedTarget = GetLockedTarget();
             if (lockedTarget.empty()) {
-                return false;
+                m_BrowseDamageTrackedTargetName.clear();
+                m_LastBrowseTrackedHurtTime = 0;
+                return observation;
             }
 
             BrowseCacheState cacheSnapshot;
@@ -1572,11 +1590,12 @@ void Target::TickSynchronous(void* envPtr) {
                 cacheSnapshot = g_BrowseCache;
             }
             if (!cacheSnapshot.active) {
-                return false;
+                m_BrowseDamageTrackedTargetName.clear();
+                m_LastBrowseTrackedHurtTime = 0;
+                return observation;
             }
 
             const auto players = world->GetPlayerEntities(env);
-            bool found = false;
             for (auto* player : players) {
                 if (!player) {
                     continue;
@@ -1591,7 +1610,18 @@ void Target::TickSynchronous(void* envPtr) {
                 if (TargetNamesMatch(playerName, lockedTarget) &&
                     BrowseCacheContainsPlayer(cacheSnapshot, playerName) &&
                     IsRenderableBrowseCandidate(env, player)) {
-                    found = true;
+                    observation.rendered = true;
+                    const int hurtTime = (std::max)(0, player->GetHurtTime(env));
+                    const bool switchedTrackedTarget = !TargetNamesMatch(m_BrowseDamageTrackedTargetName, playerName);
+                    if (switchedTrackedTarget) {
+                        m_BrowseDamageTrackedTargetName = playerName;
+                        m_LastBrowseTrackedHurtTime = hurtTime;
+                    } else {
+                        if (hurtTime > 0 && hurtTime > m_LastBrowseTrackedHurtTime) {
+                            observation.tookDamage = true;
+                        }
+                        m_LastBrowseTrackedHurtTime = hurtTime;
+                    }
                     env->DeleteLocalRef(reinterpret_cast<jobject>(player));
                     break;
                 }
@@ -1599,7 +1629,12 @@ void Target::TickSynchronous(void* envPtr) {
                 env->DeleteLocalRef(reinterpret_cast<jobject>(player));
             }
 
-            return found;
+            if (!observation.rendered) {
+                m_BrowseDamageTrackedTargetName.clear();
+                m_LastBrowseTrackedHurtTime = 0;
+            }
+
+            return observation;
         };
 
         struct ObservedHitInfo {
@@ -1653,13 +1688,6 @@ void Target::TickSynchronous(void* envPtr) {
                 std::lock_guard<std::mutex> lock(g_BrowseMutex);
                 browseActive = browseActive || g_BrowseCache.active;
             }
-
-            const std::string lockedTarget = GetLockedTarget();
-            for (const auto& attackedName : localAttackEvents) {
-                if (!attackedName.empty() && TargetNamesMatch(attackedName, lockedTarget)) {
-                    ++m_BrowseHitCount;
-                }
-            }
         }
 
         ObservedHitInfo observedHit;
@@ -1668,16 +1696,17 @@ void Target::TickSynchronous(void* envPtr) {
             if (observedHit.browseActivated) {
                 browseActive = true;
             }
-            if (!observedHit.playerName.empty() && TargetNamesMatch(observedHit.playerName, GetLockedTarget())) {
-                ++m_BrowseHitCount;
-            }
         }
 
         if (config->Target.m_BrowseAllPlayers) {
             ResetBreakArmorTracking();
             if (browseActive) {
-                const bool currentRendered = isLockedBrowseTargetRendered();
-                bool shouldSwitch = !currentRendered;
+                const LockedBrowseTargetObservation targetObservation = observeLockedBrowseTarget();
+                if (targetObservation.tookDamage) {
+                    ++m_BrowseHitCount;
+                }
+
+                bool shouldSwitch = !targetObservation.rendered;
                 if (!shouldSwitch) {
                     if (config->Target.m_SwitchMode == 0) {
                         shouldSwitch = m_BrowseHitCount >= config->Target.m_SwitchHits;
@@ -1692,7 +1721,7 @@ void Target::TickSynchronous(void* envPtr) {
                 }
 
                 if (shouldSwitch) {
-                    if (currentRendered) {
+                    if (targetObservation.rendered) {
                         MarkBrowsePlayerProcessed(GetLockedTarget());
                     }
 
@@ -1700,6 +1729,8 @@ void Target::TickSynchronous(void* envPtr) {
                     if (!selected) {
                         ClearLockedTarget();
                         m_BrowseHitCount = 0;
+                        m_BrowseDamageTrackedTargetName.clear();
+                        m_LastBrowseTrackedHurtTime = 0;
                     }
                 }
             } else {
@@ -1707,10 +1738,14 @@ void Target::TickSynchronous(void* envPtr) {
                     ClearLockedTarget();
                 }
                 m_BrowseHitCount = 0;
+                m_BrowseDamageTrackedTargetName.clear();
+                m_LastBrowseTrackedHurtTime = 0;
             }
         } else {
             selectBestAutomaticTarget();
             m_BrowseHitCount = 0;
+            m_BrowseDamageTrackedTargetName.clear();
+            m_LastBrowseTrackedHurtTime = 0;
         }
 
         ManageHitboxes(env, localPlayer, world);
@@ -2078,6 +2113,8 @@ void Target::ShutdownRuntime(void* envPtr) {
     ClearLockedTarget();
     ClearInUse();
     m_BrowseHitCount = 0;
+    m_BrowseDamageTrackedTargetName.clear();
+    m_LastBrowseTrackedHurtTime = 0;
     m_LastBrowseSwitchTime = {};
     m_PreviousSwingProgressInt = 0;
     m_PreviousPhysicalClick = false;

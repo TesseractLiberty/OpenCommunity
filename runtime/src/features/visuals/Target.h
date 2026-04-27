@@ -264,6 +264,8 @@ private:
     std::string m_LockedTargetName;
     std::chrono::steady_clock::time_point m_LastBrowseSwitchTime{};
     int m_BrowseHitCount = 0;
+    std::string m_BrowseDamageTrackedTargetName;
+    int m_LastBrowseTrackedHurtTime = 0;
     int m_PreviousSwingProgressInt = 0;
     bool m_PreviousPhysicalClick = false;
     std::string m_BreakArmorTargetName;
