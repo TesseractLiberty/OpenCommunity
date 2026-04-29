@@ -466,6 +466,7 @@ namespace {
     BrowseCacheState g_BrowseCache;
     std::mutex g_LocalAttackMutex;
     std::vector<std::string> g_LocalAttackEvents;
+    constexpr float kBrowseRenderableDistance = 10.0f;
 
     void RecordLocalAttackEvent(const std::string& playerName) {
         if (playerName.empty()) {
@@ -1199,16 +1200,16 @@ namespace {
         return health;
     }
 
-    bool BrowseCacheContainsPlayer(const BrowseCacheState& cache, const std::string& playerName) {
-        if (!cache.active || playerName.empty()) {
+    bool CachedBrowseMemberSetContains(const std::unordered_set<std::string>& members, const std::string& playerName) {
+        if (members.empty() || playerName.empty()) {
             return false;
         }
 
-        if (cache.members.find(playerName) != cache.members.end()) {
+        if (members.find(playerName) != members.end()) {
             return true;
         }
 
-        for (const auto& cachedName : cache.members) {
+        for (const auto& cachedName : members) {
             if (TargetNamesMatch(cachedName, playerName)) {
                 return true;
             }
@@ -1217,12 +1218,25 @@ namespace {
         return false;
     }
 
-    bool IsRenderableBrowseCandidate(JNIEnv* env, Player* player) {
-        if (!env || !player) {
+    bool BrowseCacheContainsPlayer(const BrowseCacheState& cache, const std::string& playerName) {
+        if (!cache.active || playerName.empty()) {
             return false;
         }
 
-        return player->GetHealth(env) > 0.0f && !player->IsInvisible(env);
+        return CachedBrowseMemberSetContains(cache.members, playerName);
+    }
+
+    bool IsRenderableBrowseCandidate(JNIEnv* env, Player* player, Player* localPlayer) {
+        if (!env || !player || !localPlayer) {
+            return false;
+        }
+
+        if (player->GetHealth(env) <= 0.0f || player->IsInvisible(env)) {
+            return false;
+        }
+
+        const float distance = localPlayer->GetDistanceToEntity(reinterpret_cast<jobject>(player), env);
+        return std::isfinite(distance) && distance <= kBrowseRenderableDistance;
     }
 
     void RefreshBrowseMembers(JNIEnv* env, World* world, Scoreboard* scoreboard) {
@@ -1343,7 +1357,16 @@ void Target::OnEntityAttacked(JNIEnv* env, Player* attackedPlayer) {
         return;
     }
 
+    BrowseCacheState initialCacheState;
+    initialCacheState.active = true;
+    initialCacheState.clanTagDisplay = !formattedClanTag.empty()
+        ? formattedClanTag
+        : (!plainClanTag.empty() ? plainClanTag : registeredTeamName);
+    initialCacheState.normalizedClanTag = normalizedClanTag;
+    initialCacheState.registeredTeamName = registeredTeamName;
+
     std::unordered_set<std::string> matchedPlayers;
+    CollectBrowseMembersFromNetHandler(env, initialCacheState, matchedPlayers);
     const auto players = world->GetPlayerEntities(env);
     for (auto* player : players) {
         if (!player) {
@@ -1544,6 +1567,10 @@ void Target::TickSynchronous(void* envPtr) {
     const std::vector<std::string> localAttackEvents = DrainLocalAttackEvents();
 
     const bool automaticEnabled = config->Target.m_AutoTarget || config->Target.m_TargetSwitch;
+    const int priorityMode = config->Target.m_PriorityMode;
+    const bool switchVisibleHitMode = priorityMode == kModeSwitchVisibleHit;
+    const bool switchVisibleTimeMode = priorityMode == kModeSwitchVisibleTime;
+    const bool switchVisiblePlayersMode = switchVisibleHitMode || switchVisibleTimeMode;
     if (automaticEnabled) {
         auto selectBestAutomaticTarget = [&]() {
             AutoSelectTarget(env);
@@ -1609,7 +1636,7 @@ void Target::TickSynchronous(void* envPtr) {
                 const std::string playerName = player->GetName(env, true);
                 if (TargetNamesMatch(playerName, lockedTarget) &&
                     BrowseCacheContainsPlayer(cacheSnapshot, playerName) &&
-                    IsRenderableBrowseCandidate(env, player)) {
+                    IsRenderableBrowseCandidate(env, player, localPlayer)) {
                     observation.rendered = true;
                     const int hurtTime = (std::max)(0, player->GetHurtTime(env));
                     const bool switchedTrackedTarget = !TargetNamesMatch(m_BrowseDamageTrackedTargetName, playerName);
@@ -1690,6 +1717,66 @@ void Target::TickSynchronous(void* envPtr) {
             }
         }
 
+        auto observeLockedVisibleSwitchTarget = [&]() -> LockedBrowseTargetObservation {
+            LockedBrowseTargetObservation observation;
+            const std::string lockedTarget = GetLockedTarget();
+            if (lockedTarget.empty()) {
+                m_BrowseDamageTrackedTargetName.clear();
+                m_LastBrowseTrackedHurtTime = 0;
+                return observation;
+            }
+
+            const auto players = world->GetPlayerEntities(env);
+            for (auto* player : players) {
+                if (!player) {
+                    continue;
+                }
+
+                if (env->IsSameObject(reinterpret_cast<jobject>(player), localPlayerObject)) {
+                    env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+                    continue;
+                }
+
+                auto* scoreboard = reinterpret_cast<Scoreboard*>(world->GetScoreboard(env));
+                const std::string playerName = player->GetName(env, true);
+                if (TargetNamesMatch(playerName, lockedTarget) &&
+                    !IsSameClan(env, player, localPlayer, scoreboard) &&
+                    IsValidCombatTarget(env, player, localPlayer) &&
+                    IsRenderableBrowseCandidate(env, player, localPlayer)) {
+                    observation.rendered = true;
+                    const int hurtTime = (std::max)(0, player->GetHurtTime(env));
+                    const bool switchedTrackedTarget = !TargetNamesMatch(m_BrowseDamageTrackedTargetName, playerName);
+                    if (switchedTrackedTarget) {
+                        m_BrowseDamageTrackedTargetName = playerName;
+                        m_LastBrowseTrackedHurtTime = hurtTime;
+                    } else {
+                        if (hurtTime > 0 && hurtTime > m_LastBrowseTrackedHurtTime) {
+                            observation.tookDamage = true;
+                        }
+                        m_LastBrowseTrackedHurtTime = hurtTime;
+                    }
+
+                    env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+                    if (scoreboard) {
+                        env->DeleteLocalRef(reinterpret_cast<jobject>(scoreboard));
+                    }
+                    break;
+                }
+
+                if (scoreboard) {
+                    env->DeleteLocalRef(reinterpret_cast<jobject>(scoreboard));
+                }
+                env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+            }
+
+            if (!observation.rendered) {
+                m_BrowseDamageTrackedTargetName.clear();
+                m_LastBrowseTrackedHurtTime = 0;
+            }
+
+            return observation;
+        };
+
         ObservedHitInfo observedHit;
         if (config->Target.m_BrowseAllPlayers && localAttackEvents.empty() && newObservedHit) {
             observedHit = observeHit();
@@ -1740,6 +1827,42 @@ void Target::TickSynchronous(void* envPtr) {
                 m_BrowseHitCount = 0;
                 m_BrowseDamageTrackedTargetName.clear();
                 m_LastBrowseTrackedHurtTime = 0;
+            }
+        } else if (switchVisiblePlayersMode) {
+            ResetBreakArmorTracking();
+            const LockedBrowseTargetObservation targetObservation = observeLockedVisibleSwitchTarget();
+            if (targetObservation.tookDamage) {
+                ++m_BrowseHitCount;
+            }
+
+            bool shouldSwitch = !targetObservation.rendered;
+            if (!shouldSwitch) {
+                if (switchVisibleHitMode) {
+                    shouldSwitch = m_BrowseHitCount >= config->Target.m_SwitchHits;
+                } else {
+                    if (m_LastBrowseSwitchTime.time_since_epoch().count() == 0) {
+                        m_LastBrowseSwitchTime = std::chrono::steady_clock::now();
+                    }
+                    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - m_LastBrowseSwitchTime).count();
+                    shouldSwitch = elapsedMs >= config->Target.m_SwitchTimeMs;
+                }
+            }
+
+            if (shouldSwitch) {
+                std::string nextTarget;
+                if (TrySelectVisibleSwitchTarget(env, localPlayer, world, GetLockedTarget(), nextTarget) && !nextTarget.empty()) {
+                    SetLockedTarget(nextTarget);
+                    m_BrowseHitCount = 0;
+                    m_BrowseDamageTrackedTargetName.clear();
+                    m_LastBrowseTrackedHurtTime = 0;
+                    m_LastBrowseSwitchTime = std::chrono::steady_clock::now();
+                } else {
+                    ClearLockedTarget();
+                    m_BrowseHitCount = 0;
+                    m_BrowseDamageTrackedTargetName.clear();
+                    m_LastBrowseTrackedHurtTime = 0;
+                }
             }
         } else {
             selectBestAutomaticTarget();
@@ -2304,6 +2427,10 @@ bool Target::TrySelectBrowseTarget(JNIEnv* env, Player* localPlayer, World* worl
         return false;
     }
 
+    std::unordered_set<std::string> survivalBrowseMembers;
+    CollectBrowseMembersFromNetHandler(env, cacheSnapshot, survivalBrowseMembers);
+    const bool requireSurvivalBrowseMembership = !survivalBrowseMembers.empty();
+
     Player* bestTarget = nullptr;
     Player* processedFallbackTarget = nullptr;
     float bestScore = std::numeric_limits<float>::max();
@@ -2321,7 +2448,13 @@ bool Target::TrySelectBrowseTarget(JNIEnv* env, Player* localPlayer, World* worl
         }
 
         const std::string playerName = player->GetName(env, true);
-        if (playerName.empty() || !BrowseCacheContainsPlayer(cacheSnapshot, playerName) || !IsRenderableBrowseCandidate(env, player)) {
+        const bool survivalAllowed =
+            !requireSurvivalBrowseMembership ||
+            CachedBrowseMemberSetContains(survivalBrowseMembers, playerName);
+        if (playerName.empty() ||
+            !BrowseCacheContainsPlayer(cacheSnapshot, playerName) ||
+            !survivalAllowed ||
+            !IsRenderableBrowseCandidate(env, player, localPlayer)) {
             env->DeleteLocalRef(reinterpret_cast<jobject>(player));
             continue;
         }
@@ -2386,6 +2519,73 @@ bool Target::TrySelectBrowseTarget(JNIEnv* env, Player* localPlayer, World* worl
     return !nextTarget.empty();
 }
 
+bool Target::TrySelectVisibleSwitchTarget(JNIEnv* env, Player* localPlayer, World* world, const std::string& previousTarget, std::string& nextTarget) {
+    if (!env || !localPlayer || !world) {
+        return false;
+    }
+
+    auto* scoreboard = reinterpret_cast<Scoreboard*>(world->GetScoreboard(env));
+    std::vector<std::string> candidates;
+    std::vector<std::string> alternateCandidates;
+    const auto players = world->GetPlayerEntities(env);
+    for (auto* player : players) {
+        if (!player) {
+            continue;
+        }
+
+        if (env->IsSameObject(reinterpret_cast<jobject>(player), reinterpret_cast<jobject>(localPlayer))) {
+            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+            continue;
+        }
+
+        if (!IsValidCombatTarget(env, player, localPlayer) ||
+            IsSameClan(env, player, localPlayer, scoreboard) ||
+            !IsRenderableBrowseCandidate(env, player, localPlayer)) {
+            env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+            continue;
+        }
+
+        const std::string playerName = player->GetName(env, true);
+        env->DeleteLocalRef(reinterpret_cast<jobject>(player));
+        if (playerName.empty()) {
+            continue;
+        }
+
+        candidates.push_back(playerName);
+        if (previousTarget.empty() || !TargetNamesMatch(playerName, previousTarget)) {
+            alternateCandidates.push_back(playerName);
+        }
+    }
+
+    if (candidates.empty()) {
+        return false;
+    }
+
+    auto uniqueNames = [](std::vector<std::string>& names) {
+        std::sort(names.begin(), names.end(), CaseInsensitiveNameLess);
+        names.erase(std::unique(names.begin(), names.end(), [](const std::string& lhs, const std::string& rhs) {
+            return _stricmp(lhs.c_str(), rhs.c_str()) == 0;
+        }), names.end());
+    };
+
+    uniqueNames(candidates);
+    uniqueNames(alternateCandidates);
+
+    const auto& selectionPool = alternateCandidates.empty() ? candidates : alternateCandidates;
+    if (selectionPool.empty()) {
+        if (scoreboard) {
+            env->DeleteLocalRef(reinterpret_cast<jobject>(scoreboard));
+        }
+        return false;
+    }
+
+    nextTarget = selectionPool[static_cast<size_t>(std::rand()) % selectionPool.size()];
+    if (scoreboard) {
+        env->DeleteLocalRef(reinterpret_cast<jobject>(scoreboard));
+    }
+    return !nextTarget.empty();
+}
+
 bool Target::IsValidCombatTarget(JNIEnv* env, Player* player, Player* localPlayer) {
     if (!player || !localPlayer) {
         return false;
@@ -2419,6 +2619,8 @@ float Target::CalculatePriorityScore(JNIEnv* env, Player* player, Player* localP
             (GetBreakArmorScore(env, player) * config->Target.m_BothArmorWeight) +
             (distance * 0.001f);
     case kModeBrowseAllPlayers:
+    case kModeSwitchVisibleHit:
+    case kModeSwitchVisibleTime:
         return distance;
     case kModeLowArmor:
     default:

@@ -24,7 +24,7 @@ public:
 
         AddOption(ModuleOption::Text("Player Name", "", 127));
         AddOption(ModuleOption::Toggle("Automatic", false));
-        AddOption(ModuleOption::Combo("Mode", { "Low Armor", "Break Armor", "Health", "Both", "Browse All Players" }, 0));
+        AddOption(ModuleOption::Combo("Mode", { "Low Armor", "Break Armor", "Health", "Both", "Browse All Players", "Switch Visible Hit", "Switch Visible Time" }, 0));
         AddOption(ModuleOption::Combo("Browse Mode", { "Hits", "Time" }, 0));
         AddOption(ModuleOption::SliderInt("Browse Hits", 5, 1, 20));
         AddOption(ModuleOption::SliderInt("Browse Time Ms", 3000, 1, 10000));
@@ -82,9 +82,9 @@ public:
         case kBrowseModeOption:
             return GetAutomatic() && GetBrowseAllPlayers();
         case kBrowseHitsOption:
-            return GetAutomatic() && GetBrowseAllPlayers() && GetBrowseMode() == 0;
+            return GetAutomatic() && ((GetBrowseAllPlayers() && GetBrowseMode() == 0) || GetSwitchVisibleHitMode());
         case kBrowseTimeOption:
-            return GetAutomatic() && GetBrowseAllPlayers() && GetBrowseMode() == 1;
+            return GetAutomatic() && ((GetBrowseAllPlayers() && GetBrowseMode() == 1) || GetSwitchVisibleTimeMode());
         case kBrowseClearCacheOption:
         case kShowBrowsedPlayersOption:
             return GetAutomatic() && GetBrowseAllPlayers();
@@ -208,12 +208,15 @@ private:
 
     bool GetAutomatic() const { return m_Options.size() > kAutomaticOption && m_Options[kAutomaticOption].boolValue; }
     bool GetBrowseAllPlayers() const { return GetMode() == kModeBrowseAllPlayers; }
+    bool GetSwitchVisibleHitMode() const { return GetMode() == kModeSwitchVisibleHit; }
+    bool GetSwitchVisibleTimeMode() const { return GetMode() == kModeSwitchVisibleTime; }
+    bool GetSwitchVisiblePlayers() const { return GetSwitchVisibleHitMode() || GetSwitchVisibleTimeMode(); }
     bool GetShowBrowsedPlayers() const { return m_Options.size() > kShowBrowsedPlayersOption && m_Options[kShowBrowsedPlayersOption].boolValue; }
     int GetMode() const { return m_Options.size() > kModeOption ? ClampMode(m_Options[kModeOption].comboIndex) : kModeLowArmor; }
     int GetBrowseMode() const { return m_Options.size() > kBrowseModeOption ? ClampBrowseMode(m_Options[kBrowseModeOption].comboIndex) : 0; }
 
     static int ClampMode(int mode) {
-        return mode >= kModeLowArmor && mode <= kModeBrowseAllPlayers ? mode : kModeLowArmor;
+        return mode >= kModeLowArmor && mode <= kModeSwitchVisibleTime ? mode : kModeLowArmor;
     }
 
     static int ClampBrowseMode(int mode) {
@@ -239,6 +242,8 @@ private:
     static constexpr int kModeHealth = 2;
     static constexpr int kModeBoth = 3;
     static constexpr int kModeBrowseAllPlayers = 4;
+    static constexpr int kModeSwitchVisibleHit = 5;
+    static constexpr int kModeSwitchVisibleTime = 6;
 
 #ifdef _RUNTIME
 private:
@@ -254,6 +259,7 @@ private:
     void ManageHitboxes(JNIEnv* env, Player* localPlayer, World* world);
     void AutoSelectTarget(JNIEnv* env);
     bool TrySelectBrowseTarget(JNIEnv* env, Player* localPlayer, World* world, Scoreboard* scoreboard, const std::string& previousTarget, std::string& nextTarget);
+    bool TrySelectVisibleSwitchTarget(JNIEnv* env, Player* localPlayer, World* world, const std::string& previousTarget, std::string& nextTarget);
 
     std::string GetLockedTarget() const;
     void SetLockedTarget(const std::string& name);
