@@ -200,6 +200,186 @@ namespace CommandManager {
             return false;
         }
 
+        inline bool IsBindableVirtualKey(int key) {
+            if (key <= 0 || key >= 256) {
+                return false;
+            }
+
+            switch (key) {
+            case VK_LBUTTON:
+            case VK_RBUTTON:
+            case VK_MBUTTON:
+            case VK_XBUTTON1:
+            case VK_XBUTTON2:
+                return false;
+            default:
+                return true;
+            }
+        }
+
+        inline std::string FormatKeybindName(int key) {
+            if (key == 0) {
+                return "none";
+            }
+
+            char name[32] = {};
+            const UINT scanCode = MapVirtualKeyA(static_cast<UINT>(key), MAPVK_VK_TO_VSC);
+            GetKeyNameTextA(static_cast<LONG>(scanCode << 16), name, sizeof(name));
+            if (name[0] != '\0') {
+                return ToLower(name);
+            }
+
+            return std::to_string(key);
+        }
+
+        inline bool ParseKeybindToken(const std::string& value, int& outKey) {
+            const std::string normalized = NormalizeKey(value);
+            if (normalized.empty()) {
+                return false;
+            }
+
+            if (normalized == "none" || normalized == "clear" || normalized == "unbind" || normalized == "remove" || normalized == "off") {
+                outKey = 0;
+                return true;
+            }
+
+            if (normalized.size() == 1) {
+                const unsigned char ascii = static_cast<unsigned char>(normalized[0]);
+                if (std::isalpha(ascii) != 0) {
+                    outKey = static_cast<int>(std::toupper(ascii));
+                    return true;
+                }
+
+                if (std::isdigit(ascii) != 0) {
+                    outKey = static_cast<int>(ascii);
+                    return true;
+                }
+            }
+
+            if (normalized[0] == 'f' && normalized.size() <= 3) {
+                int functionIndex = 0;
+                if (ParseInteger(normalized.substr(1), functionIndex) && functionIndex >= 1 && functionIndex <= 24) {
+                    outKey = VK_F1 + (functionIndex - 1);
+                    return true;
+                }
+            }
+
+            struct KeyAlias {
+                const char* name;
+                int key;
+            };
+
+            static constexpr KeyAlias aliases[] = {
+                { "tab", VK_TAB },
+                { "caps", VK_CAPITAL },
+                { "capslock", VK_CAPITAL },
+                { "shift", VK_SHIFT },
+                { "lshift", VK_LSHIFT },
+                { "leftshift", VK_LSHIFT },
+                { "rshift", VK_RSHIFT },
+                { "rightshift", VK_RSHIFT },
+                { "ctrl", VK_CONTROL },
+                { "control", VK_CONTROL },
+                { "lctrl", VK_LCONTROL },
+                { "leftctrl", VK_LCONTROL },
+                { "rctrl", VK_RCONTROL },
+                { "rightctrl", VK_RCONTROL },
+                { "alt", VK_MENU },
+                { "lalt", VK_LMENU },
+                { "leftalt", VK_LMENU },
+                { "ralt", VK_RMENU },
+                { "rightalt", VK_RMENU },
+                { "space", VK_SPACE },
+                { "enter", VK_RETURN },
+                { "return", VK_RETURN },
+                { "backspace", VK_BACK },
+                { "escape", VK_ESCAPE },
+                { "esc", VK_ESCAPE },
+                { "insert", VK_INSERT },
+                { "ins", VK_INSERT },
+                { "delete", VK_DELETE },
+                { "del", VK_DELETE },
+                { "home", VK_HOME },
+                { "end", VK_END },
+                { "pageup", VK_PRIOR },
+                { "pgup", VK_PRIOR },
+                { "pagedown", VK_NEXT },
+                { "pgdn", VK_NEXT },
+                { "up", VK_UP },
+                { "down", VK_DOWN },
+                { "left", VK_LEFT },
+                { "right", VK_RIGHT },
+                { "plus", VK_OEM_PLUS },
+                { "minus", VK_OEM_MINUS },
+                { "comma", VK_OEM_COMMA },
+                { "period", VK_OEM_PERIOD },
+                { "dot", VK_OEM_PERIOD },
+                { "slash", VK_OEM_2 },
+                { "backslash", VK_OEM_5 },
+                { "semicolon", VK_OEM_1 },
+                { "quote", VK_OEM_7 },
+                { "tilde", VK_OEM_3 },
+                { "grave", VK_OEM_3 },
+                { "lbracket", VK_OEM_4 },
+                { "rbracket", VK_OEM_6 },
+                { "numlock", VK_NUMLOCK },
+                { "scrolllock", VK_SCROLL },
+                { "pause", VK_PAUSE },
+                { "printscreen", VK_SNAPSHOT },
+                { "prtsc", VK_SNAPSHOT }
+            };
+
+            for (const auto& alias : aliases) {
+                if (normalized == alias.name) {
+                    outKey = alias.key;
+                    return true;
+                }
+            }
+
+            if (normalized.rfind("num", 0) == 0) {
+                const std::string suffix = normalized.substr(3);
+                if (suffix.size() == 1 && std::isdigit(static_cast<unsigned char>(suffix[0])) != 0) {
+                    outKey = VK_NUMPAD0 + (suffix[0] - '0');
+                    return true;
+                }
+            }
+
+            if (normalized.rfind("numpad", 0) == 0) {
+                const std::string suffix = normalized.substr(6);
+                if (suffix.size() == 1 && std::isdigit(static_cast<unsigned char>(suffix[0])) != 0) {
+                    outKey = VK_NUMPAD0 + (suffix[0] - '0');
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        inline std::vector<std::string> BuildKeybindSuggestions(const std::string& prefix, const std::string& moduleCommandName, const std::string& fragment) {
+            const std::string normalizedFragment = NormalizeKey(fragment);
+            const std::string base = prefix + "bind " + moduleCommandName + " ";
+            std::vector<std::string> suggestions;
+
+            const std::vector<std::string> commonKeys = {
+                "none", "r", "f", "g", "v", "c", "x", "z", "q", "e",
+                "1", "2", "3", "4", "5",
+                "tab", "shift", "ctrl", "alt", "space",
+                "mouse", "f1", "f2", "f3", "f4", "f5", "f6"
+            };
+
+            for (const std::string& key : commonKeys) {
+                if (key == "mouse") {
+                    continue;
+                }
+
+                if (normalizedFragment.empty() || NormalizeKey(key).rfind(normalizedFragment, 0) == 0) {
+                    suggestions.push_back(base + key);
+                }
+            }
+
+            return suggestions;
+        }
+
         inline std::string FormatFloat(float value) {
             char buffer[32] = {};
             std::snprintf(buffer, sizeof(buffer), "%.2f", value);
@@ -464,13 +644,15 @@ namespace CommandManager {
             }
 
             module.SyncToConfig(config);
+            ModuleManager::Get()->SyncModuleKeybindToConfig(module, config);
             module.SyncFromConfig(config);
+            ModuleManager::Get()->SyncModuleKeybindFromConfig(module, config);
         }
 
         inline void SendRootHelp(JNIEnv* env, const std::string& prefix) {
             CommandOutput::SendInfo(
                 env,
-                "Use " + prefix + "t <module> to toggle modules or " + prefix + "<module> <option>. Try " + prefix + "modules and press Tab in chat for autocomplete.",
+                "Use " + prefix + "t <module> to toggle, " + prefix + "bind <module> <key> to set a bind, or " + prefix + "<module> <option>. Try " + prefix + "modules and press Tab in chat for autocomplete.",
                 "Commands");
         }
 
@@ -752,12 +934,61 @@ namespace CommandManager {
             return HandleModuleToggle(env, *moduleEntry->module, config, !moduleEntry->module->IsEnabled());
         }
 
+        inline bool HandleBindCommand(
+            JNIEnv* env,
+            ModuleConfig* config,
+            const std::string& prefix,
+            const std::vector<std::string>& tokens) {
+            if (tokens.size() <= 1) {
+                CommandOutput::SendInfo(env, "Use " + prefix + "bind <module> <key>.", "Commands");
+                return true;
+            }
+
+            const auto moduleEntry = FindModuleExact(tokens[1]);
+            if (!moduleEntry.has_value() || !moduleEntry->module) {
+                CommandOutput::SendError(env, "Unknown module for bind. Use " + prefix + "modules to list them.", "Commands");
+                return true;
+            }
+
+            Module& module = *moduleEntry->module;
+            if (!module.SupportsKeybind()) {
+                CommandOutput::SendError(env, module.GetName() + " does not support keybinds.", module.GetName());
+                return true;
+            }
+
+            if (tokens.size() <= 2) {
+                CommandOutput::SendInfo(
+                    env,
+                    "Current bind: " + FormatKeybindName(module.GetKeybind()) + ". Use " + prefix + "bind " + moduleEntry->commandName + " <key> or none.",
+                    module.GetName());
+                return true;
+            }
+
+            const std::string rawKey = JoinTokens(tokens, 2, tokens.size());
+            int virtualKey = 0;
+            if (!ParseKeybindToken(rawKey, virtualKey) || (virtualKey != 0 && !IsBindableVirtualKey(virtualKey))) {
+                CommandOutput::SendError(env, "Unknown key. Try keys like r, f, tab, shift, space, f5 or none.", module.GetName());
+                return true;
+            }
+
+            module.SetKeybind(virtualKey);
+            CommitModule(module, config);
+
+            if (virtualKey == 0) {
+                CommandOutput::SendSuccess(env, module.GetName() + " unbound.", module.GetName());
+            } else {
+                CommandOutput::SendSuccess(env, module.GetName() + " bound to " + module.GetKeybindName() + ".", module.GetName());
+            }
+            return true;
+        }
+
         inline std::vector<std::string> BuildRootSuggestions(const std::string& prefix, const std::string& fragment) {
             const std::string normalizedFragment = NormalizeKey(fragment);
             std::vector<std::string> suggestions;
 
             const std::vector<std::string> rootCommands = {
                 "t",
+                "bind",
                 "help",
                 "modules",
                 "commands"
@@ -804,6 +1035,17 @@ namespace CommandManager {
             const std::string base = prefix + "t ";
             for (const auto& entry : FindModuleMatches(fragment)) {
                 suggestions.push_back(base + entry.commandName);
+            }
+            return suggestions;
+        }
+
+        inline std::vector<std::string> BuildBindSuggestions(const std::string& prefix, const std::string& fragment) {
+            std::vector<std::string> suggestions;
+            const std::string base = prefix + "bind ";
+            for (const auto& entry : FindModuleMatches(fragment)) {
+                if (entry.module && entry.module->SupportsKeybind()) {
+                    suggestions.push_back(base + entry.commandName);
+                }
             }
             return suggestions;
         }
@@ -891,6 +1133,10 @@ namespace CommandManager {
             return detail::HandleToggleCommand(env, config, prefix, tokens);
         }
 
+        if (rootToken == "bind") {
+            return detail::HandleBindCommand(env, config, prefix, tokens);
+        }
+
         const auto moduleEntry = detail::FindModuleExact(tokens[0]);
         if (!moduleEntry.has_value() || !moduleEntry->module) {
             CommandOutput::SendError(env, "Unknown module. Use " + prefix + "modules to list the available ones.", "Commands");
@@ -934,6 +1180,25 @@ namespace CommandManager {
             }
 
             return {};
+        }
+
+        if (detail::NormalizeKey(tokens[0]) == "bind") {
+            if (tokens.size() == 1) {
+                return detail::BuildBindSuggestions(prefix, {});
+            }
+
+            if (tokens.size() == 2) {
+                const std::string fragment = endsWithSpace ? std::string() : tokens[1];
+                return detail::BuildBindSuggestions(prefix, fragment);
+            }
+
+            const auto moduleEntry = detail::FindModuleExact(tokens[1]);
+            if (!moduleEntry.has_value() || !moduleEntry->module || !moduleEntry->module->SupportsKeybind()) {
+                return {};
+            }
+
+            const std::string fragment = endsWithSpace ? std::string() : tokens.back();
+            return detail::BuildKeybindSuggestions(prefix, moduleEntry->commandName, fragment);
         }
 
         if (tokens.size() == 1 && !endsWithSpace) {

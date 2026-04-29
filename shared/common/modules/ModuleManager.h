@@ -1,7 +1,9 @@
 #pragma once
 
 #include "Module.h"
+#include "../ModuleConfig.h"
 
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
@@ -105,8 +107,9 @@ public:
             return;
         }
 
-        ForEachModule([configPtr](Module& module) {
+        ForEachModule([this, configPtr](Module& module) {
             module.SyncToConfig(configPtr);
+            SyncModuleKeybindToConfig(module, configPtr);
         });
     }
 
@@ -119,6 +122,7 @@ public:
         ForEachModule([this, configPtr](Module& module) {
             const bool wasEnabled = module.IsEnabled();
             module.SyncFromConfig(configPtr);
+            SyncModuleKeybindFromConfig(module, configPtr);
             if (!m_EnableStatePrimed) {
                 m_KnownEnabledStates[BuildModuleKey(module)] = module.IsEnabled();
                 return;
@@ -182,6 +186,45 @@ public:
         TickAll();
     }
 
+    void SyncModuleKeybindToConfig(Module& module, void* configPtr) {
+        if (!configPtr || !module.SupportsKeybind()) {
+            return;
+        }
+
+        auto* config = static_cast<ModuleConfig*>(configPtr);
+        if (!config) {
+            return;
+        }
+
+        ModuleConfig::KeybindEntry* entry = FindOrCreateKeybindEntry(*config, module);
+        if (!entry) {
+            return;
+        }
+
+        entry->m_Category = static_cast<int>(module.GetCategory());
+        std::strncpy(entry->m_ModuleName, module.GetName().c_str(), sizeof(entry->m_ModuleName) - 1);
+        entry->m_ModuleName[sizeof(entry->m_ModuleName) - 1] = '\0';
+        entry->m_Keybind = module.GetKeybind();
+    }
+
+    void SyncModuleKeybindFromConfig(Module& module, void* configPtr) {
+        if (!configPtr || !module.SupportsKeybind()) {
+            return;
+        }
+
+        const auto* config = static_cast<const ModuleConfig*>(configPtr);
+        if (!config) {
+            return;
+        }
+
+        const ModuleConfig::KeybindEntry* entry = FindKeybindEntry(*config, module);
+        if (!entry) {
+            return;
+        }
+
+        module.SetKeybind(entry->m_Keybind);
+    }
+
 private:
     ModuleManager() = default;
 
@@ -199,6 +242,48 @@ private:
 
     static std::string BuildModuleKey(const Module& module) {
         return std::to_string(static_cast<int>(module.GetCategory())) + ":" + module.GetName();
+    }
+
+    static bool IsKeybindEntryForModule(const ModuleConfig::KeybindEntry& entry, const Module& module) {
+        return entry.m_Category == static_cast<int>(module.GetCategory()) &&
+               std::strcmp(entry.m_ModuleName, module.GetName().c_str()) == 0;
+    }
+
+    static const ModuleConfig::KeybindEntry* FindKeybindEntry(const ModuleConfig& config, const Module& module) {
+        const int count = (config.Keybinds.m_Count < 0) ? 0 : config.Keybinds.m_Count;
+        const int maxCount = static_cast<int>(sizeof(config.Keybinds.m_Entries) / sizeof(config.Keybinds.m_Entries[0]));
+        const int safeCount = (count > maxCount) ? maxCount : count;
+        for (int index = 0; index < safeCount; ++index) {
+            const auto& entry = config.Keybinds.m_Entries[index];
+            if (IsKeybindEntryForModule(entry, module)) {
+                return &entry;
+            }
+        }
+
+        return nullptr;
+    }
+
+    static ModuleConfig::KeybindEntry* FindOrCreateKeybindEntry(ModuleConfig& config, const Module& module) {
+        const int maxCount = static_cast<int>(sizeof(config.Keybinds.m_Entries) / sizeof(config.Keybinds.m_Entries[0]));
+        const int count = (config.Keybinds.m_Count < 0) ? 0 : ((config.Keybinds.m_Count > maxCount) ? maxCount : config.Keybinds.m_Count);
+        for (int index = 0; index < count; ++index) {
+            auto& entry = config.Keybinds.m_Entries[index];
+            if (IsKeybindEntryForModule(entry, module)) {
+                return &entry;
+            }
+        }
+
+        if (count >= maxCount) {
+            return nullptr;
+        }
+
+        config.Keybinds.m_Count = count + 1;
+        auto& entry = config.Keybinds.m_Entries[count];
+        entry = ModuleConfig::KeybindEntry{};
+        entry.m_Category = static_cast<int>(module.GetCategory());
+        std::strncpy(entry.m_ModuleName, module.GetName().c_str(), sizeof(entry.m_ModuleName) - 1);
+        entry.m_ModuleName[sizeof(entry.m_ModuleName) - 1] = '\0';
+        return &entry;
     }
 
     void NotifyEnabledChangeIfNeeded(const Module& module, bool wasEnabled, bool isEnabled) {

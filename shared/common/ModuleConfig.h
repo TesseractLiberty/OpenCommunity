@@ -22,7 +22,7 @@ enum class GameChatOutputMode {
 
 struct ModuleConfig {
     static constexpr std::uint32_t kMagic = 0x4746434F; // OCFG
-    static constexpr std::uint32_t kVersion = 11;
+    static constexpr std::uint32_t kVersion = 12;
 
     std::uint32_t m_Magic = kMagic;
     std::uint32_t m_Version = kVersion;
@@ -36,6 +36,17 @@ struct ModuleConfig {
     struct {
         bool m_KeybindInputBlocked = false;
     } Runtime;
+
+    struct KeybindEntry {
+        int m_Category = -1;
+        char m_ModuleName[64] = {};
+        int m_Keybind = 0;
+    };
+
+    struct {
+        KeybindEntry m_Entries[64] = {};
+        int m_Count = 0;
+    } Keybinds;
 
     struct {
         bool m_UseGameChat = false;
