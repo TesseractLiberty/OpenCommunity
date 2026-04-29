@@ -1,5 +1,5 @@
 #pragma once
 
 namespace BuildVersion {
-    inline constexpr const char* kPublicReleaseTag = "v1.3.0";
+    inline constexpr const char* kPublicReleaseTag = "v1.4.0";
 }
