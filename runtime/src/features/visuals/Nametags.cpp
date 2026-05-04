@@ -620,8 +620,12 @@ namespace {
         }
 
         float realHealth = player->GetRealHealth(env);
-        if (!std::isfinite(realHealth) || realHealth < 0.0f) {
+        if (!std::isfinite(realHealth) || realHealth <= 0.0f) {
             realHealth = player->GetHealth(env);
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                realHealth = 20.0f;
+            }
         }
 
         return std::isfinite(realHealth) ? realHealth : -1.0f;
@@ -763,6 +767,10 @@ void Nametags::TickSynchronous(void* envPtr) {
     std::unordered_set<std::string> activePlayerNames;
     const auto players = world->GetPlayerEntities(env);
     for (auto* player : players) {
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+
         if (!player) {
             continue;
         }
@@ -796,6 +804,11 @@ void Nametags::TickSynchronous(void* envPtr) {
             }
 
             float maxHealth = player->GetMaxHealth(env);
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                maxHealth = 20.0f;
+            }
+            
             if (maxHealth <= 0.0f) {
                 maxHealth = (std::max)(20.0f, realHealth);
             } else if (realHealth > maxHealth) {
@@ -822,6 +835,10 @@ void Nametags::TickSynchronous(void* envPtr) {
         }
 
         env->DeleteLocalRef(playerObject);
+    }
+
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
     }
 
     if (shouldRefreshHealthCache) {
@@ -898,6 +915,10 @@ void Nametags::RenderOverlay(ImDrawList* drawList, float screenW, float screenH)
 
     const auto players = world->GetPlayerEntities(env);
     for (auto* player : players) {
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+        }
+
         if (!player) {
             continue;
         }
@@ -983,6 +1004,10 @@ void Nametags::RenderOverlay(ImDrawList* drawList, float screenW, float screenH)
         });
 
         env->DeleteLocalRef(playerObject);
+    }
+
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
     }
 
     if (entries.empty()) {
