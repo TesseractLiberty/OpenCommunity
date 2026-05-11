@@ -128,6 +128,7 @@
     <ClCompile Include="src\features\visuals\Notifications.cpp" />
     <ClCompile Include="src\features\visuals\ItemChams.cpp" />
     <ClCompile Include="src\features\visuals\NoRender.cpp" />
+    <ClCompile Include="src\features\account\NickChanger.cpp" />
     <ClCompile Include="src\game\classes\ActiveRenderInfo.cpp" />
     <ClCompile Include="src\game\classes\Container.cpp" />
     <ClCompile Include="src\game\classes\EntityItem.cpp" />
@@ -189,6 +190,7 @@
     <ClInclude Include="src\features\visuals\Notifications.h" />
     <ClInclude Include="src\features\visuals\ItemChams.h" />
     <ClInclude Include="src\features\visuals\NoRender.h" />
+    <ClInclude Include="src\features\account\NickChanger.h" />
     <ClInclude Include="src\game\classes\ActiveRenderInfo.h" />
     <ClInclude Include="src\game\classes\Container.h" />
     <ClInclude Include="src\game\classes\EntityItem.h" />

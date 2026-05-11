@@ -1,0 +1,139 @@
+╔════════════════════════════════════════════════════════════════╗
+║          ALT MANAGER PARA OPENCOMMUNITY - PACOTE COMPLETO      ║
+╚════════════════════════════════════════════════════════════════╝
+
+📦 CONTEÚDO DO PACOTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. NickChanger.h              - Header do módulo
+2. NickChanger.cpp            - Implementação do módulo
+3. INSTALLATION_GUIDE.md      - Guia de instalação (DEVS)
+4. USER_GUIDE.md              - Guia de uso (USUÁRIOS)
+5. README.md                  - Visão geral do projeto
+6. LEIA-ME.txt                - Este arquivo
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚀 INÍCIO RÁPIDO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PARA DESENVOLVEDORES (Adicionar ao OpenCommunity):
+  1. Abra: INSTALLATION_GUIDE.md
+  2. Siga os passos de instalação
+  3. Compile o projeto
+  4. Teste
+
+PARA USUÁRIOS FINAIS (Usar o Alt Manager):
+  1. Abra: USER_GUIDE.md
+  2. Siga o guia passo a passo
+  3. Divirta-se!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✨ FUNCIONALIDADES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ Troca de nickname in-game sem reiniciar
+✅ Funciona com Vanilla, Lunar, Badlion
+✅ Validação automática de nicks
+✅ Sistema de logs detalhado
+✅ Fácil integração no OpenCommunity
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 REQUISITOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- OpenCommunity client
+- Minecraft 1.8.9
+- Visual Studio 2019+ (para compilar)
+- Windows 10/11
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎯 COMO FUNCIONA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Usuário cria arquivo: opencommunity_nick.txt
+2. Módulo lê o arquivo a cada 1 segundo
+3. Valida o nick (3-16 chars, alphanumeric + _)
+4. Aplica o nick via JNI
+5. Deleta o arquivo
+6. Gera logs detalhados
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 ARQUIVOS TEMPORÁRIOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Arquivo de Nick (Input):
+  Localização: C:\Users\{user}\AppData\Local\Temp\opencommunity_nick.txt
+  Conteúdo: Apenas o nick (ex: "TestNick123")
+  Ciclo: Criado → Lido → Deletado
+
+Arquivo de Log (Output):
+  Localização: C:\Users\{user}\AppData\Local\Temp\opencommunity_nickchanger.log
+  Conteúdo: Logs detalhados de todas as operações
+  Formato: [YYYY-MM-DD HH:MM:SS] Mensagem
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⚠️ LIMITAÇÕES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Nick é apenas local (cosmético)
+- Outros jogadores veem seu nick original
+- Não funciona no menu (precisa estar em jogo)
+- Alguns servidores podem forçar o nick original
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📚 DOCUMENTAÇÃO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+README.md              - Visão geral do projeto
+INSTALLATION_GUIDE.md  - Guia completo de instalação para devs
+USER_GUIDE.md          - Guia de uso para usuários finais
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🤝 CONTRIBUINDO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Este código é open source para a comunidade OpenCommunity.
+
+Sinta-se livre para:
+  ✅ Modificar o código
+  ✅ Adicionar features
+  ✅ Corrigir bugs
+  ✅ Compartilhar melhorias
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📄 LICENÇA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Fornecido "como está" para uso livre na comunidade.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🎉 CRÉDITOS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Desenvolvido para: Comunidade OpenCommunity
+Versão: 1.0
+Data: Maio 2026
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📞 SUPORTE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Para suporte:
+  1. Leia a documentação
+  2. Verifique os logs
+  3. Consulte a comunidade OpenCommunity
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Boa sorte e bom uso! 🚀

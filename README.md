@@ -104,6 +104,38 @@ All available modules organized by category.
 
 **Render** - HUD
 
+**Account** - NickChanger
+
+### Alt Manager (NickChanger)
+
+The Alt Manager allows you to change your in-game nickname without restarting Minecraft. This is a cosmetic change that only affects how you see your own name locally.
+
+**How to use:**
+
+1. Inject the runtime DLL into Minecraft
+2. Join a world or server (must be in-game, not in menu)
+3. Create a file: `C:\Users\{user}\AppData\Local\Temp\opencommunity_nick.txt`
+4. Write your desired nickname in the file (3-16 characters, alphanumeric + underscore)
+5. Save and close the file
+6. Wait 1 second - the module will read, validate, and apply the nick automatically
+7. The file will be deleted after processing
+
+**Validation rules:**
+- Length: 3-16 characters
+- Allowed characters: A-Z, a-z, 0-9, _
+- No spaces or special characters
+
+**Logs:**
+All operations are logged to: `C:\Users\{user}\AppData\Local\Temp\opencommunity_nickchanger.log`
+
+**Important notes:**
+- The nickname change is local only (cosmetic)
+- Other players will see your original username
+- Some servers may override your local nickname
+- Only works when in-game (world loaded)
+
+For detailed documentation, see the `ALTMANAGER_RELEASE` folder.
+
 ## Module System
 
 Modules are built from three shared primitives:
@@ -273,6 +305,7 @@ Notifications::SendNotifications::DISABLED("AutoClicker");
 - `ModuleCategory::Movement`
 - `ModuleCategory::Visuals`
 - `ModuleCategory::Settings`
+- `ModuleCategory::Account`
 
 ## Mapping System
 
@@ -449,6 +482,8 @@ OpenCommunity/
 |       |   `-- RenderHook.h / .cpp
 |       |-- features/
 |       |   |-- ModuleRegistry.h
+|       |   |-- account/
+|       |   |   `-- NickChanger.h / .cpp
 |       |   |-- combat/
 |       |   |   |-- AutoClicker.h / .cpp
 |       |   |   |-- ArmorFilter.h / .cpp
