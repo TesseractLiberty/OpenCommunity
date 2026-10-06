@@ -22,12 +22,12 @@ public:
         OptionCount
     };
 
-    MODULE_INFO(AutoClicker, "AutoClicker", "Automatically clicks for you.", ModuleCategory::Combat) {
+    MODULE_INFO(AutoClicker, XOR("AutoClicker"), XOR("Automatically clicks for you."), ModuleCategory::Combat) {
         SetImagePrefix(module_icons::mouse_icon_data, module_icons::mouse_icon_data_size);
-        AddOption(ModuleOption::SliderInt("Min CPS", 10, 1, 20));
-        AddOption(ModuleOption::SliderInt("Max CPS", 14, 1, 20));
-        AddOption(ModuleOption::Toggle("Jitter", false));
-        AddOption(ModuleOption::Toggle("Only While Holding", true));
+        AddOption(ModuleOption::SliderInt(XOR("Min CPS"), 10, 1, 20));
+        AddOption(ModuleOption::SliderInt(XOR("Max CPS"), 14, 1, 20));
+        AddOption(ModuleOption::Toggle(XOR("Jitter"), false));
+        AddOption(ModuleOption::Toggle(XOR("Only While Holding"), true));
     }
 
     void OnOptionEdited(size_t optionIndex) override {

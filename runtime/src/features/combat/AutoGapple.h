@@ -16,9 +16,9 @@
 
 class AutoGapple : public Module {
 public:
-    MODULE_INFO(AutoGapple, "AutoGapple", "Automatically eats a golden apple when regeneration is low.", ModuleCategory::Combat) {
+    MODULE_INFO(AutoGapple, XOR("AutoGapple"), XOR("Automatically eats a golden apple when regeneration is low."), ModuleCategory::Combat) {
         SetImagePrefix(module_icons::apple_icon_data, module_icons::apple_icon_data_size);
-        AddOption(ModuleOption::SliderInt("Delay", 5, 1, 28));
+        AddOption(ModuleOption::SliderInt(XOR("Delay"), 5, 1, 28));
     }
 
     void SyncToConfig(void* configPtr) override {

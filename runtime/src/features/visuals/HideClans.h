@@ -6,28 +6,28 @@
 
 class HideClans : public Module {
 public:
-    MODULE_INFO(HideClans, "HideClans", "Hides allied players using the original team and clan rules.", ModuleCategory::Visuals) {
+    MODULE_INFO(HideClans, XOR("HideClans"), XOR("Hides allied players using the original team and clan rules."), ModuleCategory::Visuals) {
         SetImagePrefix(module_icons::hide_clans_icon_data, module_icons::hide_clans_icon_data_size);
 
-        AddOption(ModuleOption::Toggle("Show Allies", false));
-        AddOption(ModuleOption::Combo("Show Allies Mode", { "Nearest", "Semi Auto", "Manual" }, 0));
-        AddOption(ModuleOption::SliderInt("Show Allies Count", 5, 1, 14));
+        AddOption(ModuleOption::Toggle(XOR("Show Allies"), false));
+        AddOption(ModuleOption::Combo(XOR("Show Allies Mode"), { XOR("Nearest"), XOR("Semi Auto"), XOR("Manual") }, 0));
+        AddOption(ModuleOption::SliderInt(XOR("Show Allies Count"), 5, 1, 14));
     }
 
     std::string GetTag() const override {
         std::string mode;
         if (!GetShowAllies()) {
-            mode = "Blatant";
+            mode = XOR("Blatant");
         } else {
             switch (GetShowAlliesMode()) {
             case 0:
-                mode = "Automatic";
+                mode = XOR("Automatic");
                 break;
             case 1:
-                mode = "Semi Automatic";
+                mode = XOR("Semi Automatic");
                 break;
             default:
-                mode = "Manual";
+                mode = XOR("Manual");
                 break;
             }
         }

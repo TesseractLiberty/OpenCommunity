@@ -3,6 +3,7 @@
 #include "Field.h"
 #include "Method.h"
 #include "../../../../shared/common/logging/Logger.h"
+#include "../../../../shared/common/security/XorString.h"
 
 #include <algorithm>
 
@@ -196,7 +197,7 @@ GameVersions GameInstance::DetectGameVersion()
 
 		CHAR cName[MAX_PATH];
 		GetClassNameA(hWnd, cName, _countof(cName));
-		if (strcmp(cName, "LWJGL") != 0)
+		if (strcmp(cName, XOR("LWJGL")) != 0)
 			continue;
 
 		DWORD pid;

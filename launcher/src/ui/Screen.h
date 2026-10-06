@@ -50,6 +50,7 @@ private:
     void HandleEnemyInfoApplicationRequests();
     void RegisterEnemyInfoWindowState();
     void ClearEnemyInfoWindowState();
+    void ScrubUiTextState();
 
     static LRESULT WINAPI WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
     LRESULT HandleWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);

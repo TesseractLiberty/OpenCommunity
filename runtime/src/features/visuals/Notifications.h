@@ -28,11 +28,13 @@ public:
         static void SUCCESS(const std::string& message, const std::string& title = "Success");
         static void ERROR(const std::string& message, const std::string& title = "Error");
         static void INFO(const std::string& message, const std::string& title = "Info");
+        static void ENABLED(const Module& module);
+        static void DISABLED(const Module& module);
         static void ENABLED(const std::string& moduleName, const std::string& title = "Module");
         static void DISABLED(const std::string& moduleName, const std::string& title = "Module");
     };
 
-    MODULE_INFO(Notifications, "Notifications", "Displays HUD notifications.", ModuleCategory::Visuals) {
+    MODULE_INFO(Notifications, XOR("Notifications"), XOR("Displays HUD notifications."), ModuleCategory::Visuals) {
         SetImagePrefix(module_icons::notifications_icon_data, module_icons::notifications_icon_data_size);
         SetEnabled(true);
     }
@@ -60,8 +62,11 @@ public:
     static void SendSuccess(const std::string& message, const std::string& title = "Success");
     static void SendError(const std::string& message, const std::string& title = "Error");
     static void SendInfo(const std::string& message, const std::string& title = "Info");
+    static void SendEnabled(const Module& module);
+    static void SendDisabled(const Module& module);
     static void SendEnabled(const std::string& moduleName, const std::string& title = "Module");
     static void SendDisabled(const std::string& moduleName, const std::string& title = "Module");
+    static void ScrubNotifications();
 
 #ifdef _RUNTIME
     static void SetFonts(ImFont* regular, ImFont* bold);

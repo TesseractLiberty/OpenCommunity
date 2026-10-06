@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <chrono>
+#include <cstdint>
 #include <unordered_map>
 
 struct ImFont;
@@ -25,8 +26,9 @@ private:
     struct ModuleEntry {
         std::string name;
         std::string tag;
-        float width;
+        float width = 0.0f;
         bool inUse = false;
+        std::uint64_t hash = 0;
     };
 
     std::vector<ModuleEntry> GetActiveModules(ImFont* nameFont, float nameFontSize, ImFont* tagFont, float tagFontSize);
@@ -41,7 +43,7 @@ private:
     int m_Fps = 0;
     int m_FrameCount = 0;
     std::chrono::steady_clock::time_point m_LastFpsTime = std::chrono::steady_clock::now();
-    std::unordered_map<std::string, float> m_SlideProgress;
+    std::unordered_map<std::uint64_t, float> m_SlideProgress;
     std::chrono::steady_clock::time_point m_LastFrameTime = std::chrono::steady_clock::now();
     ImFont* m_RegularFont = nullptr;
     ImFont* m_BoldFont = nullptr;

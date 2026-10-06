@@ -29,19 +29,29 @@ namespace {
     constexpr float kLifetime = 3.0f;
     constexpr size_t kMaxNotifications = 8;
 
+    inline std::uint64_t Fnv1aHash(const char* s) {
+        std::uint64_t h = 1469598103934665603ull;
+        if (!s) return h;
+        for (const char* p = s; *p; ++p) { h ^= static_cast<unsigned char>(*p); h *= 1099511628211ull; }
+        return h;
+    }
+
     struct NotificationEntry {
         std::uint64_t id = 0;
         std::uint64_t animationKey = 0;
         Notifications::Severity severity = Notifications::Severity::Info;
         Notifications::Severity previousSeverity = Notifications::Severity::Info;
-        std::string title;
-        std::string message;
+        EncString title;
+        EncString message;
+        std::uint64_t m_TitleHash = 0;
+        std::uint64_t m_MessageHash = 0;
         std::chrono::steady_clock::time_point createdAt;
         std::chrono::steady_clock::time_point refreshedAt;
         std::chrono::steady_clock::time_point severityChangedAt;
         float renderY = 0.0f;
         bool hasRenderY = false;
         bool hasPreviousSeverity = false;
+        void Clear() { title.Wipe(); message.Wipe(); m_TitleHash = 0; m_MessageHash = 0; }
     };
 
     std::mutex g_NotificationsMutex;
@@ -276,8 +286,12 @@ namespace {
     float CalcNotificationHeight(ImFont* titleFont, ImFont* messageFont, const NotificationEntry& notification) {
         (void)messageFont;
         const float textWidth = kCardWidth - (kCardPadding * 2.0f) - kIconSize - kColumnGap;
-        const ImVec2 titleSize = CalcTextSize(titleFont, 14.0f, notification.title, textWidth);
-        const RichTextMetrics messageSize = CalcRichTextMetrics(notification.message, 12.0f, textWidth);
+        std::string titleStr(notification.title.c_str());
+        std::string msgStr(notification.message.c_str());
+        const ImVec2 titleSize = CalcTextSize(titleFont, 14.0f, titleStr, textWidth);
+        const RichTextMetrics messageSize = CalcRichTextMetrics(msgStr, 12.0f, textWidth);
+        MemoryScrub::ClearString(titleStr);
+        MemoryScrub::ClearString(msgStr);
         const float textHeight = titleSize.y + 1.0f + messageSize.height;
         return (std::max)(kIconSize + (kCardPadding * 2.0f), textHeight + (kCardPadding * 2.0f));
     }
@@ -450,7 +464,11 @@ namespace {
         const ImVec2 messagePos(textX, min.y + kCardPadding + 18.0f);
 
         drawList->AddText(titleFont, 14.0f, titlePos, titleColor, notification.title.c_str(), nullptr, textWidth);
-        DrawRichText(drawList, messagePos, 12.0f, messageColor, notification.message, textWidth);
+        {
+            std::string msgStr(notification.message.c_str());
+            DrawRichText(drawList, messagePos, 12.0f, messageColor, msgStr, textWidth);
+            MemoryScrub::ClearString(msgStr);
+        }
     }
 }
 
@@ -464,6 +482,14 @@ void Notifications::SendNotifications::ERROR(const std::string& message, const s
 
 void Notifications::SendNotifications::INFO(const std::string& message, const std::string& title) {
     Notifications::SendInfo(message, title);
+}
+
+void Notifications::SendNotifications::ENABLED(const Module& module) {
+    Notifications::SendEnabled(module);
+}
+
+void Notifications::SendNotifications::DISABLED(const Module& module) {
+    Notifications::SendDisabled(module);
 }
 
 void Notifications::SendNotifications::ENABLED(const std::string& moduleName, const std::string& title) {
@@ -486,8 +512,11 @@ void Notifications::SendNotification(Severity severity, const std::string& title
     entry.animationKey = id;
     entry.severity = severity;
     entry.previousSeverity = severity;
-    entry.title = title.empty() ? "Notification" : title;
-    entry.message = message;
+    const char* titleC = title.empty() ? "Notification" : title.c_str();
+    entry.title.EncryptFrom(titleC);
+    entry.message.EncryptFrom(message.c_str());
+    entry.m_TitleHash = Fnv1aHash(titleC);
+    entry.m_MessageHash = Fnv1aHash(message.c_str());
     entry.createdAt = now;
     entry.refreshedAt = now;
     entry.severityChangedAt = now;
@@ -495,14 +524,15 @@ void Notifications::SendNotification(Severity severity, const std::string& title
     std::lock_guard<std::mutex> lock(g_NotificationsMutex);
 
     if (IsToggleSeverity(severity)) {
-        auto existing = std::find_if(g_Notifications.begin(), g_Notifications.end(), [&message](const NotificationEntry& notification) {
-            return IsToggleSeverity(notification.severity) && notification.message == message;
+        auto existing = std::find_if(g_Notifications.begin(), g_Notifications.end(), [&](const NotificationEntry& notification) {
+            return IsToggleSeverity(notification.severity) && notification.m_MessageHash == entry.m_MessageHash;
         });
 
         if (existing != g_Notifications.end()) {
             existing->previousSeverity = existing->severity;
             existing->severity = severity;
             existing->title = entry.title;
+            existing->m_TitleHash = entry.m_TitleHash;
             existing->refreshedAt = now;
             existing->severityChangedAt = now;
             existing->hasPreviousSeverity = true;
@@ -513,8 +543,10 @@ void Notifications::SendNotification(Severity severity, const std::string& title
     g_Notifications.insert(g_Notifications.begin(), std::move(entry));
 
     if (g_Notifications.size() > kMaxNotifications) {
+        for (size_t i = kMaxNotifications; i < g_Notifications.size(); ++i) g_Notifications[i].Clear();
         g_Notifications.resize(kMaxNotifications);
     }
+    string_obfuscation::WipeAllXorStrings();
 }
 
 void Notifications::SendSuccess(const std::string& message, const std::string& title) {
@@ -529,12 +561,33 @@ void Notifications::SendInfo(const std::string& message, const std::string& titl
     SendNotification(Severity::Info, title, message);
 }
 
+void Notifications::SendEnabled(const Module& module) {
+    char buf[128]; if (!module.GetNameInto(buf, sizeof(buf))) return;
+    SendNotification(Severity::Enabled, "Module", buf);
+    MemoryScrub::Wipe(buf, sizeof(buf));
+    string_obfuscation::WipeAllXorStrings();
+}
+
+void Notifications::SendDisabled(const Module& module) {
+    char buf[128]; if (!module.GetNameInto(buf, sizeof(buf))) return;
+    SendNotification(Severity::Disabled, "Module", buf);
+    MemoryScrub::Wipe(buf, sizeof(buf));
+    string_obfuscation::WipeAllXorStrings();
+}
+
 void Notifications::SendEnabled(const std::string& moduleName, const std::string& title) {
     SendNotification(Severity::Enabled, title, moduleName);
 }
 
 void Notifications::SendDisabled(const std::string& moduleName, const std::string& title) {
     SendNotification(Severity::Disabled, title, moduleName);
+}
+
+void Notifications::ScrubNotifications() {
+    std::lock_guard<std::mutex> lock(g_NotificationsMutex);
+    for (auto& n : g_Notifications) n.Clear();
+    g_Notifications.clear();
+    g_Notifications.shrink_to_fit();
 }
 
 #ifdef _RUNTIME
@@ -562,11 +615,15 @@ void Notifications::RenderOverlay(ImDrawList* drawList, float screenW, float scr
 
     std::lock_guard<std::mutex> lock(g_NotificationsMutex);
 
-    g_Notifications.erase(
-        std::remove_if(g_Notifications.begin(), g_Notifications.end(), [](const NotificationEntry& notification) {
-            return SecondsSince(notification.refreshedAt) >= (kLifetime + kExitDuration);
-        }),
-        g_Notifications.end());
+    {
+        auto it = g_Notifications.begin();
+        while (it != g_Notifications.end()) {
+            if (SecondsSince(it->refreshedAt) >= (kLifetime + kExitDuration)) {
+                it->Clear();
+                it = g_Notifications.erase(it);
+            } else { ++it; }
+        }
+    }
 
     if (g_Notifications.empty()) {
         return;

@@ -3,6 +3,7 @@
 #include "Module.h"
 #include "../ModuleConfig.h"
 
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <memory>
@@ -40,12 +41,17 @@ public:
         }
 
         auto& categoryModules = m_Modules[module->GetCategory()];
+        const std::uint64_t h = module->GetNameHash();
         for (const auto& registeredModule : categoryModules) {
-            if (registeredModule && registeredModule->GetName() == module->GetName()) {
+            if (registeredModule && h != 0 && registeredModule->GetNameHash() == h) {
+                return;
+            }
+            if (registeredModule && registeredModule.get() == module.get()) {
                 return;
             }
         }
 
+        module->SetId(m_NextModuleId++);
         m_KnownEnabledStates[BuildModuleKey(*module)] = module->IsEnabled();
         categoryModules.push_back(std::move(module));
     }
@@ -65,6 +71,16 @@ public:
             }
         }
         return allModules;
+    }
+
+    void ScrubAllTextBuffers() {
+        for (auto& [category, modules] : m_Modules) {
+            (void)category;
+            for (auto& module : modules) {
+                if (module) module->ScrubTextBuffers();
+            }
+        }
+        m_KnownEnabledStates.clear();
     }
 
     void ProcessKeybinds() {
@@ -202,8 +218,7 @@ public:
         }
 
         entry->m_Category = static_cast<int>(module.GetCategory());
-        std::strncpy(entry->m_ModuleName, module.GetName().c_str(), sizeof(entry->m_ModuleName) - 1);
-        entry->m_ModuleName[sizeof(entry->m_ModuleName) - 1] = '\0';
+        WriteModuleIdIntoEntry(*entry, module);
         entry->m_Keybind = module.GetKeybind();
     }
 
@@ -241,12 +256,43 @@ private:
     }
 
     static std::string BuildModuleKey(const Module& module) {
-        return std::to_string(static_cast<int>(module.GetCategory())) + ":" + module.GetName();
+        // Sem nome — só categoria + id + endereço (zero plaintext).
+        char buf[64]{};
+        std::snprintf(buf, sizeof(buf), "%d:%d:%p",
+            static_cast<int>(module.GetCategory()),
+            module.GetId(),
+            static_cast<const void*>(&module));
+        return std::string(buf);
+    }
+
+    static void WriteModuleIdIntoEntry(ModuleConfig::KeybindEntry& entry, const Module& module) {
+        // Reusa m_ModuleName para guardar id/hash — nunca plaintext.
+        // Formato: "#<id>:<hash>" — sem nome legível.
+        std::snprintf(entry.m_ModuleName, sizeof(entry.m_ModuleName),
+            "#%d:%llu", module.GetId(),
+            static_cast<unsigned long long>(module.GetNameHash()));
+        entry.m_ModuleName[sizeof(entry.m_ModuleName) - 1] = '\0';
     }
 
     static bool IsKeybindEntryForModule(const ModuleConfig::KeybindEntry& entry, const Module& module) {
-        return entry.m_Category == static_cast<int>(module.GetCategory()) &&
-               std::strcmp(entry.m_ModuleName, module.GetName().c_str()) == 0;
+        if (entry.m_Category != static_cast<int>(module.GetCategory())) return false;
+        // Novo formato "#id:hash".
+        if (entry.m_ModuleName[0] == '#') {
+            char expected[64]{};
+            std::snprintf(expected, sizeof(expected), "#%d:%llu", module.GetId(),
+                static_cast<unsigned long long>(module.GetNameHash()));
+            return std::strcmp(entry.m_ModuleName, expected) == 0;
+        }
+        // Legado: compara por hash derivado do conteúdo antigo sem expor nome novo.
+        // Se entrada legada contém nome plaintext, ainda casa via hash para migração,
+        // mas novas escritas nunca gravam plaintext.
+        std::uint64_t h = 1469598103934665603ull;
+        for (const char* p = entry.m_ModuleName; *p; ++p) { h ^= static_cast<unsigned char>(*p); h *= 1099511628211ull; }
+        // Não podemos derivar nome do módulo sem decrypt; usa ScopedName transiente.
+        ScopedName n(module);
+        std::uint64_t nh = 1469598103934665603ull;
+        for (const char* p = n.c_str(); *p; ++p) { nh ^= static_cast<unsigned char>(*p); nh *= 1099511628211ull; }
+        return h == nh;
     }
 
     static const ModuleConfig::KeybindEntry* FindKeybindEntry(const ModuleConfig& config, const Module& module) {
@@ -281,8 +327,7 @@ private:
         auto& entry = config.Keybinds.m_Entries[count];
         entry = ModuleConfig::KeybindEntry{};
         entry.m_Category = static_cast<int>(module.GetCategory());
-        std::strncpy(entry.m_ModuleName, module.GetName().c_str(), sizeof(entry.m_ModuleName) - 1);
-        entry.m_ModuleName[sizeof(entry.m_ModuleName) - 1] = '\0';
+        WriteModuleIdIntoEntry(entry, module);
         return &entry;
     }
 
@@ -359,4 +404,5 @@ private:
     KeybindInputBlockPredicate m_KeybindInputBlockPredicate;
     ModuleToggleCallback m_ModuleToggleCallback;
     bool m_EnableStatePrimed = false;
+    int m_NextModuleId = 0;
 };
