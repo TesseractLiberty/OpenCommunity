@@ -12,16 +12,16 @@
 
 class NoRender : public Module {
 public:
-    MODULE_INFO(NoRender, "NoRender", "Controls selected entity rendering.", ModuleCategory::Visuals) {
+    MODULE_INFO(NoRender, XOR("NoRender"), XOR("Controls selected entity rendering."), ModuleCategory::Visuals) {
         SetImagePrefix(module_icons::no_render_icon_data, module_icons::no_render_icon_data_size);
-        AddOption(ModuleOption::Toggle("AllEntities", true));
-        AddOption(ModuleOption::Toggle("Items", true));
-        AddOption(ModuleOption::Toggle("Players", true));
-        AddOption(ModuleOption::Toggle("Mobs", true));
-        AddOption(ModuleOption::Toggle("Animals", true));
-        AddOption(ModuleOption::Toggle("ArmorStand", true));
-        AddOption(ModuleOption::Toggle("AutoReset", true));
-        AddOption(ModuleOption::SliderFloat("MaxRenderRange", 4.0f, 0.0f, 16.0f));
+        AddOption(ModuleOption::Toggle(XOR("AllEntities"), true));
+        AddOption(ModuleOption::Toggle(XOR("Items"), true));
+        AddOption(ModuleOption::Toggle(XOR("Players"), true));
+        AddOption(ModuleOption::Toggle(XOR("Mobs"), true));
+        AddOption(ModuleOption::Toggle(XOR("Animals"), true));
+        AddOption(ModuleOption::Toggle(XOR("ArmorStand"), true));
+        AddOption(ModuleOption::Toggle(XOR("AutoReset"), true));
+        AddOption(ModuleOption::SliderFloat(XOR("MaxRenderRange"), 4.0f, 0.0f, 16.0f));
     }
 
     bool ShouldRenderOption(size_t optionIndex) const override {

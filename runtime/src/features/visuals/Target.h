@@ -19,21 +19,21 @@
 
 class Target : public Module {
 public:
-    MODULE_INFO(Target, "Target", "Focuses and filters combat targets using the original loader logic.", ModuleCategory::Visuals) {
+    MODULE_INFO(Target, XOR("Target"), XOR("Focuses and filters combat targets using the original loader logic."), ModuleCategory::Visuals) {
         SetImagePrefix(module_icons::target_icon_data, module_icons::target_icon_data_size);
 
-        AddOption(ModuleOption::Text("Player Name", "", 127));
-        AddOption(ModuleOption::Toggle("Automatic", false));
-        AddOption(ModuleOption::Combo("Mode", { "Low Armor", "Break Armor", "Health", "Both", "Browse All Players", "Switch Visible Hit", "Switch Visible Time" }, 0));
-        AddOption(ModuleOption::Combo("Browse Mode", { "Hits", "Time" }, 0));
-        AddOption(ModuleOption::SliderInt("Browse Hits", 5, 1, 20));
-        AddOption(ModuleOption::SliderInt("Browse Time Ms", 3000, 1, 10000));
-        AddOption(ModuleOption::Button("Browse Cache", "Clear Cache"));
-        AddOption(ModuleOption::Toggle("Show Browsed Players", false));
-        AddOption(ModuleOption::SliderFloat("Both Health Weight", 1.0f, 0.1f, 5.0f));
-        AddOption(ModuleOption::SliderFloat("Both Armor Weight", 1.0f, 0.1f, 5.0f));
-        AddOption(ModuleOption::Toggle("Consider Durability", true));
-        AddOption(ModuleOption::SliderFloat("Break Armor Priority", 5.0f, 0.0f, 10.0f));
+        AddOption(ModuleOption::Text(XOR("Player Name"), "", 127));
+        AddOption(ModuleOption::Toggle(XOR("Automatic"), false));
+        AddOption(ModuleOption::Combo(XOR("Mode"), { XOR("Low Armor"), XOR("Break Armor"), XOR("Health"), XOR("Both"), XOR("Browse All Players"), XOR("Switch Visible Hit"), XOR("Switch Visible Time") }, 0));
+        AddOption(ModuleOption::Combo(XOR("Browse Mode"), { XOR("Hits"), XOR("Time") }, 0));
+        AddOption(ModuleOption::SliderInt(XOR("Browse Hits"), 5, 1, 20));
+        AddOption(ModuleOption::SliderInt(XOR("Browse Time Ms"), 3000, 1, 10000));
+        AddOption(ModuleOption::Button(XOR("Browse Cache"), XOR("Clear Cache")));
+        AddOption(ModuleOption::Toggle(XOR("Show Browsed Players"), false));
+        AddOption(ModuleOption::SliderFloat(XOR("Both Health Weight"), 1.0f, 0.1f, 5.0f));
+        AddOption(ModuleOption::SliderFloat(XOR("Both Armor Weight"), 1.0f, 0.1f, 5.0f));
+        AddOption(ModuleOption::Toggle(XOR("Consider Durability"), true));
+        AddOption(ModuleOption::SliderFloat(XOR("Break Armor Priority"), 5.0f, 0.0f, 10.0f));
     }
 
     std::string GetTag() const override {

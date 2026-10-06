@@ -18,13 +18,13 @@
 
 class DamageIndicator : public Module {
 public:
-    MODULE_INFO(DamageIndicator, "DamageIndicator", "Displays information about the player you're aiming at.", ModuleCategory::Visuals) {
+    MODULE_INFO(DamageIndicator, XOR("DamageIndicator"), XOR("Displays information about the player you're aiming at."), ModuleCategory::Visuals) {
         SetImagePrefix(module_icons::heart_icon_data, module_icons::heart_icon_data_size);
-        AddOption(ModuleOption::Combo("Mode", { "J3 Ultimate", "Astralis" }, static_cast<int>(DamageIndicatorMode::J3Ultimate)));
-        AddOption(ModuleOption::Color("Color", 242.0f / 255.0f, 141.0f / 255.0f, 39.0f / 255.0f, 1.0f));
-        AddOption(ModuleOption::SliderFloat("Scale", 1.0f, 0.5f, 2.0f));
-        AddOption(ModuleOption::SliderFloat("X", 0.5f, 0.0f, 1.0f));
-        AddOption(ModuleOption::SliderFloat("Y", 0.5f, 0.0f, 1.0f));
+        AddOption(ModuleOption::Combo(XOR("Mode"), { XOR("J3 Ultimate"), XOR("Astralis") }, static_cast<int>(DamageIndicatorMode::J3Ultimate)));
+        AddOption(ModuleOption::Color(XOR("Color"), 242.0f / 255.0f, 141.0f / 255.0f, 39.0f / 255.0f, 1.0f));
+        AddOption(ModuleOption::SliderFloat(XOR("Scale"), 1.0f, 0.5f, 2.0f));
+        AddOption(ModuleOption::SliderFloat(XOR("X"), 0.5f, 0.0f, 1.0f));
+        AddOption(ModuleOption::SliderFloat(XOR("Y"), 0.5f, 0.0f, 1.0f));
     }
 
     bool ShouldRenderOption(size_t optionIndex) const override {
@@ -69,13 +69,11 @@ public:
     }
 
     std::string GetTag() const override {
-        switch (GetMode()) {
-        case DamageIndicatorMode::Astralis:
-            return "Astralis";
-        case DamageIndicatorMode::J3Ultimate:
-        default:
-            return "J3 Ultimate";
+        const int idx = static_cast<int>(GetMode());
+        if (m_Options.size() > kModeOption && idx >= 0 && idx < static_cast<int>(m_Options[kModeOption].comboItems.size())) {
+            return std::string(m_Options[kModeOption].comboItems[static_cast<size_t>(idx)].c_str());
         }
+        return {};
     }
 
 private:

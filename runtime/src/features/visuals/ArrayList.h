@@ -8,15 +8,15 @@
 
 class ArrayList : public Module {
 public:
-    MODULE_INFO(ArrayList, "ArrayList", "Displays active modules on the HUD.", ModuleCategory::Visuals) {
+    MODULE_INFO(ArrayList, XOR("ArrayList"), XOR("Displays active modules on the HUD."), ModuleCategory::Visuals) {
         SetImagePrefix(module_icons::view_details_icon_data, module_icons::view_details_icon_data_size);
         SetEnabled(true);
-        AddOption(ModuleOption::Combo("Mode", { "Default", "Rise", "Tesseract", "VapeV4" }, static_cast<int>(ArrayListMode::Default)));
-        AddOption(ModuleOption::Toggle("Watermark", true));
-        AddOption(ModuleOption::Toggle("Spaced Modules", false));
-        AddOption(ModuleOption::Toggle("Wave", true));
-        AddOption(ModuleOption::Color("Primary Color", 78.0f / 255.0f, 86.0f / 255.0f, 107.0f / 255.0f, 1.0f));
-        AddOption(ModuleOption::Color("Secondary Color", 120.0f / 255.0f, 146.0f / 255.0f, 214.0f / 255.0f, 1.0f));
+        AddOption(ModuleOption::Combo(XOR("Mode"), { XOR("Default"), XOR("Rise"), XOR("Tesseract"), XOR("VapeV4") }, static_cast<int>(ArrayListMode::Default)));
+        AddOption(ModuleOption::Toggle(XOR("Watermark"), true));
+        AddOption(ModuleOption::Toggle(XOR("Spaced Modules"), false));
+        AddOption(ModuleOption::Toggle(XOR("Wave"), true));
+        AddOption(ModuleOption::Color(XOR("Primary Color"), 78.0f / 255.0f, 86.0f / 255.0f, 107.0f / 255.0f, 1.0f));
+        AddOption(ModuleOption::Color(XOR("Secondary Color"), 120.0f / 255.0f, 146.0f / 255.0f, 214.0f / 255.0f, 1.0f));
     }
 
     bool ShouldRenderOption(size_t optionIndex) const override {

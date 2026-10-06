@@ -139,6 +139,19 @@ namespace CommandManager {
             return acronym;
         }
 
+
+        inline std::string ModuleNameStr(const Module& m) {
+            ScopedName n(m);
+            return std::string(n.c_str());
+        }
+        inline std::string ModuleNameStr(const Module* m) {
+            if (!m) return {};
+            return ModuleNameStr(*m);
+        }
+        inline std::string OptionNameStr(const ModuleOption& o) {
+            return std::string(o.name.c_str());
+        }
+
         inline std::string JoinTokens(const std::vector<std::string>& tokens, size_t startIndex, size_t endIndexExclusive) {
             if (startIndex >= endIndexExclusive || startIndex >= tokens.size()) {
                 return {};
@@ -415,14 +428,14 @@ namespace CommandManager {
 
                 ModuleEntry entry;
                 entry.module = module.get();
-                entry.commandName = BuildModuleCommandName(module->GetName());
-                entry.normalizedName = NormalizeKey(module->GetName());
-                entry.acronym = BuildAcronym(module->GetName());
+                entry.commandName = BuildModuleCommandName(ModuleNameStr(*module));
+                entry.normalizedName = NormalizeKey(ModuleNameStr(*module));
+                entry.acronym = BuildAcronym(ModuleNameStr(*module));
                 entries.push_back(std::move(entry));
             }
 
             std::sort(entries.begin(), entries.end(), [](const ModuleEntry& left, const ModuleEntry& right) {
-                return ToLower(left.module->GetName()) < ToLower(right.module->GetName());
+                return ToLower(ModuleNameStr(left.module)) < ToLower(ModuleNameStr(right.module));
             });
             return entries;
         }
@@ -471,8 +484,8 @@ namespace CommandManager {
                 OptionEntry entry;
                 entry.option = &option;
                 entry.index = index;
-                entry.commandName = BuildOptionCommandName(option.name);
-                entry.normalizedName = NormalizeKey(option.name);
+                entry.commandName = BuildOptionCommandName(OptionNameStr(option));
+                entry.normalizedName = NormalizeKey(OptionNameStr(option));
                 entries.push_back(std::move(entry));
             }
 
@@ -531,7 +544,7 @@ namespace CommandManager {
                 return FormatFloat(option.floatValue);
             case OptionType::Combo:
                 if (option.comboIndex >= 0 && option.comboIndex < static_cast<int>(option.comboItems.size())) {
-                    return option.comboItems[option.comboIndex];
+                    return std::string(option.comboItems[option.comboIndex].c_str());
                 }
                 return "unknown";
             case OptionType::Color: {
@@ -570,7 +583,7 @@ namespace CommandManager {
                     if (index > 0) {
                         usage += "/";
                     }
-                    usage += BuildOptionCommandName(entry.option->comboItems[index]);
+                    usage += BuildOptionCommandName(std::string((entry.option->comboItems[index]).c_str()));
                 }
                 if (entry.option->comboItems.size() > maxPreviewItems) {
                     usage += "/...";
@@ -663,8 +676,8 @@ namespace CommandManager {
         inline void SendModuleOverview(JNIEnv* env, Module& module, const std::string& prefix) {
             CommandOutput::SendInfo(
                 env,
-                BuildModuleSummary(module) + ". Use " + prefix + "t " + BuildModuleCommandName(module.GetName()) + " to toggle or " + prefix + BuildModuleCommandName(module.GetName()) + " help for commands.",
-                module.GetName());
+                BuildModuleSummary(module) + ". Use " + prefix + "t " + BuildModuleCommandName(ModuleNameStr(module)) + " to toggle or " + prefix + BuildModuleCommandName(ModuleNameStr(module)) + " help for commands.",
+                ModuleNameStr(module));
         }
 
         inline void SendModuleHelp(JNIEnv* env, Module& module) {
@@ -691,7 +704,7 @@ namespace CommandManager {
                 message += " more";
             }
 
-            CommandOutput::SendInfo(env, message, module.GetName());
+            CommandOutput::SendInfo(env, message, ModuleNameStr(module));
         }
 
         inline bool HandleModuleToggle(JNIEnv* env, Module& module, ModuleConfig* config, bool enabled) {
@@ -699,8 +712,8 @@ namespace CommandManager {
             CommitModule(module, config);
             CommandOutput::SendSuccess(
                 env,
-                module.GetName() + std::string(enabled ? " enabled." : " disabled."),
-                module.GetName());
+                ModuleNameStr(module) + std::string(enabled ? " enabled." : " disabled."),
+                ModuleNameStr(module));
             return true;
         }
 
@@ -713,8 +726,9 @@ namespace CommandManager {
             std::optional<int> prefixMatch;
             int prefixMatchCount = 0;
             for (int index = 0; index < static_cast<int>(option.comboItems.size()); ++index) {
-                const std::string normalizedItem = NormalizeKey(option.comboItems[index]);
-                const std::string normalizedCommandItem = NormalizeKey(BuildOptionCommandName(option.comboItems[index]));
+                const std::string itemStr(option.comboItems[index].c_str());
+                const std::string normalizedItem = NormalizeKey(itemStr);
+                const std::string normalizedCommandItem = NormalizeKey(BuildOptionCommandName(itemStr));
                 if (normalizedValue == normalizedItem || normalizedValue == normalizedCommandItem) {
                     return index;
                 }
@@ -740,7 +754,7 @@ namespace CommandManager {
             const std::vector<std::string>& valueTokens,
             const std::string& commandPrefix) {
             if (!match.option.option) {
-                CommandOutput::SendError(env, "Unknown option.", module.GetName());
+                CommandOutput::SendError(env, "Unknown option.", ModuleNameStr(module));
                 return true;
             }
 
@@ -749,14 +763,14 @@ namespace CommandManager {
             case OptionType::Toggle: {
                 bool nextValue = !option.boolValue;
                 if (!valueTokens.empty() && !ParseBoolean(valueTokens.front(), nextValue)) {
-                    CommandOutput::SendError(env, "Use on/off, true/false or 1/0 for " + match.option.commandName + ".", module.GetName());
+                    CommandOutput::SendError(env, "Use on/off, true/false or 1/0 for " + match.option.commandName + ".", ModuleNameStr(module));
                     return true;
                 }
 
                 option.boolValue = nextValue;
                 module.OnOptionEdited(match.option.index);
                 CommitModule(module, config);
-                CommandOutput::SendSuccess(env, match.option.commandName + " set to " + std::string(nextValue ? "on" : "off") + ".", module.GetName());
+                CommandOutput::SendSuccess(env, match.option.commandName + " set to " + std::string(nextValue ? "on" : "off") + ".", ModuleNameStr(module));
                 return true;
             }
             case OptionType::SliderInt: {
@@ -764,20 +778,20 @@ namespace CommandManager {
                     CommandOutput::SendError(
                         env,
                         "Use " + commandPrefix + " " + match.option.commandName + " <" + std::to_string(option.intMin) + "-" + std::to_string(option.intMax) + ">.",
-                        module.GetName());
+                        ModuleNameStr(module));
                     return true;
                 }
 
                 int parsedValue = 0;
                 if (!ParseInteger(valueTokens.front(), parsedValue)) {
-                    CommandOutput::SendError(env, match.option.commandName + " only accepts whole numbers.", module.GetName());
+                    CommandOutput::SendError(env, match.option.commandName + " only accepts whole numbers.", ModuleNameStr(module));
                     return true;
                 }
 
                 option.intValue = (std::clamp)(parsedValue, option.intMin, option.intMax);
                 module.OnOptionEdited(match.option.index);
                 CommitModule(module, config);
-                CommandOutput::SendSuccess(env, match.option.commandName + " set to " + std::to_string(option.intValue) + ".", module.GetName());
+                CommandOutput::SendSuccess(env, match.option.commandName + " set to " + std::to_string(option.intValue) + ".", ModuleNameStr(module));
                 return true;
             }
             case OptionType::SliderFloat: {
@@ -785,44 +799,44 @@ namespace CommandManager {
                     CommandOutput::SendError(
                         env,
                         "Use " + commandPrefix + " " + match.option.commandName + " <" + FormatFloat(option.floatMin) + "-" + FormatFloat(option.floatMax) + ">.",
-                        module.GetName());
+                        ModuleNameStr(module));
                     return true;
                 }
 
                 float parsedValue = 0.0f;
                 if (!ParseFloat(valueTokens.front(), parsedValue)) {
-                    CommandOutput::SendError(env, match.option.commandName + " only accepts numbers.", module.GetName());
+                    CommandOutput::SendError(env, match.option.commandName + " only accepts numbers.", ModuleNameStr(module));
                     return true;
                 }
 
                 option.floatValue = (std::clamp)(parsedValue, option.floatMin, option.floatMax);
                 module.OnOptionEdited(match.option.index);
                 CommitModule(module, config);
-                CommandOutput::SendSuccess(env, match.option.commandName + " set to " + FormatFloat(option.floatValue) + ".", module.GetName());
+                CommandOutput::SendSuccess(env, match.option.commandName + " set to " + FormatFloat(option.floatValue) + ".", ModuleNameStr(module));
                 return true;
             }
             case OptionType::Combo: {
                 if (valueTokens.empty()) {
-                    CommandOutput::SendError(env, "Choose a value for " + match.option.commandName + " or press Tab for suggestions.", module.GetName());
+                    CommandOutput::SendError(env, "Choose a value for " + match.option.commandName + " or press Tab for suggestions.", ModuleNameStr(module));
                     return true;
                 }
 
                 const auto comboIndex = FindComboIndex(option, JoinTokens(valueTokens, 0, valueTokens.size()));
                 if (!comboIndex.has_value()) {
-                    CommandOutput::SendError(env, "Unknown value for " + match.option.commandName + ".", module.GetName());
+                    CommandOutput::SendError(env, "Unknown value for " + match.option.commandName + ".", ModuleNameStr(module));
                     return true;
                 }
 
                 option.comboIndex = *comboIndex;
                 module.OnOptionEdited(match.option.index);
                 CommitModule(module, config);
-                const std::string currentValue = option.comboItems[option.comboIndex];
-                CommandOutput::SendSuccess(env, match.option.commandName + " set to " + currentValue + ".", module.GetName());
+                const std::string currentValue(std::string(option.comboItems[option.comboIndex].c_str()));
+                CommandOutput::SendSuccess(env, match.option.commandName + " set to " + currentValue + ".", ModuleNameStr(module));
                 return true;
             }
             case OptionType::Color: {
                 if (valueTokens.size() < 3) {
-                    CommandOutput::SendError(env, "Use " + commandPrefix + " " + match.option.commandName + " <r g b>.", module.GetName());
+                    CommandOutput::SendError(env, "Use " + commandPrefix + " " + match.option.commandName + " <r g b>.", ModuleNameStr(module));
                     return true;
                 }
 
@@ -830,7 +844,7 @@ namespace CommandManager {
                 int green = 0;
                 int blue = 0;
                 if (!ParseInteger(valueTokens[0], red) || !ParseInteger(valueTokens[1], green) || !ParseInteger(valueTokens[2], blue)) {
-                    CommandOutput::SendError(env, match.option.commandName + " expects RGB values between 0 and 255.", module.GetName());
+                    CommandOutput::SendError(env, match.option.commandName + " expects RGB values between 0 and 255.", ModuleNameStr(module));
                     return true;
                 }
 
@@ -839,7 +853,7 @@ namespace CommandManager {
                 option.colorValue[2] = (std::clamp)(blue, 0, 255) / 255.0f;
                 module.OnOptionEdited(match.option.index);
                 CommitModule(module, config);
-                CommandOutput::SendSuccess(env, match.option.commandName + " updated.", module.GetName());
+                CommandOutput::SendSuccess(env, match.option.commandName + " updated.", ModuleNameStr(module));
                 return true;
             }
             case OptionType::Text: {
@@ -847,14 +861,14 @@ namespace CommandManager {
                 option.textValue = nextValue;
                 module.OnOptionEdited(match.option.index);
                 CommitModule(module, config);
-                CommandOutput::SendSuccess(env, match.option.commandName + " updated.", module.GetName());
+                CommandOutput::SendSuccess(env, match.option.commandName + " updated.", ModuleNameStr(module));
                 return true;
             }
             case OptionType::Button: {
                 if (!valueTokens.empty()) {
                     const std::string action = NormalizeKey(valueTokens.front());
                     if (action != "run" && action != "click" && action != "open" && action != "clear" && action != "use" && action != "trigger") {
-                        CommandOutput::SendError(env, "Use " + commandPrefix + " " + match.option.commandName + " or add run.", module.GetName());
+                        CommandOutput::SendError(env, "Use " + commandPrefix + " " + match.option.commandName + " or add run.", ModuleNameStr(module));
                         return true;
                     }
                 }
@@ -862,11 +876,11 @@ namespace CommandManager {
                 option.buttonPressed = true;
                 module.OnOptionEdited(match.option.index);
                 CommitModule(module, config);
-                CommandOutput::SendSuccess(env, match.option.commandName + " triggered.", module.GetName());
+                CommandOutput::SendSuccess(env, match.option.commandName + " triggered.", ModuleNameStr(module));
                 return true;
             }
             default:
-                CommandOutput::SendError(env, "Unsupported option type.", module.GetName());
+                CommandOutput::SendError(env, "Unsupported option type.", ModuleNameStr(module));
                 return true;
             }
         }
@@ -877,7 +891,7 @@ namespace CommandManager {
             ModuleConfig* config,
             const std::string& prefix,
             const std::vector<std::string>& tokens) {
-            const std::string moduleCommandName = BuildModuleCommandName(module.GetName());
+            const std::string moduleCommandName = BuildModuleCommandName(ModuleNameStr(module));
             const std::string commandPrefix = prefix + moduleCommandName;
             if (tokens.size() <= 1) {
                 SendModuleOverview(env, module, prefix);
@@ -902,7 +916,7 @@ namespace CommandManager {
 
             const auto match = FindOptionExact(module, tokens, optionStartIndex);
             if (!match.has_value()) {
-                CommandOutput::SendError(env, "Unknown command or option.", module.GetName());
+                CommandOutput::SendError(env, "Unknown command or option.", ModuleNameStr(module));
                 SendModuleHelp(env, module);
                 return true;
             }
@@ -952,7 +966,7 @@ namespace CommandManager {
 
             Module& module = *moduleEntry->module;
             if (!module.SupportsKeybind()) {
-                CommandOutput::SendError(env, module.GetName() + " does not support keybinds.", module.GetName());
+                CommandOutput::SendError(env, ModuleNameStr(module) + " does not support keybinds.", ModuleNameStr(module));
                 return true;
             }
 
@@ -960,14 +974,14 @@ namespace CommandManager {
                 CommandOutput::SendInfo(
                     env,
                     "Current bind: " + FormatKeybindName(module.GetKeybind()) + ". Use " + prefix + "bind " + moduleEntry->commandName + " <key> or none.",
-                    module.GetName());
+                    ModuleNameStr(module));
                 return true;
             }
 
             const std::string rawKey = JoinTokens(tokens, 2, tokens.size());
             int virtualKey = 0;
             if (!ParseKeybindToken(rawKey, virtualKey) || (virtualKey != 0 && !IsBindableVirtualKey(virtualKey))) {
-                CommandOutput::SendError(env, "Unknown key. Try keys like r, f, tab, shift, space, f5 or none.", module.GetName());
+                CommandOutput::SendError(env, "Unknown key. Try keys like r, f, tab, shift, space, f5 or none.", ModuleNameStr(module));
                 return true;
             }
 
@@ -975,9 +989,9 @@ namespace CommandManager {
             CommitModule(module, config);
 
             if (virtualKey == 0) {
-                CommandOutput::SendSuccess(env, module.GetName() + " unbound.", module.GetName());
+                CommandOutput::SendSuccess(env, ModuleNameStr(module) + " unbound.", ModuleNameStr(module));
             } else {
-                CommandOutput::SendSuccess(env, module.GetName() + " bound to " + module.GetKeybindName() + ".", module.GetName());
+                CommandOutput::SendSuccess(env, ModuleNameStr(module) + " bound to " + std::string(module.GetKeybindName()) + ".", ModuleNameStr(module));
             }
             return true;
         }
@@ -1009,7 +1023,7 @@ namespace CommandManager {
 
         inline std::vector<std::string> BuildModuleSuggestions(const std::string& prefix, Module& module, const std::string& fragment) {
             const std::string normalizedFragment = NormalizeKey(fragment);
-            const std::string base = prefix + BuildModuleCommandName(module.GetName()) + " ";
+            const std::string base = prefix + BuildModuleCommandName(ModuleNameStr(module)) + " ";
             std::vector<std::string> suggestions;
 
             const std::vector<std::string> builtinCommands = {
@@ -1072,7 +1086,8 @@ namespace CommandManager {
                 break;
             }
             case OptionType::Combo:
-                for (const std::string& item : optionEntry.option->comboItems) {
+                for (const auto& itemEnc : optionEntry.option->comboItems) {
+                    const std::string item(itemEnc.c_str());
                     const std::string itemCommand = BuildOptionCommandName(item);
                     if (normalizedFragment.empty() || NormalizeKey(itemCommand).rfind(normalizedFragment, 0) == 0 || NormalizeKey(item).rfind(normalizedFragment, 0) == 0) {
                         suggestions.push_back(base + itemCommand);
@@ -1220,7 +1235,7 @@ namespace CommandManager {
 
         if (tokens.size() == 2 && !endsWithSpace) {
             if (const auto optionMatch = detail::FindOptionExact(module, tokens, 1); optionMatch.has_value() && optionMatch->consumedTokens == 1) {
-                return detail::BuildOptionValueSuggestions(prefix + detail::BuildModuleCommandName(module.GetName()) + " ", optionMatch->option, {});
+                return detail::BuildOptionValueSuggestions(prefix + detail::BuildModuleCommandName(detail::ModuleNameStr(module)) + " ", optionMatch->option, {});
             }
             return detail::BuildModuleSuggestions(prefix, module, tokens[1]);
         }
@@ -1229,7 +1244,7 @@ namespace CommandManager {
             if (tokens.size() == 2 || (tokens.size() == 3 && !endsWithSpace)) {
                 const std::string fragment = tokens.size() >= 3 ? tokens[2] : std::string();
                 std::vector<std::string> suggestions;
-                const std::string base = prefix + detail::BuildModuleCommandName(module.GetName()) + " set ";
+                const std::string base = prefix + detail::BuildModuleCommandName(detail::ModuleNameStr(module)) + " set ";
                 for (const auto& optionEntry : detail::FindOptionMatches(module, fragment)) {
                     suggestions.push_back(base + optionEntry.commandName);
                 }
@@ -1238,7 +1253,7 @@ namespace CommandManager {
 
             if (const auto optionMatch = detail::FindOptionExact(module, tokens, 2); optionMatch.has_value() && optionMatch->consumedTokens == 1) {
                 const std::string fragment = endsWithSpace ? std::string() : tokens.back();
-                return detail::BuildOptionValueSuggestions(prefix + detail::BuildModuleCommandName(module.GetName()) + " set ", optionMatch->option, fragment);
+                return detail::BuildOptionValueSuggestions(prefix + detail::BuildModuleCommandName(detail::ModuleNameStr(module)) + " set ", optionMatch->option, fragment);
             }
             return {};
         }
@@ -1247,7 +1262,7 @@ namespace CommandManager {
             if (optionMatch->consumedTokens == 1) {
                 const bool awaitingValue = endsWithSpace || tokens.size() > 2;
                 const std::string valueFragment = awaitingValue && !endsWithSpace && tokens.size() > 2 ? tokens.back() : std::string();
-                return detail::BuildOptionValueSuggestions(prefix + detail::BuildModuleCommandName(module.GetName()) + " ", optionMatch->option, valueFragment);
+                return detail::BuildOptionValueSuggestions(prefix + detail::BuildModuleCommandName(detail::ModuleNameStr(module)) + " ", optionMatch->option, valueFragment);
             }
         }
 

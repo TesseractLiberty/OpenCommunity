@@ -113,8 +113,8 @@ void AutoClicker::Run() {
         return;
     }
     
-    HWND mcWindow = FindWindowA("LWJGL", nullptr);
-    if (!mcWindow) mcWindow = FindWindowA("GLFW30", nullptr);
+    HWND mcWindow = FindWindowA(XOR("LWJGL"), nullptr);
+    if (!mcWindow) mcWindow = FindWindowA(XOR("GLFW30"), nullptr);
     if (!mcWindow || GetForegroundWindow() != mcWindow) {
         Reset();
         return;

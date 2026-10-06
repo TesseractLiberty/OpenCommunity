@@ -18,7 +18,7 @@ bool Bridge::Initialize() {
         PAGE_READWRITE,
         0,
         sizeof(ModuleConfig),
-        MEMORY_NAME
+        MemoryName()
     );
     
     if (m_MapFile) {
@@ -26,11 +26,11 @@ bool Bridge::Initialize() {
         createdMapping = createStatus != ERROR_ALREADY_EXISTS;
     } else {
         const DWORD createError = GetLastError();
-        OC_LOG_WARNINGF("Bridge", "CreateFileMappingW failed with %lu, trying OpenFileMappingW.", createError);
+        OC_LOG_WARNINGF(XOR("Bridge"), XOR("CreateFileMappingW failed with %lu, trying OpenFileMappingW."), createError);
 
-        m_MapFile = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, MEMORY_NAME);
+        m_MapFile = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, MemoryName());
         if (!m_MapFile) {
-            OC_LOG_ERRORF("Bridge", "OpenFileMappingW failed with %lu.", GetLastError());
+            OC_LOG_ERRORF(XOR("Bridge"), XOR("OpenFileMappingW failed with %lu."), GetLastError());
             return false;
         }
     }
@@ -44,19 +44,19 @@ bool Bridge::Initialize() {
     ));
     
     if (!m_Config) {
-        OC_LOG_ERRORF("Bridge", "MapViewOfFile failed with %lu.", GetLastError());
+        OC_LOG_ERRORF(XOR("Bridge"), XOR("MapViewOfFile failed with %lu."), GetLastError());
         CloseHandle(m_MapFile);
         m_MapFile = nullptr;
         return false;
     }
-    
+
     if (createdMapping || !m_Config->IsCompatible()) {
-        OC_LOG_INFO("Bridge", "Initializing shared ModuleConfig schema.");
+        OC_LOG_INFO(XOR("Bridge"), XOR("Initializing shared ModuleConfig schema."));
         m_Config->Reset();
     }
-    
+
     m_Initialized = true;
-    OC_LOG_INFO("Bridge", "Shared memory bridge initialized.");
+    OC_LOG_INFO(XOR("Bridge"), XOR("Shared memory bridge initialized."));
     return true;
 }
 

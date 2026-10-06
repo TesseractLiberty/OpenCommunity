@@ -87,23 +87,23 @@ private:
 #endif
 
 public:
-    MODULE_INFO(ArmorSwap, "ArmorSwap", "Automatically swaps damaged armor with a better set.", ModuleCategory::Combat) {
+    MODULE_INFO(ArmorSwap, XOR("ArmorSwap"), XOR("Automatically swaps damaged armor with a better set."), ModuleCategory::Combat) {
         SetImagePrefix(module_icons::armor_swap_icon_data, module_icons::armor_swap_icon_data_size);
-        AddOption(ModuleOption::SliderInt("Delay", 80, 1, 500));
-        AddOption(ModuleOption::Toggle("Swap All", false));
-        AddOption(ModuleOption::SliderInt("Percentage", 25, 0, 100));
-        AddOption(ModuleOption::SliderInt("Helmet", 25, 0, 100));
-        AddOption(ModuleOption::SliderInt("Chest", 25, 0, 100));
-        AddOption(ModuleOption::SliderInt("Legs", 25, 0, 100));
-        AddOption(ModuleOption::SliderInt("Boots", 25, 0, 100));
-        AddOption(ModuleOption::Toggle("Auto Drop", false));
-        AddOption(ModuleOption::Toggle("Multi Swap", false));
-        AddOption(ModuleOption::Toggle("Open Inventory", true));
-        AddOption(ModuleOption::Toggle("Inventory Organizer", false));
-        AddOption(ModuleOption::SliderInt("Helmet Slot", 1, 1, 9));
-        AddOption(ModuleOption::SliderInt("Chest Slot", 2, 1, 9));
-        AddOption(ModuleOption::SliderInt("Legs Slot", 3, 1, 9));
-        AddOption(ModuleOption::SliderInt("Boots Slot", 4, 1, 9));
+        AddOption(ModuleOption::SliderInt(XOR("Delay"), 80, 1, 500));
+        AddOption(ModuleOption::Toggle(XOR("Swap All"), false));
+        AddOption(ModuleOption::SliderInt(XOR("Percentage"), 25, 0, 100));
+        AddOption(ModuleOption::SliderInt(XOR("Helmet"), 25, 0, 100));
+        AddOption(ModuleOption::SliderInt(XOR("Chest"), 25, 0, 100));
+        AddOption(ModuleOption::SliderInt(XOR("Legs"), 25, 0, 100));
+        AddOption(ModuleOption::SliderInt(XOR("Boots"), 25, 0, 100));
+        AddOption(ModuleOption::Toggle(XOR("Auto Drop"), false));
+        AddOption(ModuleOption::Toggle(XOR("Multi Swap"), false));
+        AddOption(ModuleOption::Toggle(XOR("Open Inventory"), true));
+        AddOption(ModuleOption::Toggle(XOR("Inventory Organizer"), false));
+        AddOption(ModuleOption::SliderInt(XOR("Helmet Slot"), 1, 1, 9));
+        AddOption(ModuleOption::SliderInt(XOR("Chest Slot"), 2, 1, 9));
+        AddOption(ModuleOption::SliderInt(XOR("Legs Slot"), 3, 1, 9));
+        AddOption(ModuleOption::SliderInt(XOR("Boots Slot"), 4, 1, 9));
     }
 
     void SyncToConfig(void* configPtr) override {

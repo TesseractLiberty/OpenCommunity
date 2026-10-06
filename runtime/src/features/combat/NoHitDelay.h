@@ -10,7 +10,7 @@
 
 class NoHitDelay : public Module {
 public:
-    MODULE_INFO(NoHitDelay, "NoHitDelay", "Removes the attack delay after hits.", ModuleCategory::Combat) {
+    MODULE_INFO(NoHitDelay, XOR("NoHitDelay"), XOR("Removes the attack delay after hits."), ModuleCategory::Combat) {
         SetImagePrefix(module_icons::no_hit_delay_icon_data, module_icons::no_hit_delay_icon_data_size);
     }
 

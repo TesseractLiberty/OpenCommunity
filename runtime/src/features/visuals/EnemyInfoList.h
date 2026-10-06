@@ -11,9 +11,9 @@
 
 class EnemyInfoList : public Module {
 public:
-    MODULE_INFO(EnemyInfoList, "EnemyInfoList", "Tracks enemy clan members and sends their info to the application.", ModuleCategory::Visuals) {
+    MODULE_INFO(EnemyInfoList, XOR("EnemyInfoList"), XOR("Tracks enemy clan members and sends their info to the application."), ModuleCategory::Visuals) {
         SetImagePrefix(module_icons::enemy_info_list_icon_data, module_icons::enemy_info_list_icon_data_size);
-        AddOption(ModuleOption::Button("Open in new Application", "Open in new Application"));
+        AddOption(ModuleOption::Button(XOR("Open in new Application"), XOR("Open in new Application")));
     }
 
     void SyncToConfig(void* configPtr) override {
@@ -43,9 +43,9 @@ public:
 
             SetEnabled(config->EnemyInfoList.m_Enabled);
             if (!m_Options.empty()) {
-                m_Options[0].buttonLabel = config->EnemyInfoList.m_SecondApplicationOpen
-                    ? "Openned in a second application, click to view"
-                    : "Open in new Application";
+                m_Options[0].buttonLabel.EncryptFrom(config->EnemyInfoList.m_SecondApplicationOpen
+                    ? XOR("Openned in a second application, click to view")
+                    : XOR("Open in new Application"));
             }
         }
 

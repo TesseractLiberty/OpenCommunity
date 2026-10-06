@@ -9,20 +9,21 @@
 #include "game/jni/JniRefs.h"
 #include "../../shared/common/logging/Logger.h"
 #include "../../deps/minhook/MinHook.h"
+#include "../../deps/imgui/imgui_internal.h"
 
 namespace {
     const char* VersionToString(GameVersions version) {
         switch (version) {
         case BADLION:
-            return "BADLION";
+            return XOR("BADLION");
         case FORGE_1_8:
-            return "FORGE_1_8";
+            return XOR("FORGE_1_8");
         case FEATHER_1_8:
-            return "FEATHER_1_8";
+            return XOR("FEATHER_1_8");
         case LUNAR:
-            return "LUNAR";
+            return XOR("LUNAR");
         default:
-            return "UNKNOWN";
+            return XOR("UNKNOWN");
         }
     }
 }
@@ -67,50 +68,76 @@ static void SafeShutdownRuntimeAll(ModuleManager* modules, void* env) {
     }
 }
 
+static void ScrubRuntimeUiTextState() {
+    __try {
+        ImGuiContext* ctx = ImGui::GetCurrentContext();
+        if (!ctx) return;
+        for (ImGuiWindow* w : ctx->Windows) {
+            if (w && w->Name && w->NameBufLen > 0)
+                MemoryScrub::Wipe(w->Name, static_cast<size_t>(w->NameBufLen));
+        }
+        for (ImGuiWindow* w : ctx->WindowsFocusOrder) {
+            if (w && w->Name && w->NameBufLen > 0)
+                MemoryScrub::Wipe(w->Name, static_cast<size_t>(w->NameBufLen));
+        }
+        if (ctx->InputTextState.TextA.Data && ctx->InputTextState.TextA.Capacity > 0)
+            MemoryScrub::Wipe(ctx->InputTextState.TextA.Data, static_cast<size_t>(ctx->InputTextState.TextA.Capacity));
+        if (ctx->InputTextState.InitialTextA.Data && ctx->InputTextState.InitialTextA.Capacity > 0)
+            MemoryScrub::Wipe(ctx->InputTextState.InitialTextA.Data, static_cast<size_t>(ctx->InputTextState.InitialTextA.Capacity));
+        if (ctx->SettingsWindows.Buf.Data && ctx->SettingsWindows.Buf.Capacity > 0)
+            MemoryScrub::Wipe(ctx->SettingsWindows.Buf.Data, static_cast<size_t>(ctx->SettingsWindows.Buf.Capacity));
+        ctx->SettingsWindows.clear();
+        if (ctx->SettingsIniData.Buf.Data && ctx->SettingsIniData.Buf.Capacity > 0)
+            MemoryScrub::Wipe(ctx->SettingsIniData.Buf.Data, static_cast<size_t>(ctx->SettingsIniData.Buf.Capacity));
+        ctx->SettingsIniData.clear();
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
 static DWORD MainThreadImpl() {
     Sleep(3000);
-    OC_LOG_INFO("Runtime", "Main thread started.");
-    
+    OC_LOG_INFO(XOR("Runtime"), XOR("Main thread started."));
+
     if (!Bridge::Get()->Initialize()) {
-        OC_LOG_ERROR("Runtime", "Bridge initialization failed.");
+        OC_LOG_ERROR(XOR("Runtime"), XOR("Bridge initialization failed."));
         return 1;
     }
-    OC_LOG_INFO("Runtime", "Bridge initialized.");
-    
+    OC_LOG_INFO(XOR("Runtime"), XOR("Bridge initialized."));
+
     g_Game = new GameInstance();
     if (!g_Game->Attach()) {
-        OC_LOG_ERROR("Runtime", "Failed to attach to JVM/JVMTI.");
+        OC_LOG_ERROR(XOR("Runtime"), XOR("Failed to attach to JVM/JVMTI."));
         delete g_Game;
         g_Game = nullptr;
     }
     else {
-        OC_LOG_INFO("Runtime", "Attached to JVM/JVMTI.");
+        OC_LOG_INFO(XOR("Runtime"), XOR("Attached to JVM/JVMTI."));
     }
-    
+
     if (g_Game && !g_Game->InitializeGame()) {
-        OC_LOG_ERROR("Runtime", "Failed to initialize game instance.");
+        OC_LOG_ERROR(XOR("Runtime"), XOR("Failed to initialize game instance."));
         g_Game->Detach();
         delete g_Game;
         g_Game = nullptr;
     }
     else if (g_Game) {
-        OC_LOG_INFOF("Runtime", "Game initialized with version %s.", VersionToString(g_Game->GetGameVersion()));
+        OC_LOG_INFOF(XOR("Runtime"), XOR("Game initialized with version %s."), VersionToString(g_Game->GetGameVersion()));
     }
-    
+
     ModuleRegistry::RegisterAll();
-    
+
     MH_Initialize();
     const bool gameThreadHookInitialized = GameThreadHook::Initialize();
-    OC_LOG_INFOF("Runtime", "GameThreadHook initialize result: %s", gameThreadHookInitialized ? "success" : "failed");
+    OC_LOG_INFOF(XOR("Runtime"), XOR("GameThreadHook initialize result: %s"), gameThreadHookInitialized ? XOR("success") : XOR("failed"));
     RenderHook::Get()->Initialize();
     
     auto* config = Bridge::Get()->GetConfig();
     auto* modules = ModuleManager::Get();
     modules->SetModuleToggleCallback([](const Module& module, bool enabled) {
         if (enabled) {
-            Notifications::SendNotifications::ENABLED(module.GetName());
+            Notifications::SendNotifications::ENABLED(module);
         } else {
-            Notifications::SendNotifications::DISABLED(module.GetName());
+            Notifications::SendNotifications::DISABLED(module);
         }
     });
 
@@ -167,6 +194,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved) {
         break;
         
     case DLL_PROCESS_DETACH:
+        ScrubRuntimeUiTextState();
+        if (ModuleManager::Get()) ModuleManager::Get()->ScrubAllTextBuffers();
+        Notifications::ScrubNotifications();
+        string_obfuscation::WipeAllXorStrings();
         break;
     }
     

@@ -19,13 +19,13 @@
 
 class ItemChams : public Module {
 public:
-    MODULE_INFO(ItemChams, "Item Chams", "Highlights eligible armor items through walls.", ModuleCategory::Visuals) {
+    MODULE_INFO(ItemChams, XOR("Item Chams"), XOR("Highlights eligible armor items through walls."), ModuleCategory::Visuals) {
         SetBeta();
         SetImagePrefix(module_icons::item_chams_icon_data, module_icons::item_chams_icon_data_size);
-        AddOption(ModuleOption::Combo("Mode", { "ESP", "Draw" }, 0));
-        AddOption(ModuleOption::SliderInt("Porcentagem", 0, 0, 100));
-        AddOption(ModuleOption::Toggle("Notify Drops", false));
-        AddOption(ModuleOption::Toggle("Notify Pickup", false));
+        AddOption(ModuleOption::Combo(XOR("Mode"), { XOR("ESP"), XOR("Draw") }, 0));
+        AddOption(ModuleOption::SliderInt(XOR("Porcentagem"), 0, 0, 100));
+        AddOption(ModuleOption::Toggle(XOR("Notify Drops"), false));
+        AddOption(ModuleOption::Toggle(XOR("Notify Pickup"), false));
     }
 
     void SyncToConfig(void* configPtr) override {

@@ -11,7 +11,7 @@
 
 class NoJumpDelay : public Module {
 public:
-    MODULE_INFO(NoJumpDelay, "NoJumpDelay", "Removes the jump cooldown.", ModuleCategory::Movement) {
+    MODULE_INFO(NoJumpDelay, XOR("NoJumpDelay"), XOR("Removes the jump cooldown."), ModuleCategory::Movement) {
         SetImagePrefix(module_icons::no_jump_delay_icon_data, module_icons::no_jump_delay_icon_data_size);
     }
 

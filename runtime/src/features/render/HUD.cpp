@@ -318,23 +318,25 @@ std::vector<HUD::ModuleEntry> HUD::GetActiveModules(ImFont* nameFont, float name
     const float spaceWidth = CalcTextSize(resolvedTagFont, resolvedTagSize, " ").x;
 
     for (const auto& mod : ModuleManager::Get()->GetAllModules()) {
-        if (!mod->IsEnabled()) {
+        if (!mod || !mod->IsEnabled()) {
             continue;
         }
 
-        const std::string name = mod->GetName();
-        if (name == "ArrayList") {
+        ScopedName scoped(*mod);
+        if (std::strcmp(scoped.c_str(), XOR("ArrayList")) == 0) {
             continue;
         }
-
-        const std::string displayName = FormatModuleName(name, Bridge::Get()->GetConfig() && Bridge::Get()->GetConfig()->HUD.m_SpacedModules);
+        const std::uint64_t h = mod->GetNameHash();
+        const std::string nameStr(scoped.c_str());
+        const std::string displayName = FormatModuleName(nameStr, Bridge::Get()->GetConfig() && Bridge::Get()->GetConfig()->HUD.m_SpacedModules);
         const std::string tag = mod->GetTag();
         float width = CalcTextSize(resolvedNameFont, resolvedNameSize, displayName).x;
         if (!tag.empty()) {
             width += spaceWidth + CalcFormattedTagWidth(resolvedTagFont, resolvedTagSize, tag);
         }
 
-        modules.push_back({ displayName, tag, width, mod->IsInUse() });
+        ModuleEntry e; e.name = displayName; e.tag = tag; e.width = width; e.inUse = mod->IsInUse(); e.hash = h;
+        modules.push_back(std::move(e));
     }
 
     std::sort(modules.begin(), modules.end(), [](const ModuleEntry& a, const ModuleEntry& b) {
@@ -536,7 +538,7 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
         const float textY = riseLikeMode ? (topY + risePadY) : (tesseractMode ? 6.0f : topY);
         float cursorX = riseLikeMode ? (10.0f + risePadX) : 10.0f;
 
-        const float titleWidth = CalcTextSize(nameFont, nameSize, "OpenCommunity").x;
+        const float titleWidth = CalcTextSize(nameFont, nameSize, XOR("OpenCommunity")).x;
         const float segmentWidth = CalcTextSize(tagFont, tagSize, segment).x;
         const float fpsWidth = CalcTextSize(tagFont, tagSize, fpsText).x;
 
@@ -553,7 +555,7 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
             drawList->AddRectFilled(ImVec2(boxMax.x - riseRectWidth, boxMin.y), boxMax, accentColor, 0.0f);
         }
 
-        DrawShadowedText(drawList, nameFont, nameSize, ImVec2(cursorX, textY), riseMode ? riseWatermarkTextColor : accentColor, shadowColor, "OpenCommunity");
+        DrawShadowedText(drawList, nameFont, nameSize, ImVec2(cursorX, textY), riseMode ? riseWatermarkTextColor : accentColor, shadowColor, XOR("OpenCommunity"));
         cursorX += titleWidth;
 
         DrawShadowedText(drawList, tagFont, tagSize, ImVec2(cursorX, textY), secondaryColor, shadowColor, segment);
@@ -562,8 +564,8 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
         DrawShadowedText(drawList, tagFont, tagSize, ImVec2(cursorX, textY), secondaryColor, shadowColor, fpsText);
     }
 
-    const auto modules = GetActiveModules(nameFont, nameSize, tagFont, tagSize);
-    std::vector<std::string> activeKeys;
+    auto modules = GetActiveModules(nameFont, nameSize, tagFont, tagSize);
+    std::vector<std::uint64_t> activeKeys;
     activeKeys.reserve(modules.size());
 
     int index = 0;
@@ -585,9 +587,9 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
             b = config->HUD.m_PrimaryColor[2];
         }
 
-        activeKeys.push_back(mod.name);
+        activeKeys.push_back(mod.hash);
 
-        float& progress = m_SlideProgress[mod.name];
+        float& progress = m_SlideProgress[mod.hash];
         if (progress < 1.0f) {
             progress += deltaTime * 6.0f;
             if (progress > 1.0f) {
@@ -650,5 +652,11 @@ void HUD::Render(ModuleConfig* config, float screenW, float screenH) {
         } else {
             ++it;
         }
+    }
+
+    // Higiene de heap: nomes/tags por frame nao podem permanecer no heap liberado.
+    for (auto& mod : modules) {
+        MemoryScrub::ClearString(mod.name);
+        MemoryScrub::ClearString(mod.tag);
     }
 }

@@ -4,6 +4,8 @@
 #include <cstdio>
 #include <windows.h>
 
+#include "../security/XorString.h"
+
 namespace OpenCommunity {
     enum class LogLevel {
         Debug,
@@ -15,15 +17,15 @@ namespace OpenCommunity {
     inline const char* ToString(LogLevel level) {
         switch (level) {
         case LogLevel::Debug:
-            return "Debug";
+            return XOR("Debug");
         case LogLevel::Info:
-            return "Info";
+            return XOR("Info");
         case LogLevel::Warning:
-            return "Warning";
+            return XOR("Warning");
         case LogLevel::Error:
-            return "Error";
+            return XOR("Error");
         default:
-            return "Unknown";
+            return XOR("Unknown");
         }
     }
 
@@ -32,11 +34,12 @@ namespace OpenCommunity {
         std::snprintf(
             buffer,
             sizeof(buffer),
-            "[OpenCommunity][%s][%s] %s\r\n",
+            XOR("[OpenCommunity][%s][%s] %s\r\n"),
             ToString(level),
-            component ? component : "Core",
+            component ? component : XOR("Core"),
             message ? message : "");
         OutputDebugStringA(buffer);
+        MemoryScrub::Wipe(buffer, sizeof(buffer));
     }
 
     inline void LogFormat(LogLevel level, const char* component, const char* format, ...) {
@@ -49,6 +52,7 @@ namespace OpenCommunity {
 
         message[sizeof(message) - 1] = '\0';
         Log(level, component, message);
+        MemoryScrub::Wipe(message, sizeof(message));
     }
 }
 

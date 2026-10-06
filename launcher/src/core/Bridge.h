@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../../shared/common/ModuleConfig.h"
+#include "../../../shared/common/security/XorString.h"
 
 class Bridge {
 public:
@@ -22,7 +23,9 @@ private:
     HANDLE m_MapFile = nullptr;
     ModuleConfig* m_Config = nullptr;
 
-    static constexpr const wchar_t* MEMORY_NAME = L"OpenCommunitySharedMem";
+    // Nome do file-mapping decriptado de forma transiente (ring thread_local).
+    // Nunca em plaintext em .rdata: o literal vive cifrado via XOR_W.
+    static const wchar_t* MemoryName() { return XOR_W(L"OpenCommunitySharedMem"); }
 
     bool m_Initialized = false;
 };

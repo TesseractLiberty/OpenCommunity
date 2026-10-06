@@ -7,5 +7,7 @@ struct ClientInfo {
     float m_Height = 550.0f;
     bool m_Injected = false;
     bool m_ShouldClose = false;
-    wchar_t m_TargetProcess[32] = L"javaw.exe";
+    // NOTA: default com nome do processo-alvo removido (plaintext em .rdata, campo sem leitura).
+    // Processo-alvo hoje vem da janela LWJGL/GLFW (Screen.cpp) via m_TargetPid.
+    wchar_t m_TargetProcess[32] = {};
 };
